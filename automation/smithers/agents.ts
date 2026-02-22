@@ -11,7 +11,8 @@ function hasCommand(command: string): boolean {
 }
 
 const usePi = process.env.SMITHERS_USE_PI === "1" && hasCommand("pi");
-const codexModel = process.env.SMITHERS_CODEX_MODEL ?? "gpt-5-codex";
+const codexModel = process.env.SMITHERS_CODEX_MODEL ?? "gpt-5.3-codex";
+const codexReasoningEffort = process.env.SMITHERS_CODEX_REASONING_EFFORT ?? "medium";
 const piProvider = process.env.SMITHERS_PI_PROVIDER ?? "openai";
 const piModel = process.env.SMITHERS_PI_MODEL ?? "gpt-5.2-codex";
 
@@ -26,6 +27,9 @@ function buildCodexAgent(id: string, timeoutMs: number): CodexAgent {
     id,
     cwd: REPO_ROOT,
     model: codexModel,
+    config: {
+      model_reasoning_effort: codexReasoningEffort,
+    },
     sandbox: "workspace-write",
     fullAuto: true,
     skipGitRepoCheck: true,
