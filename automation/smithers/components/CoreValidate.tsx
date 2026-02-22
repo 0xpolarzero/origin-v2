@@ -12,6 +12,7 @@ export function CoreValidate() {
       <CoreValidatePrompt
         implementation={JSON.stringify(implementation ?? {}, null, 2)}
         testMatrix={JSON.stringify(plan?.testMatrix ?? [], null, 2)}
+        requiredValidationCommands={JSON.stringify(plan?.requiredValidationCommands ?? [], null, 2)}
       />
     </Task>
   );

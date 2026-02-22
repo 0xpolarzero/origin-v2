@@ -13,6 +13,10 @@ Tasks:
 - Select exactly one target slice for this run.
 - Produce precise acceptance criteria and a concrete implementation plan.
 - Provide a deterministic test matrix (commands and expected outcomes).
+- Define a 1-3 step `workChunkPlan` for iterative delivery.
+- Define `requiredValidationCommands` that must be run for every chunk.
+- Ensure `requiredValidationCommands` include typecheck and relevant tests for changed code.
+- Define explicit `checkpointPolicy` using JJ (checkpoint message discipline and when to `jj new`).
 - Select the relevant installed skills for this slice and justify why each is needed.
 - Ensure selected skills explicitly include `smithers` for orchestration and `prd-authoring` for spec quality checks when applicable.
 - Set `uiBlockedUntilCorePasses` to true unless UI is explicitly allowed and core is already complete.

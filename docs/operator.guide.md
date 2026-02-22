@@ -13,6 +13,8 @@
 - Pipeline: Discover -> Plan -> CoreImplement -> CoreValidate -> Review -> ReviewFix -> Report
 - Looping: Implement/Validate/Review/Fix repeats via Ralph until approval or max rounds.
 - Skill policy: Plan/Implement/Report explicitly track relevant installed skill usage.
+- Validation policy: required validation commands (including typecheck and relevant tests) must pass before approval.
+- Chunking policy: work is delivered in logical chunks with JJ checkpoints per chunk.
 
 ## 3. Input contract
 

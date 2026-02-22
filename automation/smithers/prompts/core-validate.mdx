@@ -6,8 +6,14 @@ Implementation output:
 Planned test matrix:
 {props.testMatrix}
 
+Required validation commands:
+{props.requiredValidationCommands}
+
 Tasks:
 - Execute all applicable validation commands (tests, typecheck, lint, integration checks).
+- Execute all commands listed in `requiredValidationCommands`.
+- Mark `passed` and `blockingCommandsPassed` false if any required command fails or is skipped.
+- Set `typecheckPassed` and `testsPassed` explicitly from command outcomes.
 - Report each command with pass/fail status and concise summary.
 - Keep failures concrete and actionable.
 

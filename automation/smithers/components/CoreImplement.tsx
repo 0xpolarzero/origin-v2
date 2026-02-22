@@ -12,6 +12,8 @@ export function CoreImplement() {
     <Task id="core-implement" output={outputs.coreImplement} agent={implementAgents} retries={1}>
       <CoreImplementPrompt
         plan={JSON.stringify(plan ?? {}, null, 2)}
+        workChunkPlan={JSON.stringify(plan?.workChunkPlan ?? [], null, 2)}
+        requiredValidationCommands={JSON.stringify(plan?.requiredValidationCommands ?? [], null, 2)}
         reviewFeedback={previousReview?.feedback ?? "none"}
         fixPlan={JSON.stringify(previousFix?.fixPlan ?? [], null, 2)}
       />

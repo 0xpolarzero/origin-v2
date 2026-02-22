@@ -1,111 +1,163 @@
-# Origin v2 Product Requirements (Minimal)
+# Origin Product Requirements (Comprehensive, Low-Prescription)
 
-Status: Draft v0.2  
-Purpose: Define a concise but complete product baseline for rebuilding Origin.
+Status: Draft v0.3  
+Purpose: Define complete product-facing scope (features + views + workflows) while leaving implementation choices to agents.
 
 ## 1. Summary
 
-Users can capture thoughts quickly, but turning that input into reliable planned work still requires manual triage across notes, tasks, and calendar tools. Origin v2 provides a local-first personal command center that converts raw input and inbound signals into structured work and a clear 3-21 day plan, with explicit approval for outbound actions.
+Origin is a local-first personal command center for one user. It converts raw input and inbound signals into structured work, and keeps a reliable short-horizon plan (3-21 days) across tasks and events, with explicit approval for outbound actions.
 
 ## 2. Problem Statement
 
 Current state:
-- Fast capture is easy; consistent conversion into executable plans is not.
-- Signals (messages, emails, threads) are disconnected from planning.
-- Calendar/task context is fragmented, causing missed or duplicated work.
+- Capture is fast, but conversion into executable work is inconsistent.
+- Signals from external tools are disconnected from planning.
+- Tasks/events context is fragmented across surfaces.
 
 User pain:
-- High cognitive overhead to translate intent into tasks/events.
-- Planning quality depends on manual discipline and context switching.
-- Risk of accidental outbound actions when integrations are automated.
+- High cognitive overhead for triage and planning.
+- Repeated context switching and plan drift.
+- Safety risk from accidental outbound actions.
 
 Impact:
-- Lower execution reliability and slower decision cycles.
-- Frequent plan drift across short horizons.
+- Lower execution quality and slower feedback cycles.
 
 ## 3. Target User and Jobs To Be Done
 
 Primary user:
-- Single power user managing personal work and commitments.
+- Single power user managing personal and project commitments.
 
 Core jobs:
-- Capture intent in seconds.
-- Convert intent/signals into structured tasks/events/notes/projects.
-- Maintain a trustworthy short-horizon plan.
-- Approve outbound actions safely.
+- Capture intent quickly.
+- Convert intent/signals into structured work.
+- Plan and execute the next 3-21 days from one place.
+- Approve risky outbound actions explicitly.
 
-## 4. Goals
+## 4. Product Goals
 
 - Minimize friction from capture to structured work.
-- Keep planning view accurate and actionable for the next 3-21 days.
+- Keep plan quality high and continuously actionable.
 - Preserve local control and auditability of AI-assisted changes.
-- Make external integrations assistive, not autonomous.
+- Keep integrations assistive, not autonomous.
 
 ## 5. Success Metrics
 
 Product metrics:
-- Capture-to-persist latency is consistently fast (target p95 <= 2s on local machine).
-- Structured conversion success is high (target >= 90% of entries converted without manual rewrite).
-- Planning reliability is strong (target >= 95% of planned items/events render correctly in horizon view).
+- Fast capture-to-persist latency (target p95 <= 2s local).
+- High structured conversion quality (target >= 90% without manual rewrite).
+- Strong planning reliability (target >= 95% correct rendering of planned items).
 
 Safety metrics:
 - Outbound external actions require explicit approval 100% of the time.
-- All AI-applied changes are traceable to structured, reviewable records.
+- AI-applied changes are always traceable in activity/audit surfaces.
 
-## 6. MVP Scope
+## 6. Required Views and Feature Surface
+
+### 6.1 Core views (required)
+
+- `Plan`
+  - Combined timeline for tasks + events over configurable N-day horizon.
+  - Fast schedule edits, complete/defer flows, clear pending vs approved event state.
+- `Inbox`
+  - Raw entries + untriaged items.
+  - Accept/edit/reject AI suggestions.
+  - Convert into tasks/events/notes/projects.
+- `Tasks`
+  - Full task management: status, priority, dates, project links, batch actions, filtering.
+- `Events`
+  - Local event create/edit.
+  - Pending approval queue for external sync.
+  - Approval/rejection and conflict handling.
+- `Projects`
+  - Project lifecycle, grouped work visibility, archive/unarchive.
+- `Notes`
+  - Durable note editing, linking, pin/favorite behavior, searchable content.
+- `Signals`
+  - Unified external feed, triage to work, archive/read controls, draft outbound actions.
+- `Jobs`
+  - Automation list, status, enable/disable, run-now, execution history and errors.
+- `Notifications`
+  - Actionable alerts for approvals, failures, due/overdue items, sync issues.
+- `Search`
+  - Global cross-entity search with filters and keyboard-first open.
+- `Settings`
+  - Integrations/auth, AI preferences, plan defaults, safety/approval behavior, shortcuts.
+- `Activity`
+  - Auditable trail of AI changes, approvals, job runs, and recovery actions.
+
+### 6.2 Cross-view UX capabilities (required)
+
+- Keyboard-first navigation and command palette.
+- Fast capture path always available.
+- Consistent create/edit interactions across entities.
+- Consistent filters/sorting patterns.
+- Clear empty/loading/error states.
+- Save/sync/error feedback that is always visible.
+- Entity linking (task <-> project <-> note <-> event <-> signal).
+- Undo/recovery affordances where practical.
+- Basic accessibility baseline (focus order, keyboard operability, readable contrast).
+
+## 7. Required User Workflows
+
+- Capture -> persist -> AI suggestions -> user confirms/edits -> structured entity created.
+- Signal ingestion -> triage -> conversion to task/event/note/project or outbound draft.
+- Planning loop -> adjust timeline -> execute -> reschedule/defer/complete.
+- Local event -> pending state -> explicit approval -> external sync.
+- Outbound action draft -> explicit approval -> send/post.
+- Automation run -> inspect result -> retry/fix.
+- AI-applied update -> inspect changes -> keep/recover.
+
+## 8. Scope Guardrails
 
 Must have:
-- Local entry capture and storage.
+- Local entry capture/storage.
 - Structured objects: tasks, events, notes, projects, signals, jobs, views, memory, checkpoints.
-- Horizon plan view combining tasks and events.
-- Signal-to-structured-work triage flow.
-- Approval gate for outbound actions.
-- Checkpoint restore path.
+- All required views and workflows in Sections 6 and 7.
+- Explicit approval gate for outbound actions.
+- Recovery path from bad writes/outputs.
 
 Out of scope for MVP:
 - Team collaboration.
 - Cloud-first mandatory architecture.
 - Autonomous external posting/sending.
 
-## 7. Core Domain Objects
+## 9. Core Domain Objects
 
-- `Entry`: raw user input.
-- `Task`: actionable unit with state and optional schedule window.
-- `Event`: calendar unit with pending/approved lifecycle.
-- `Project`: grouping for related execution.
-- `Note`: durable reference content.
-- `Signal`: inbound external item.
-- `Job`: background automation definition.
+- `Entry`: raw input.
+- `Task`: actionable work item.
+- `Event`: time-bound item with pending/approved lifecycle.
+- `Project`: work grouping/context.
+- `Note`: durable knowledge.
+- `Signal`: inbound external artifact.
+- `Job`: automation definition.
 - `View`: saved query/filter projection.
 - `Memory`: persistent AI context.
-- `Checkpoint`: restorable state snapshot.
+- `Checkpoint`: restorable snapshot.
 
-## 8. Required Product Workflows
-
-- Capture: persist entry immediately, then optionally parse/apply structured updates.
-- Plan: show date-range timeline with tasks + events.
-- Triage: convert signals into tasks/events/notes/drafts.
-- Approval: require explicit confirmation before outbound actions.
-- Recovery: restore previous known-good state from checkpoints.
-
-## 9. Product Constraints and Rules
+## 10. Product Rules
 
 - Local-first authored data.
-- Single-writer lease model per workspace.
+- Single-writer model per workspace.
 - AI changes must be auditable and reversible.
-- Pending events remain local until approved for external sync.
-- Core flows should work offline except inherently online integrations.
+- Pending external changes remain local until approved.
+- Core flows work offline except inherently online integrations.
 
-## 10. Acceptance Criteria
+## 11. Acceptance Criteria
 
-- User can create/edit/retrieve all core objects.
-- User can manage the next N days from one combined plan surface.
-- User can process inbound signals into structured work.
-- No outbound external action is executed without explicit approval.
-- User can recover via checkpoint restore after bad write/output.
+- All required views are usable for daily operation.
+- All required workflows complete end-to-end with clear user feedback.
+- No outbound action executes without explicit approval.
+- Core planning loop is reliable and actionable.
+- Recovery flow is available after bad writes/AI outputs.
 
-## 11. Open Questions
+## 12. Intentionally Unspecified
 
-- Exact schema contract for AI operation payloads and failure semantics.
-- Exact UX for approval and retry/failure handling.
-- Final data retention/dedup policy for external signals.
+- Exact component hierarchy and visual style.
+- Exact infrastructure and internal architecture.
+- Exact prompt/model/provider implementation details.
+
+## 13. Open Questions
+
+- Exact AI operation payload contract and failure semantics.
+- Exact approval UX for retries/errors.
+- Final retention and dedup strategy for signals.

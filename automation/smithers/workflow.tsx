@@ -13,7 +13,10 @@ import { Workflow, smithers, tables } from "./smithers";
 
 export default smithers((ctx) => {
   const latestReview = ctx.latest(tables.review, "review");
-  const approved = latestReview?.approved === true;
+  const latestValidation = ctx.latest(tables.coreValidate, "core-validate");
+  const approved =
+    latestReview?.approved === true &&
+    latestValidation?.blockingCommandsPassed === true;
 
   return (
     <Workflow name="origin-v2-core-autonomy" cache>

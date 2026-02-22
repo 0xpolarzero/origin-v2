@@ -3,6 +3,12 @@ CORE IMPLEMENT PHASE
 Planned slice:
 {props.plan}
 
+Work chunk plan:
+{props.workChunkPlan}
+
+Required validation commands:
+{props.requiredValidationCommands}
+
 Previous review feedback:
 {props.reviewFeedback}
 
@@ -11,10 +17,13 @@ Previous fix plan:
 
 Tasks:
 - Implement only core/domain behavior for the planned slice.
+- Complete one or more logical chunks from `workChunkPlan` (do not mix unrelated work in one chunk).
 - Apply the `requiredSkills` selected in the plan and reflect that in `skillsApplied`.
 - Keep side effects at boundaries.
 - Prefer Effect-based patterns for concurrency, retries, and error handling where applicable.
 - If additional data is needed, inspect reference repos before coding.
-- Run the relevant tests after implementation changes.
+- Run required validation commands locally after implementation changes.
+- If local checks pass for a chunk, create a JJ checkpoint with clear message discipline (for example `jj describe -m \"feat(area): ...\"`, then `jj new` before the next chunk when appropriate).
+- Record completed chunks, checkpoints, and local check outcomes explicitly.
 
 Return JSON matching the output schema exactly.
