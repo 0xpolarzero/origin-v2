@@ -1,0 +1,20 @@
+DISCOVER PHASE
+
+Goal:
+{props.goal}
+
+Scope hint:
+{props.scopeHint}
+
+UI allowed:
+{String(props.allowUi)}
+
+Tasks:
+- Read `docs/design.spec.md`, `docs/engineering.choices.md`, and `docs/smithers.autonomy.md`.
+- Apply `prd-authoring` to assess spec clarity/completeness and identify spec gaps.
+- Apply `smithers` to ensure proposed slices are workflow-friendly and resumable.
+- Propose 1-3 prioritized core-only feature slices that can be implemented and tested independently.
+- Include assumptions explicitly.
+- Do not include UI work when `allowUi` is false.
+
+Return JSON matching the output schema exactly.

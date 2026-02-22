@@ -1,0 +1,20 @@
+CORE IMPLEMENT PHASE
+
+Planned slice:
+{props.plan}
+
+Previous review feedback:
+{props.reviewFeedback}
+
+Previous fix plan:
+{props.fixPlan}
+
+Tasks:
+- Implement only core/domain behavior for the planned slice.
+- Apply the `requiredSkills` selected in the plan and reflect that in `skillsApplied`.
+- Keep side effects at boundaries.
+- Prefer Effect-based patterns for concurrency, retries, and error handling where applicable.
+- If additional data is needed, inspect reference repos before coding.
+- Run the relevant tests after implementation changes.
+
+Return JSON matching the output schema exactly.
