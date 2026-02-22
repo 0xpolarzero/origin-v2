@@ -1,0 +1,15 @@
+{
+  "name": "origin-v2",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.7",
+  "workspaces": [
+    "automation/smithers"
+  ],
+  "scripts": {
+    "bootstrap:refs": "bash scripts/bootstrap-references.sh",
+    "automation:run": "cd automation/smithers && bun run run",
+    "automation:resume": "cd automation/smithers && bun run resume",
+    "automation:typecheck": "cd automation/smithers && bun run typecheck"
+  }
+}

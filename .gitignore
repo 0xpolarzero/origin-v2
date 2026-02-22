@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Bun
+bun.lockb
+
+# Build artifacts
+dist/
+out/
+coverage/
+
+# Smithers runtime artifacts
+automation/smithers/.state/
+automation/smithers/*.db
+automation/smithers/*.sqlite
+automation/smithers/.env
+
+# Local reference clones are large and read-only
+references/
