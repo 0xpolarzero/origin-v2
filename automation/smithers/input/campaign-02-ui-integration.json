@@ -1,0 +1,5 @@
+{
+  "goal": "Implement all required product views and cross-view UX capabilities from docs/design.spec.md on top of validated core behavior.",
+  "scopeHint": "Only integrate capabilities whose core behavior is already tested and passing. Deliver view-by-view in chunks, keep interactions keyboard-first, and run required validation commands for each chunk before checkpointing.",
+  "allowUi": true
+}

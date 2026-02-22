@@ -59,3 +59,19 @@ Typecheck workflow code:
 cd automation/smithers
 bun run typecheck
 ```
+
+## 5. Campaign Inputs
+
+Run these campaign inputs in sequence:
+
+1. `automation/smithers/input/campaign-01-core-foundation.json`
+2. `automation/smithers/input/campaign-02-ui-integration.json`
+3. `automation/smithers/input/campaign-03-hardening-and-fixes.json`
+4. `automation/smithers/input/campaign-04-readiness.json`
+
+Example:
+
+```bash
+cd automation/smithers
+bun run run -- ./input/campaign-01-core-foundation.json
+```

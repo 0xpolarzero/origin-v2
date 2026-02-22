@@ -25,6 +25,15 @@ bun run resume -- <run-id>
 bun run typecheck
 ```
 
+## Campaigns
+
+Predefined campaign inputs are in `input/README.md`:
+
+- `campaign-01-core-foundation.json`
+- `campaign-02-ui-integration.json`
+- `campaign-03-hardening-and-fixes.json`
+- `campaign-04-readiness.json`
+
 ## Agent mode
 
 - Default: Codex CLI agent
