@@ -76,6 +76,7 @@ Research relevant patterns before major implementation decisions:
 - Keep changes small, reviewable, and resumable.
 
 ## Commit Policy
+- Commit every atomic piece of completed work.
 - Use small logical commits, not one large commit.
 - Use Conventional Commits without `origin-v2` scope prefixes.
 - Subject format: `<type>(<area>): <imperative summary>`
@@ -87,6 +88,7 @@ Research relevant patterns before major implementation decisions:
 - Use JJ checkpoint flow for frequent progress:
   - `jj describe -m \"<commit subject>\"`
   - `jj new` to start the next logical change
+- After an atomic piece is validated, commit immediately (do not batch unrelated completed work).
 - If commit expectations are unclear, stop and ask before committing.
 
 ## Ambiguity Policy
