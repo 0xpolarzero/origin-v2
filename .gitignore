@@ -10,6 +10,7 @@ out/
 coverage/
 
 # Smithers runtime artifacts
+.smithers/
 automation/smithers/.state/
 automation/smithers/*.db
 automation/smithers/*.sqlite
