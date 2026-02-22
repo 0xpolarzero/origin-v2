@@ -1,5 +1,0 @@
-{
-  "goal": "Prepare Origin for daily real use by finalizing UX polish, consistency, and validation confidence across all required views and workflows.",
-  "scopeHint": "Prioritize completion quality: consistency, error states, empty states, keyboard accessibility baseline, and test confidence. Only mark completed when required validation commands pass and remaining risks are explicit.",
-  "allowUi": true
-}

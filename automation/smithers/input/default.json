@@ -1,5 +1,0 @@
-{
-  "goal": "Implement the next highest-impact core feature slice from docs/design.spec.md",
-  "scopeHint": "Focus on local-first deterministic core behavior and exhaustive tests",
-  "allowUi": false
-}

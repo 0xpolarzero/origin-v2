@@ -6,7 +6,7 @@ Build Origin v2 as a local-first, single-user command center that turns raw inpu
 ## Source of Truth (in order)
 1. `docs/design.spec.md`
 2. `docs/engineering.choices.md`
-3. `docs/smithers.autonomy.md`
+3. `docs/super-ralph.autonomy.md`
 4. `docs/operator.guide.md`
 5. This file
 
@@ -36,8 +36,9 @@ Trigger rule: if a task matches one of these skills (or names it explicitly), us
 
 ## Technology Baseline
 - Use latest stable versions, pinned in lockfiles.
-- Required stack: `bun`, `electron`, `typescript`, `vite`, `react`, `shadcn/ui`, `effect`, `pi-mono`, `smithers`, `jj`.
-- Codex CLI is the default implementation agent path; PI is optional when available.
+- Required stack: `bun`, `electron`, `typescript`, `vite`, `react`, `shadcn/ui`, `effect`, `pi-mono`, `super-ralph`, `jj`.
+- `super-ralph` is the primary autonomous workflow path (it runs on `smithers-orchestrator`).
+- Codex CLI is the default implementation agent path.
 
 ## Delivery Policy (Non-Negotiable)
 - Core logic first.
@@ -45,21 +46,18 @@ Trigger rule: if a task matches one of these skills (or names it explicitly), us
 - UI is blocked until all targeted core features and tests for that slice are complete and passing.
 
 ## Implementation Workflow
-Use Smithers orchestration with this pipeline:
-1. Discover
-2. Plan
-3. Core Implement
-4. Core Validate
-5. Review
-6. Review Fix
-7. Report
+Use Super Ralph campaign prompts from `automation/super-ralph/input/`:
+1. `campaign-01-core-foundation.md`
+2. `campaign-02-ui-integration.md`
+3. `campaign-03-hardening-and-fixes.md`
+4. `campaign-04-readiness.md`
 
-Loop `Core Implement -> Core Validate -> Review -> Review Fix` until objective approval or max iterations.
+Keep work chunked, test-first for core, and commit each atomic piece immediately after validation.
 
-## Smithers Preflight
-Before implementation, confirm understanding of Smithers from local source:
-- `references/smithers`
-- Focus: execution model, components, CLI agents, resumability, JJ integration.
+## Super Ralph Preflight
+Before implementation, confirm understanding of Super Ralph from local source:
+- `references/super-ralph`
+- Focus: prompt contract, generated workflow behavior, monitoring, JJ expectations.
 
 ## Reference Repos
 Research relevant patterns before major implementation decisions:
@@ -68,7 +66,7 @@ Research relevant patterns before major implementation decisions:
 - `references/accountability`
 - `references/jj`
 - `references/pi-mono`
-- `references/smithers`
+- `references/super-ralph`
 
 ## Engineering Standards
 - Prefer Effect primitives for async flow, retries, scheduling, and error handling.

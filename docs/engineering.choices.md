@@ -12,7 +12,7 @@ Use latest stable versions at implementation time, pinned in lockfiles:
 - UI: `react`, `shadcn/ui`
 - Effect system: `effect` (Effect-TS) wherever possible
 - AI integration: `pi-mono` primarily, with Codex/ChatGPT subscription workflows as primary coding path
-- Orchestration for autonomous implementation: `smithers` (from source, local)
+- Orchestration for autonomous implementation: `super-ralph` (prompt-driven), with `smithers-orchestrator` as runtime dependency
 - Checkpoint/revert VCS: `jj` (Jujutsu)
 
 ## 2. Version Policy

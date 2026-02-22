@@ -1,5 +1,0 @@
-{
-  "goal": "Harden the app end-to-end by resolving review findings, edge cases, regressions, and reliability gaps across required workflows and views.",
-  "scopeHint": "Focus on robustness and correctness over new scope. Use failing checks to drive fixes. Keep chunked JJ checkpoints and do not close a chunk unless required validation commands pass.",
-  "allowUi": true
-}

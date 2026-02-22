@@ -11,7 +11,7 @@ These repositories are mandatory references for architecture, patterns, and impl
 - `https://github.com/mikearnaldi/accountability`
 - `https://github.com/jj-vcs/jj`
 - `https://github.com/badlogic/pi-mono`
-- `https://github.com/evmts/smithers/`
+- `https://github.com/evmts/super-ralph/`
 
 ## 2. Local Clone Convention
 
@@ -22,7 +22,7 @@ Clone under `origin-v2/references/` with stable directory names:
 - `references/accountability`
 - `references/jj`
 - `references/pi-mono`
-- `references/smithers`
+- `references/super-ralph`
 
 ## 3. Bootstrap Commands
 
@@ -34,7 +34,7 @@ git clone --depth=1 https://github.com/tim-smart/cheffect references/cheffect
 git clone --depth=1 https://github.com/mikearnaldi/accountability references/accountability
 git clone --depth=1 https://github.com/jj-vcs/jj references/jj
 git clone --depth=1 https://github.com/badlogic/pi-mono references/pi-mono
-git clone --depth=1 https://github.com/evmts/smithers references/smithers
+git clone --depth=1 https://github.com/evmts/super-ralph references/super-ralph
 ```
 
 ## 4. Usage Rules

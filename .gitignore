@@ -9,12 +9,13 @@ dist/
 out/
 coverage/
 
-# Smithers runtime artifacts
+# Super Ralph / Smithers runtime artifacts
 .smithers/
-automation/smithers/.state/
-automation/smithers/*.db
-automation/smithers/*.sqlite
-automation/smithers/.env
+.super-ralph/
+automation/super-ralph/.state/
+automation/super-ralph/.env
+PROGRESS.md
+docs/test-suite-findings.md
 
 # Local reference clones are large and read-only
 references/

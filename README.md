@@ -6,13 +6,13 @@ Restart workspace for Origin v2.
 
 - Minimal product/design baseline in `docs/`
 - Mandatory engineering and process guardrails in `docs/engineering.choices.md`
-- Smithers autonomous workflow scaffolding in `automation/smithers/`
+- Super Ralph autonomous workflow scaffolding in `automation/super-ralph/`
 - Local reference repositories in `references/`
 
 ## Directory map
 
-- `docs/`: product spec, engineering choices, reference policy, Smithers autonomy model
-- `automation/smithers/`: autonomous implementation workflow (Codex-first, Pi optional)
+- `docs/`: product spec, engineering choices, reference policy, Super Ralph autonomy model
+- `automation/super-ralph/`: autonomous implementation workflow (prompt-driven)
 - `references/`: cloned external source repos for implementation research
 - `apps/core/`: reserved for core domain runtime (to be implemented)
 - `apps/desktop/`: reserved for Electron + React app shell (to be implemented)
@@ -29,20 +29,20 @@ Restart workspace for Origin v2.
 1. Install workflow dependencies:
 
 ```bash
-cd automation/smithers
+cd automation/super-ralph
 bun install
 ```
 
 2. Execute workflow:
 
 ```bash
-bun run run
+bun run run -- ./input/campaign-01-core-foundation.md
 ```
 
-3. Resume a run:
+3. Monitor in terminal UI:
 
 ```bash
-bun run resume -- <run-id>
+bun run automation:monitor
 ```
 
 ## Core working rule

@@ -23,6 +23,6 @@ clone_or_pull "https://github.com/tim-smart/cheffect" "$REF_DIR/cheffect"
 clone_or_pull "https://github.com/mikearnaldi/accountability" "$REF_DIR/accountability"
 clone_or_pull "https://github.com/jj-vcs/jj" "$REF_DIR/jj"
 clone_or_pull "https://github.com/badlogic/pi-mono" "$REF_DIR/pi-mono"
-clone_or_pull "https://github.com/evmts/smithers" "$REF_DIR/smithers"
+clone_or_pull "https://github.com/evmts/super-ralph" "$REF_DIR/super-ralph"
 
 echo "Reference repositories are ready at $REF_DIR"

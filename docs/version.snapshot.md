@@ -17,6 +17,7 @@ This snapshot records the versions pinned or validated during scaffold setup.
 - typescript: `5.9.3`
 - vite: `7.3.1`
 - react: `19.2.4`
+- super-ralph: `0.2.5`
 - smithers-orchestrator: `0.8.4`
 - effect: `3.19.19`
 - ai: `6.0.97`

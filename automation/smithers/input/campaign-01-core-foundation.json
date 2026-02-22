@@ -1,5 +1,0 @@
-{
-  "goal": "Implement the full core Origin app scope from docs/design.spec.md, including all required workflows and domain capabilities, without UI integration.",
-  "scopeHint": "Work in logical chunks. For each chunk, run required validation commands (must include typecheck and relevant tests), then record JJ checkpoints. Prioritize correctness, determinism, and clear auditability.",
-  "allowUi": false
-}
