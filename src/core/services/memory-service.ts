@@ -8,6 +8,12 @@ export class MemoryServiceError extends Data.TaggedError("MemoryServiceError")<{
   message: string;
 }> {}
 
+interface MemoryKeyIndex {
+  key: string;
+  memoryId: string;
+  updatedAt: string;
+}
+
 export interface UpsertMemoryInput {
   memoryId?: string;
   key: string;
@@ -17,6 +23,10 @@ export interface UpsertMemoryInput {
   at?: Date;
 }
 
+const MEMORY_KEY_INDEX_ENTITY_TYPE = "memory_key_index";
+
+const memoryKeyIndexId = (key: string): string => `memory-key-index:${key}`;
+
 const findMemoryByKey = (
   repository: CoreRepository,
   key: string,
@@ -25,6 +35,37 @@ const findMemoryByKey = (
     const memories = yield* repository.listEntities<Memory>("memory");
     return memories.find((memory) => memory.key === key);
   });
+
+const loadMemoryByKey = (
+  repository: CoreRepository,
+  key: string,
+): Effect.Effect<Memory | undefined> =>
+  Effect.gen(function* () {
+    const indexed = yield* repository.getEntity<MemoryKeyIndex>(
+      MEMORY_KEY_INDEX_ENTITY_TYPE,
+      memoryKeyIndexId(key),
+    );
+    if (indexed) {
+      return yield* repository.getEntity<Memory>("memory", indexed.memoryId);
+    }
+
+    return yield* findMemoryByKey(repository, key);
+  });
+
+const saveMemoryKeyIndex = (
+  repository: CoreRepository,
+  memory: Memory,
+  at: Date,
+): Effect.Effect<void> =>
+  repository.saveEntity<MemoryKeyIndex>(
+    MEMORY_KEY_INDEX_ENTITY_TYPE,
+    memoryKeyIndexId(memory.key),
+    {
+      key: memory.key,
+      memoryId: memory.id,
+      updatedAt: at.toISOString(),
+    },
+  );
 
 export const upsertMemory = (
   repository: CoreRepository,
@@ -37,8 +78,7 @@ export const upsertMemory = (
       ? yield* repository.getEntity<Memory>("memory", input.memoryId)
       : undefined;
 
-    const existing =
-      existingById ?? (yield* findMemoryByKey(repository, input.key));
+    const existing = existingById ?? (yield* loadMemoryByKey(repository, input.key));
 
     const memory = existing
       ? {
@@ -67,6 +107,7 @@ export const upsertMemory = (
         );
 
     yield* repository.saveEntity("memory", memory.id, memory);
+    yield* saveMemoryKeyIndex(repository, memory, at);
 
     const transition = yield* createAuditTransition({
       entityType: "memory",

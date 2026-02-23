@@ -19,4 +19,30 @@ describe("createMemory", () => {
     expect(memory.source).toBe("user");
     expect(memory.confidence).toBe(0.9);
   });
+
+  test("rejects NaN confidence values", async () => {
+    await expect(
+      Effect.runPromise(
+        createMemory({
+          key: "invalid_nan",
+          value: "value",
+          source: "user",
+          confidence: Number.NaN,
+        }),
+      ),
+    ).rejects.toThrow("confidence must be between 0 and 1");
+  });
+
+  test("rejects infinite confidence values", async () => {
+    await expect(
+      Effect.runPromise(
+        createMemory({
+          key: "invalid_inf",
+          value: "value",
+          source: "user",
+          confidence: Number.POSITIVE_INFINITY,
+        }),
+      ),
+    ).rejects.toThrow("confidence must be between 0 and 1");
+  });
 });

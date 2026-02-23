@@ -45,7 +45,11 @@ export const createMemory = (
     return Effect.fail(sourceError);
   }
 
-  if (input.confidence < 0 || input.confidence > 1) {
+  if (
+    !Number.isFinite(input.confidence) ||
+    input.confidence < 0 ||
+    input.confidence > 1
+  ) {
     return Effect.fail(
       new DomainValidationError({
         message: "confidence must be between 0 and 1",

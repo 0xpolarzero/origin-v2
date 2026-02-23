@@ -40,4 +40,37 @@ describe("memory-service", () => {
     expect(second.confidence).toBe(0.9);
     expect(memories).toHaveLength(1);
   });
+
+  test("stores key index to avoid repeated full scans on key upserts", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    const first = await Effect.runPromise(
+      upsertMemory(repository, {
+        key: "preferred_workspace",
+        value: "Office",
+        source: "user",
+        confidence: 0.8,
+      }),
+    );
+
+    const indexRecord = await Effect.runPromise(
+      repository.getEntity<{
+        key: string;
+        memoryId: string;
+      }>("memory_key_index", "memory-key-index:preferred_workspace"),
+    );
+
+    const second = await Effect.runPromise(
+      upsertMemory(repository, {
+        key: "preferred_workspace",
+        value: "Remote",
+        source: "user",
+        confidence: 0.9,
+      }),
+    );
+
+    expect(indexRecord?.key).toBe("preferred_workspace");
+    expect(indexRecord?.memoryId).toBe(first.id);
+    expect(second.id).toBe(first.id);
+  });
 });
