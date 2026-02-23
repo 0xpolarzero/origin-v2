@@ -1500,4 +1500,128 @@ describe("sqlite baseline schema migrations", () => {
       db.close();
     }
   });
+
+  test("entity_versions.updated_at keeps max transition timestamp for out-of-order inserts", async () => {
+    const db = new Database(":memory:");
+
+    try {
+      await applyCoreMigrations(db);
+
+      db.query(
+        `
+          INSERT INTO task (id, title, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?)
+        `,
+      ).run("task-version-out-of-order", "Task", "planned", ISO_1, ISO_1);
+
+      db.query(
+        `
+          INSERT INTO audit_transitions (
+            id,
+            entity_type,
+            entity_id,
+            from_state,
+            to_state,
+            actor_id,
+            actor_kind,
+            reason,
+            at,
+            metadata
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "audit-version-out-of-order-1",
+        "task",
+        "task-version-out-of-order",
+        "none",
+        "planned",
+        "user-1",
+        "user",
+        "Task created",
+        ISO_2,
+        null,
+      );
+
+      db.query(
+        `
+          INSERT INTO audit_transitions (
+            id,
+            entity_type,
+            entity_id,
+            from_state,
+            to_state,
+            actor_id,
+            actor_kind,
+            reason,
+            at,
+            metadata
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "audit-version-out-of-order-2",
+        "task",
+        "task-version-out-of-order",
+        "planned",
+        "deferred",
+        "user-1",
+        "user",
+        "Task deferred",
+        ISO_3,
+        null,
+      );
+
+      db.query(
+        `
+          INSERT INTO audit_transitions (
+            id,
+            entity_type,
+            entity_id,
+            from_state,
+            to_state,
+            actor_id,
+            actor_kind,
+            reason,
+            at,
+            metadata
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "audit-version-out-of-order-3",
+        "task",
+        "task-version-out-of-order",
+        "deferred",
+        "completed",
+        "user-1",
+        "user",
+        "Task replayed",
+        ISO_1,
+        null,
+      );
+
+      const versionRow = db
+        .query(
+          `
+            SELECT
+              latest_version AS latestVersion,
+              updated_at AS updatedAt
+            FROM entity_versions
+            WHERE entity_type = 'task' AND entity_id = 'task-version-out-of-order'
+          `,
+        )
+        .get() as {
+        latestVersion: number;
+        updatedAt: string;
+      };
+
+      expect(versionRow).toEqual({
+        latestVersion: 3,
+        updatedAt: ISO_3,
+      });
+    } finally {
+      db.close();
+    }
+  });
 });

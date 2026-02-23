@@ -43,5 +43,8 @@ BEGIN
   )
   ON CONFLICT(entity_type, entity_id) DO UPDATE SET
     latest_version = entity_versions.latest_version + 1,
-    updated_at = NEW.at;
+    updated_at = CASE
+      WHEN NEW.at > entity_versions.updated_at THEN NEW.at
+      ELSE entity_versions.updated_at
+    END;
 END;
