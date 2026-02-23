@@ -155,6 +155,14 @@ export const convertSignal = (
     const at = input.at ?? new Date();
     const atIso = at.toISOString();
 
+    if (signal.triageState !== "triaged") {
+      return yield* Effect.fail(
+        new SignalServiceError({
+          message: `signal ${signal.id} must be triaged before conversion`,
+        }),
+      );
+    }
+
     let converted: ConvertedEntityRef;
     let targetState: string;
 

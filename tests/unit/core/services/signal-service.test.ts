@@ -242,6 +242,15 @@ describe("signal-service", () => {
     );
 
     await Effect.runPromise(repository.saveEntity("signal", signal.id, signal));
+    await Effect.runPromise(
+      triageSignal(
+        repository,
+        signal.id,
+        "ready_for_conversion",
+        { id: "user-2", kind: "user" },
+        new Date("2026-02-23T12:20:00.000Z"),
+      ),
+    );
 
     await expect(
       Effect.runPromise(
