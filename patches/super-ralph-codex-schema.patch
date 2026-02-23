@@ -321,7 +321,7 @@ index 77be1f5..c25a2a8 100644
      clarificationSession
        ? "- CRITICAL: Interpret and apply the user's clarification answers to tailor the config."
 diff --git a/src/components/SuperRalph.tsx b/src/components/SuperRalph.tsx
-index 96d1c69..a2711d3 100644
+index 96d1c69..2db4704 100644
 --- a/src/components/SuperRalph.tsx
 +++ b/src/components/SuperRalph.tsx
 @@ -16,6 +16,7 @@ import CodeReviewPrompt from "../prompts/CodeReview.mdx";
@@ -354,7 +354,7 @@ index 96d1c69..a2711d3 100644
                                  architectureRules={[`Read ${specsPath} for patterns`]}
                                  commitPrefix={prefix}
                                  mainBranch={mainBranch}
-@@ -420,11 +427,7 @@ export function SuperRalph({
+@@ -420,11 +427,11 @@ export function SuperRalph({
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
                                  ticketCategory={ticket.category}
@@ -363,11 +363,15 @@ index 96d1c69..a2711d3 100644
 -                                  command,
 -                                  description: `Run ${name} tests`,
 -                                }))}
-+                                testSuites={ticketGateSelection.testSuites}
++                                testSuites={
++                                  testSuites.length > 0
++                                    ? testSuites
++                                    : ticketGateSelection.testSuites
++                                }
                                  fixCommitPrefix={`🐛 fix`}
                                  mainBranch={mainBranch}
                                />
-@@ -491,7 +494,7 @@ export function SuperRalph({
+@@ -491,7 +498,7 @@ export function SuperRalph({
                                  codeSeverity={worstCodeSeverity}
                                  codeFeedback={mergedCodeFeedback}
                                  codeIssues={mergedCodeIssues.length > 0 ? mergedCodeIssues : null}

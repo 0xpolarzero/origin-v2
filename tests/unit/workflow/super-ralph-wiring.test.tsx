@@ -6,6 +6,11 @@ import { ralphOutputSchemas } from "../../../node_modules/super-ralph/src/schema
 
 type RenderOptions = {
   specReviewSeverity?: "none" | "minor" | "major" | "critical";
+  testSuites?: Array<{
+    name: string;
+    command: string;
+    description: string;
+  }>;
 };
 
 function createCtx(
@@ -120,7 +125,7 @@ function renderSuperRalph(options: RenderOptions = {}) {
     },
     preLandChecks: [],
     postLandChecks: [],
-    testSuites: [],
+    testSuites: options.testSuites ?? [],
   });
 }
 
@@ -146,6 +151,25 @@ describe("SuperRalph ticket-gate wiring", () => {
         description: "Run core tests",
       },
     ]);
+  });
+
+  test("reuses configured testSuites when provided", () => {
+    const configuredSuites = [
+      {
+        name: "custom unit suite",
+        command: "bun run test:core",
+        description: "Run custom unit suite",
+      },
+      {
+        name: "custom api suite",
+        command: "bun run test:integration:api",
+        description: "Run custom api suite",
+      },
+    ];
+    const tree = renderSuperRalph({ testSuites: configuredSuites });
+    const testProps = findTaskPromptProps(tree, "CORE-REV-004:test");
+
+    expect(testProps.testSuites).toEqual(configuredSuites);
   });
 
   test("reuses ticket-scoped validation commands in ReviewFixPrompt", () => {
