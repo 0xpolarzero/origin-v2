@@ -1,5 +1,5 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import { Data, Effect, Exit } from "effect";
+import { Data, Effect, Exit, FiberId } from "effect";
 
 import { AuditTransition } from "../../domain/audit-transition";
 import { EntityType } from "../../domain/common";
@@ -648,14 +648,16 @@ export const makeSqliteCoreRepository = (
         catch: (cause) =>
           toRepositoryError("failed to close sqlite database", cause),
       });
+    const transactionMutex = yield* Effect.makeSemaphore(1);
     let transactionDepth = 0;
     let savepointCounter = 0;
+    let transactionOwnerThreadName: string | undefined = undefined;
 
-    const withTransaction = <A, E>(
+    const runTransaction = <A, E>(
       effect: Effect.Effect<A, E>,
+      isNested: boolean,
     ): Effect.Effect<A, E | SqliteCoreRepositoryError> =>
       Effect.gen(function* () {
-        const isNested = transactionDepth > 0;
         const savepointName = isNested
           ? `origin_savepoint_${++savepointCounter}`
           : undefined;
@@ -720,6 +722,32 @@ export const makeSqliteCoreRepository = (
         });
 
         return yield* Effect.failCause(exit.cause);
+      });
+
+    const withTransaction = <A, E>(
+      effect: Effect.Effect<A, E>,
+    ): Effect.Effect<A, E | SqliteCoreRepositoryError> =>
+      Effect.fiberIdWith((fiberId) => {
+        const threadName = FiberId.threadName(fiberId);
+        const isNested =
+          transactionDepth > 0 && transactionOwnerThreadName === threadName;
+
+        if (isNested) {
+          return runTransaction(effect, true);
+        }
+
+        return transactionMutex.withPermits(1)(
+          Effect.gen(function* () {
+            transactionOwnerThreadName = threadName;
+            return yield* runTransaction(effect, false);
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                transactionOwnerThreadName = undefined;
+              }),
+            ),
+          ),
+        );
       });
 
     return {

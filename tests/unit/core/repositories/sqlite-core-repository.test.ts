@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Effect } from "effect";
+import { Either, Effect } from "effect";
 
 import { createAuditTransition } from "../../../../src/core/domain/audit-transition";
 import { createEntry } from "../../../../src/core/domain/entry";
@@ -246,6 +246,84 @@ describe("makeSqliteCoreRepository", () => {
         repository.getEntity("entry", entry.id),
       );
       expect(persisted).toEqual(entry);
+
+      await Effect.runPromise(repository.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("withTransaction isolates overlapping root transactions", async () => {
+    const { tempDir, databasePath } = makeTempDatabasePath();
+
+    try {
+      const repository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+      const rolledBackEntry = await Effect.runPromise(
+        createEntry({
+          id: "entry-sqlite-overlap-a",
+          content: "Outer transaction entry",
+        }),
+      );
+      const committedEntry = await Effect.runPromise(
+        createEntry({
+          id: "entry-sqlite-overlap-b",
+          content: "Concurrent transaction entry",
+        }),
+      );
+
+      let notifyOuterStarted: () => void = () => {};
+      const outerStarted = new Promise<void>((resolve) => {
+        notifyOuterStarted = resolve;
+      });
+      let releaseOuter: () => void = () => {};
+      const outerGate = new Promise<void>((resolve) => {
+        releaseOuter = resolve;
+      });
+
+      const txAPromise = Effect.runPromise(
+        Effect.either(
+          repository.withTransaction!(
+            Effect.gen(function* () {
+              yield* repository.saveEntity(
+                "entry",
+                rolledBackEntry.id,
+                rolledBackEntry,
+              );
+              yield* Effect.sync(() => notifyOuterStarted());
+              yield* Effect.promise(() => outerGate);
+              return yield* Effect.fail(new Error("force outer rollback"));
+            }),
+          ),
+        ),
+      );
+
+      await outerStarted;
+
+      const txBPromise = Effect.runPromise(
+        Effect.either(
+          repository.withTransaction!(
+            repository.saveEntity("entry", committedEntry.id, committedEntry),
+          ),
+        ),
+      );
+
+      releaseOuter();
+
+      const [txAResult, txBResult] = await Promise.all([txAPromise, txBPromise]);
+      expect(Either.isLeft(txAResult)).toBe(true);
+      expect(Either.isRight(txBResult)).toBe(true);
+
+      const rolledBack = await Effect.runPromise(
+        repository.getEntity("entry", rolledBackEntry.id),
+      );
+      const committed = await Effect.runPromise(
+        repository.getEntity("entry", committedEntry.id),
+      );
+
+      expect(rolledBack).toBeUndefined();
+      expect(committed).toEqual(committedEntry);
 
       await Effect.runPromise(repository.close());
     } finally {
