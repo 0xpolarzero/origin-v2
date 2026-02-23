@@ -310,44 +310,67 @@ export const buildCorePlatform = (
         return job;
       });
 
+    const withMutationBoundary = <A, E>(
+      effect: Effect.Effect<A, E>,
+    ): Effect.Effect<A, E> => repository.withTransaction(effect);
+
     return {
-      captureEntry: (input) => captureEntry(repository, input),
-      acceptEntryAsTask: (input) => acceptEntryAsTask(repository, input),
-      suggestEntryAsTask: (input) => suggestEntryAsTask(repository, input),
-      editEntrySuggestion: (input) => editEntrySuggestion(repository, input),
+      captureEntry: (input) =>
+        withMutationBoundary(captureEntry(repository, input)),
+      acceptEntryAsTask: (input) =>
+        withMutationBoundary(acceptEntryAsTask(repository, input)),
+      suggestEntryAsTask: (input) =>
+        withMutationBoundary(suggestEntryAsTask(repository, input)),
+      editEntrySuggestion: (input) =>
+        withMutationBoundary(editEntrySuggestion(repository, input)),
       rejectEntrySuggestion: (input) =>
-        rejectEntrySuggestion(repository, input),
+        withMutationBoundary(rejectEntrySuggestion(repository, input)),
       completeTask: (taskId, actor, at) =>
-        completeTask(repository, taskId, actor, at),
+        withMutationBoundary(completeTask(repository, taskId, actor, at)),
       deferTask: (taskId, until, actor, at) =>
-        deferTask(repository, taskId, until, actor, at),
+        withMutationBoundary(deferTask(repository, taskId, until, actor, at)),
       rescheduleTask: (taskId, nextAt, actor, at) =>
-        rescheduleTask(repository, taskId, nextAt, actor, at),
-      ingestSignal: (input) => ingestSignal(repository, input),
+        withMutationBoundary(
+          rescheduleTask(repository, taskId, nextAt, actor, at),
+        ),
+      ingestSignal: (input) =>
+        withMutationBoundary(ingestSignal(repository, input)),
       triageSignal: (signalId, decision, actor, at) =>
-        triageSignal(repository, signalId, decision, actor, at),
-      convertSignal: (input) => convertSignal(repository, input),
+        withMutationBoundary(
+          triageSignal(repository, signalId, decision, actor, at),
+        ),
+      convertSignal: (input) =>
+        withMutationBoundary(convertSignal(repository, input)),
       requestEventSync: (eventId, actor, at) =>
-        requestEventSync(repository, eventId, actor, at),
+        withMutationBoundary(requestEventSync(repository, eventId, actor, at)),
       requestOutboundDraftExecution: (draftId, actor, at) =>
-        requestOutboundDraftExecution(repository, draftId, actor, at),
+        withMutationBoundary(
+          requestOutboundDraftExecution(repository, draftId, actor, at),
+        ),
       approveOutboundAction: (input) =>
-        approveOutboundAction(repository, outboundActionPort, input),
-      createJob: createJobInPlatform,
-      recordJobRun: (input) => recordJobRun(repository, input),
+        withMutationBoundary(
+          approveOutboundAction(repository, outboundActionPort, input),
+        ),
+      createJob: (input) => withMutationBoundary(createJobInPlatform(input)),
+      recordJobRun: (input) =>
+        withMutationBoundary(recordJobRun(repository, input)),
       inspectJobRun: (jobId) =>
         inspectJobRun(repository, jobId).pipe(
           Effect.mapError((error) => new Error(error.message)),
         ),
-      retryJob: (jobId, actor, at) => retryJobRun(repository, jobId, actor, at),
+      retryJob: (jobId, actor, at) =>
+        withMutationBoundary(retryJobRun(repository, jobId, actor, at)),
       createWorkflowCheckpoint: (input) =>
-        createWorkflowCheckpoint(repository, input),
+        withMutationBoundary(createWorkflowCheckpoint(repository, input)),
       keepCheckpoint: (checkpointId, actor, at) =>
-        keepCheckpoint(repository, checkpointId, actor, at),
+        withMutationBoundary(keepCheckpoint(repository, checkpointId, actor, at)),
       recoverCheckpoint: (checkpointId, actor, at) =>
-        recoverCheckpoint(repository, checkpointId, actor, at),
-      saveView: (input) => saveView(repository, input),
-      upsertMemory: (input) => upsertMemory(repository, input),
+        withMutationBoundary(
+          recoverCheckpoint(repository, checkpointId, actor, at),
+        ),
+      saveView: (input) => withMutationBoundary(saveView(repository, input)),
+      upsertMemory: (input) =>
+        withMutationBoundary(upsertMemory(repository, input)),
       getEntity: <T>(entityType: string, entityId: string) =>
         repository.getEntity<T>(entityType, entityId),
       listEntities: <T>(entityType: string) =>

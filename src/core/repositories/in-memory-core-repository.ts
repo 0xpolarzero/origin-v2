@@ -66,5 +66,6 @@ export const makeInMemoryCoreRepository = (): CoreRepository => {
 
         return filtered.map((transition) => clone(transition));
       }),
+    withTransaction: (effect) => effect,
   };
 };

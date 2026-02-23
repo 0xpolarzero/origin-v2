@@ -83,6 +83,42 @@ describe("makeSqliteCoreRepository", () => {
     }
   });
 
+  test("withTransaction rolls back writes when a later step fails", async () => {
+    const { tempDir, databasePath } = makeTempDatabasePath();
+
+    try {
+      const repository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+      const entry = await Effect.runPromise(
+        createEntry({
+          id: "entry-sqlite-tx-rollback-1",
+          content: "Rollback candidate",
+        }),
+      );
+
+      await expect(
+        Effect.runPromise(
+          repository.withTransaction!(
+            Effect.gen(function* () {
+              yield* repository.saveEntity("entry", entry.id, entry);
+              return yield* Effect.fail(new Error("force rollback"));
+            }),
+          ),
+        ),
+      ).rejects.toThrow("force rollback");
+
+      const persisted = await Effect.runPromise(
+        repository.getEntity("entry", entry.id),
+      );
+      expect(persisted).toBeUndefined();
+
+      await Effect.runPromise(repository.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("getEntity returns undefined for missing rows and parsed entity for existing rows", async () => {
     const { tempDir, databasePath } = makeTempDatabasePath();
 

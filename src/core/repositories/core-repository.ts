@@ -29,6 +29,9 @@ export interface CoreRepository {
   listAuditTrail: (
     filter?: AuditTrailFilter,
   ) => Effect.Effect<ReadonlyArray<AuditTransition>>;
+  withTransaction: <A, E>(
+    effect: Effect.Effect<A, E>,
+  ) => Effect.Effect<A, E>;
   persistSnapshot?: (path: string) => Effect.Effect<void, Error>;
   loadSnapshot?: (path: string) => Effect.Effect<void, Error>;
   close?: () => Effect.Effect<void, Error>;

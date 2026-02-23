@@ -1,5 +1,5 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import { Data, Effect } from "effect";
+import { Data, Effect, Exit } from "effect";
 
 import { AuditTransition } from "../../domain/audit-transition";
 import { EntityType } from "../../domain/common";
@@ -615,6 +615,42 @@ export const makeSqliteCoreRepository = (
           toRepositoryError("failed to close sqlite database", cause),
       });
 
+    const withTransaction = <A, E>(
+      effect: Effect.Effect<A, E>,
+    ): Effect.Effect<A, E | SqliteCoreRepositoryError> =>
+      Effect.gen(function* () {
+        yield* Effect.try({
+          try: () => {
+            db.exec("BEGIN IMMEDIATE");
+          },
+          catch: (cause) =>
+            toRepositoryError("failed to begin sqlite transaction", cause),
+        });
+
+        const exit = yield* Effect.exit(effect);
+
+        if (Exit.isSuccess(exit)) {
+          return yield* Effect.try({
+            try: () => {
+              db.exec("COMMIT");
+              return exit.value;
+            },
+            catch: (cause) =>
+              toRepositoryError("failed to commit sqlite transaction", cause),
+          });
+        }
+
+        yield* Effect.try({
+          try: () => {
+            db.exec("ROLLBACK");
+          },
+          catch: (cause) =>
+            toRepositoryError("failed to rollback sqlite transaction", cause),
+        });
+
+        return yield* Effect.failCause(exit.cause);
+      });
+
     return {
       saveEntity,
       getEntity,
@@ -622,6 +658,7 @@ export const makeSqliteCoreRepository = (
       deleteEntity,
       appendAuditTransition,
       listAuditTrail,
+      withTransaction,
       close,
     } as unknown as CoreRepository & {
       close: () => Effect.Effect<void, SqliteCoreRepositoryError>;
