@@ -279,6 +279,11 @@ describe("workflow-api integration", () => {
         message: "outbound actions require explicit approval",
       });
     }
+    const stillPendingAfterRejection = await Effect.runPromise(
+      platform.getEntity<{ syncState: string }>("event", event.id),
+    );
+    expect(stillPendingAfterRejection?.syncState).toBe("pending_approval");
+    expect(executeCount).toBe(0);
 
     await Effect.runPromise(
       api.approveOutboundAction({
@@ -294,10 +299,31 @@ describe("workflow-api integration", () => {
     const syncedEvent = await Effect.runPromise(
       platform.getEntity<{ syncState: string }>("event", event.id),
     );
+    const duplicateApproval = await Effect.runPromise(
+      Effect.either(
+        api.approveOutboundAction({
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: event.id,
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T11:03:00.000Z"),
+        }),
+      ),
+    );
 
     expect(pendingEvent?.syncState).toBe("pending_approval");
     expect(executeCount).toBe(1);
     expect(syncedEvent?.syncState).toBe("synced");
+    expect(Either.isLeft(duplicateApproval)).toBe(true);
+    if (Either.isLeft(duplicateApproval)) {
+      expect(duplicateApproval.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "approval.approveOutboundAction",
+        code: "conflict",
+        statusCode: 409,
+      });
+    }
   });
 
   test("outbound draft execution stays blocked until explicit approval, then executes once", async () => {
@@ -394,6 +420,14 @@ describe("workflow-api integration", () => {
         message: "outbound actions require explicit approval",
       });
     }
+    const pendingDraftAfterRejection = await Effect.runPromise(
+      platform.getEntity<{ status: string }>(
+        "outbound_draft",
+        "outbound-draft-api-approval-1",
+      ),
+    );
+    expect(pendingDraftAfterRejection?.status).toBe("pending_approval");
+    expect(executeCount).toBe(0);
 
     await Effect.runPromise(
       api.approveOutboundAction({
@@ -412,9 +446,30 @@ describe("workflow-api integration", () => {
         "outbound-draft-api-approval-1",
       ),
     );
+    const duplicateApproval = await Effect.runPromise(
+      Effect.either(
+        api.approveOutboundAction({
+          actionType: "outbound_draft",
+          entityType: "outbound_draft",
+          entityId: "outbound-draft-api-approval-1",
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T12:07:00.000Z"),
+        }),
+      ),
+    );
 
     expect(executeCount).toBe(1);
     expect(persistedDraft?.status).toBe("executed");
+    expect(Either.isLeft(duplicateApproval)).toBe(true);
+    if (Either.isLeft(duplicateApproval)) {
+      expect(duplicateApproval.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "approval.approveOutboundAction",
+        code: "conflict",
+        statusCode: 409,
+      });
+    }
   });
 
   test("job run -> inspect -> retry -> listHistory workflow executes through API handlers", async () => {

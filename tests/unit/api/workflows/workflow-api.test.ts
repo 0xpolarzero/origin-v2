@@ -7,6 +7,8 @@ import {
   WorkflowRouteKey,
 } from "../../../../src/api/workflows/contracts";
 import { WorkflowApiError } from "../../../../src/api/workflows/errors";
+import { ApprovalServiceError } from "../../../../src/core/services/approval-service";
+import { EventServiceError } from "../../../../src/core/services/event-service";
 import { makeWorkflowApi } from "../../../../src/api/workflows/workflow-api";
 
 const ACTOR = { id: "user-1", kind: "user" } as const;
@@ -494,6 +496,8 @@ describe("api/workflows/workflow-api", () => {
           _tag: "WorkflowApiError",
           route: handlerCase.route,
           message: errorMessage,
+          code: "unknown",
+          statusCode: 400,
         });
       }
     });
@@ -518,6 +522,8 @@ describe("api/workflows/workflow-api", () => {
           _tag: "WorkflowApiError",
           route: handlerCase.route,
           message: errorMessage,
+          code: "unknown",
+          statusCode: 400,
         });
       }
     });
@@ -540,6 +546,8 @@ describe("api/workflows/workflow-api", () => {
           _tag: "WorkflowApiError",
           route: handlerCase.route,
           message: errorMessage,
+          code: "unknown",
+          statusCode: 400,
         });
       }
     });
@@ -548,6 +556,8 @@ describe("api/workflows/workflow-api", () => {
       const expectedError = new WorkflowApiError({
         route: handlerCase.route,
         message: `pre-mapped:${handlerCase.route}`,
+        code: "validation",
+        statusCode: 400,
       });
       const platform = makePlatformStub(
         handlerCase.setMethod(() => Effect.fail(expectedError)),
@@ -565,4 +575,52 @@ describe("api/workflows/workflow-api", () => {
       }
     });
   }
+
+  test("workflow handlers preserve forbidden/conflict metadata from service failures", async () => {
+    const platform = makePlatformStub({
+      requestEventSync: () =>
+        Effect.fail(
+          new EventServiceError({
+            message:
+              "event event-api-1 must be local_only before requesting sync",
+            code: "conflict",
+          }),
+        ),
+      approveOutboundAction: () =>
+        Effect.fail(
+          new ApprovalServiceError({
+            message: "only user actors may approve outbound actions",
+            code: "forbidden",
+          }),
+        ),
+    });
+
+    const api = makeWorkflowApi({ platform });
+    const syncResult = await Effect.runPromise(
+      Effect.either(api.requestEventSync(requestEventSyncInput)),
+    );
+    const approvalResult = await Effect.runPromise(
+      Effect.either(api.approveOutboundAction(approveOutboundActionInput)),
+    );
+
+    expect(Either.isLeft(syncResult)).toBe(true);
+    if (Either.isLeft(syncResult)) {
+      expect(syncResult.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "approval.requestEventSync",
+        code: "conflict",
+        statusCode: 409,
+      });
+    }
+
+    expect(Either.isLeft(approvalResult)).toBe(true);
+    if (Either.isLeft(approvalResult)) {
+      expect(approvalResult.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "approval.approveOutboundAction",
+        code: "forbidden",
+        statusCode: 403,
+      });
+    }
+  });
 });

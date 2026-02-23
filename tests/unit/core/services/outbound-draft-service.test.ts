@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Either, Effect } from "effect";
 
 import {
   createOutboundDraft,
@@ -89,8 +89,8 @@ describe("outbound-draft-service", () => {
       repository.saveEntity("outbound_draft", pendingDraft.id, pendingDraft),
     );
 
-    await expect(
-      Effect.runPromise(
+    const result = await Effect.runPromise(
+      Effect.either(
         requestOutboundDraftExecution(
           repository,
           pendingDraft.id,
@@ -98,7 +98,18 @@ describe("outbound-draft-service", () => {
           new Date("2026-02-23T14:05:00.000Z"),
         ),
       ),
-    ).rejects.toThrow("must be in draft before requesting approval");
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "OutboundDraftServiceError",
+        code: "conflict",
+      });
+      expect(result.left.message).toContain(
+        "must be in draft before requesting approval",
+      );
+    }
   });
 
   test("requestOutboundDraftExecution rolls back draft state when audit append fails", async () => {

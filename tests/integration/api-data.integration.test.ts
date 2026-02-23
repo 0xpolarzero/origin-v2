@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Effect } from "effect";
+import { Either, Effect } from "effect";
 
 import { buildCorePlatform } from "../../src/core/app/core-platform";
 import { createEvent } from "../../src/core/domain/event";
@@ -263,6 +263,143 @@ describe("API and Data integration scaffold", () => {
       "executing",
       "executed",
     ]);
+  });
+
+  test("repeated approval-request operations do not duplicate pending transitions", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const event = await Effect.runPromise(
+      createEvent({
+        id: "event-api-repeat-1",
+        title: "Repeated request event",
+        startAt: new Date("2026-02-24T12:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("event", event.id, event));
+
+    const platform = await Effect.runPromise(
+      buildCorePlatform({
+        repository,
+      }),
+    );
+
+    await Effect.runPromise(
+      platform.requestEventSync(
+        event.id,
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T09:40:00.000Z"),
+      ),
+    );
+
+    const secondEventRequest = await Effect.runPromise(
+      Effect.either(
+        platform.requestEventSync(
+          event.id,
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T09:41:00.000Z"),
+        ),
+      ),
+    );
+    expect(Either.isLeft(secondEventRequest)).toBe(true);
+    if (Either.isLeft(secondEventRequest)) {
+      expect(secondEventRequest.left).toMatchObject({
+        _tag: "EventServiceError",
+        code: "conflict",
+      });
+    }
+
+    await Effect.runPromise(
+      platform.ingestSignal({
+        signalId: "signal-api-repeat-1",
+        source: "chat",
+        payload: "Repeated draft request",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T09:42:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      platform.triageSignal(
+        "signal-api-repeat-1",
+        "requires_outbound",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T09:43:00.000Z"),
+      ),
+    );
+    const converted = await Effect.runPromise(
+      platform.convertSignal({
+        signalId: "signal-api-repeat-1",
+        targetType: "outbound_draft",
+        targetId: "outbound-draft-api-repeat-1",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T09:44:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      platform.requestOutboundDraftExecution(
+        converted.entityId,
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T09:45:00.000Z"),
+      ),
+    );
+
+    const secondDraftRequest = await Effect.runPromise(
+      Effect.either(
+        platform.requestOutboundDraftExecution(
+          converted.entityId,
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T09:46:00.000Z"),
+        ),
+      ),
+    );
+    expect(Either.isLeft(secondDraftRequest)).toBe(true);
+    if (Either.isLeft(secondDraftRequest)) {
+      expect(secondDraftRequest.left).toMatchObject({
+        _tag: "OutboundDraftServiceError",
+        code: "conflict",
+      });
+    }
+
+    const notifications = await Effect.runPromise(
+      platform.listEntities<{
+        relatedEntityType: string;
+        relatedEntityId: string;
+      }>("notification"),
+    );
+    const eventNotifications = notifications.filter(
+      (notification) =>
+        notification.relatedEntityType === "event" &&
+        notification.relatedEntityId === event.id,
+    );
+    const draftNotifications = notifications.filter(
+      (notification) =>
+        notification.relatedEntityType === "outbound_draft" &&
+        notification.relatedEntityId === converted.entityId,
+    );
+    expect(eventNotifications).toHaveLength(1);
+    expect(draftNotifications).toHaveLength(1);
+
+    const eventAudit = await Effect.runPromise(
+      platform.listAuditTrail({
+        entityType: "event",
+        entityId: event.id,
+      }),
+    );
+    const draftAudit = await Effect.runPromise(
+      platform.listAuditTrail({
+        entityType: "outbound_draft",
+        entityId: converted.entityId,
+      }),
+    );
+    expect(
+      eventAudit.filter(
+        (transition) => transition.toState === "pending_approval",
+      ),
+    ).toHaveLength(1);
+    expect(
+      draftAudit.filter(
+        (transition) => transition.toState === "pending_approval",
+      ),
+    ).toHaveLength(1);
   });
 
   test("replays pending approval state after restart and preserves local-first data", async () => {
