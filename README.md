@@ -14,7 +14,7 @@ Minimal repo for implementing Origin with Super Ralph.
 
 ```bash
 bun install
-bun super-ralph ./docs/super-ralph.prompt.md
+bunx super-ralph ./docs/super-ralph.prompt.md
 ```
 
 Super Ralph may generate runtime artifacts such as `PROGRESS.md`; they are gitignored.
