@@ -26,4 +26,28 @@ describe("createOutboundDraft", () => {
     expect(draft.updatedAt).toBe("2026-02-23T10:05:00.000Z");
     expect(draft.executionId).toBeUndefined();
   });
+
+  test("fails when payload is empty", async () => {
+    await expect(
+      Effect.runPromise(
+        createOutboundDraft({
+          id: "outbound-draft-empty-payload",
+          payload: "   ",
+          sourceSignalId: "signal-1",
+        }),
+      ),
+    ).rejects.toThrow("payload is required");
+  });
+
+  test("fails when sourceSignalId is empty", async () => {
+    await expect(
+      Effect.runPromise(
+        createOutboundDraft({
+          id: "outbound-draft-empty-source-signal-id",
+          payload: "Send proposal update",
+          sourceSignalId: "   ",
+        }),
+      ),
+    ).rejects.toThrow("sourceSignalId is required");
+  });
 });
