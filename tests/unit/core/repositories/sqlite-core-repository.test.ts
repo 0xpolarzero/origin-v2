@@ -268,7 +268,7 @@ describe("makeSqliteCoreRepository", () => {
     await Effect.runPromise(repository.close());
   });
 
-  test("deleteEntity removes persisted rows and supports memory_key_index records", async () => {
+  test("deleteEntity enforces relation integrity and supports memory_key_index cleanup", async () => {
     const { tempDir, databasePath } = makeTempDatabasePath();
 
     try {
@@ -300,13 +300,18 @@ describe("makeSqliteCoreRepository", () => {
         ),
       );
 
-      await Effect.runPromise(repository.deleteEntity("memory", "memory-1"));
+      await expect(
+        Effect.runPromise(repository.deleteEntity("memory", "memory-1")),
+      ).rejects.toThrow(
+        "invalid delete memory.id referenced by memory_key_index.memory_id",
+      );
       await Effect.runPromise(
         repository.deleteEntity(
           "memory_key_index",
           "memory-key-index:favorite_color",
         ),
       );
+      await Effect.runPromise(repository.deleteEntity("memory", "memory-1"));
 
       const deletedMemory = await Effect.runPromise(
         repository.getEntity("memory", "memory-1"),
