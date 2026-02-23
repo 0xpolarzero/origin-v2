@@ -635,38 +635,75 @@ export const makeSqliteCoreRepository = (
         catch: (cause) =>
           toRepositoryError("failed to close sqlite database", cause),
       });
+    let transactionDepth = 0;
+    let savepointCounter = 0;
 
     const withTransaction = <A, E>(
       effect: Effect.Effect<A, E>,
     ): Effect.Effect<A, E | SqliteCoreRepositoryError> =>
       Effect.gen(function* () {
+        const isNested = transactionDepth > 0;
+        const savepointName = isNested
+          ? `origin_savepoint_${++savepointCounter}`
+          : undefined;
+
         yield* Effect.try({
           try: () => {
-            db.exec("BEGIN IMMEDIATE");
+            if (isNested) {
+              db.exec(`SAVEPOINT ${savepointName!}`);
+            } else {
+              db.exec("BEGIN IMMEDIATE");
+            }
+            transactionDepth += 1;
           },
           catch: (cause) =>
-            toRepositoryError("failed to begin sqlite transaction", cause),
+            toRepositoryError(
+              isNested
+                ? "failed to start sqlite savepoint"
+                : "failed to begin sqlite transaction",
+              cause,
+            ),
         });
 
         const exit = yield* Effect.exit(effect);
+        transactionDepth -= 1;
 
         if (Exit.isSuccess(exit)) {
           return yield* Effect.try({
             try: () => {
-              db.exec("COMMIT");
+              if (isNested) {
+                db.exec(`RELEASE SAVEPOINT ${savepointName!}`);
+              } else {
+                db.exec("COMMIT");
+              }
               return exit.value;
             },
             catch: (cause) =>
-              toRepositoryError("failed to commit sqlite transaction", cause),
+              toRepositoryError(
+                isNested
+                  ? "failed to release sqlite savepoint"
+                  : "failed to commit sqlite transaction",
+                cause,
+              ),
           });
         }
 
         yield* Effect.try({
           try: () => {
-            db.exec("ROLLBACK");
+            if (isNested) {
+              db.exec(`ROLLBACK TO SAVEPOINT ${savepointName!}`);
+              db.exec(`RELEASE SAVEPOINT ${savepointName!}`);
+            } else {
+              db.exec("ROLLBACK");
+            }
           },
           catch: (cause) =>
-            toRepositoryError("failed to rollback sqlite transaction", cause),
+            toRepositoryError(
+              isNested
+                ? "failed to rollback sqlite savepoint"
+                : "failed to rollback sqlite transaction",
+              cause,
+            ),
         });
 
         return yield* Effect.failCause(exit.cause);

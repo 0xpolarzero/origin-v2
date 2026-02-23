@@ -147,6 +147,41 @@ describe("makeSqliteCoreRepository", () => {
     }
   });
 
+  test("withTransaction supports nested transactional scopes", async () => {
+    const { tempDir, databasePath } = makeTempDatabasePath();
+
+    try {
+      const repository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+      const entry = await Effect.runPromise(
+        createEntry({
+          id: "entry-sqlite-nested-tx-1",
+          content: "Nested transaction entry",
+        }),
+      );
+
+      await Effect.runPromise(
+        repository.withTransaction!(
+          Effect.gen(function* () {
+            yield* repository.withTransaction!(
+              repository.saveEntity("entry", entry.id, entry),
+            );
+          }),
+        ),
+      );
+
+      const persisted = await Effect.runPromise(
+        repository.getEntity("entry", entry.id),
+      );
+      expect(persisted).toEqual(entry);
+
+      await Effect.runPromise(repository.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("getEntity returns undefined for missing rows and parsed entity for existing rows", async () => {
     const { tempDir, databasePath } = makeTempDatabasePath();
 
