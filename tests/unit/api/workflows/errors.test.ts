@@ -26,4 +26,15 @@ describe("api/workflows/errors", () => {
     expect(mapped.route).toBe("job.retry");
     expect(mapped.message).toBe("unknown workflow api failure");
   });
+
+  test("toWorkflowApiError preserves pre-mapped WorkflowApiError instances", () => {
+    const existing = new WorkflowApiError({
+      route: "signal.convert",
+      message: "already mapped",
+    });
+
+    const mapped = toWorkflowApiError("job.retry", existing);
+
+    expect(mapped).toBe(existing);
+  });
 });
