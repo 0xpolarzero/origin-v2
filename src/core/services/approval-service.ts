@@ -1,4 +1,4 @@
-import { Data, Effect } from "effect";
+import { Data, Effect, Either } from "effect";
 
 import { createAuditTransition } from "../domain/audit-transition";
 import { ActorRef } from "../domain/common";
@@ -82,7 +82,14 @@ export const approveOutboundAction = (
         );
       }
 
-      const event = yield* repository.getEntity<Event>("event", input.entityId);
+      const event = yield* repository.getEntity<Event>("event", input.entityId).pipe(
+        Effect.mapError(
+          (error) =>
+            new ApprovalServiceError({
+              message: `failed to load event ${input.entityId}: ${toErrorMessage(error)}`,
+            }),
+        ),
+      );
 
       if (!event) {
         return yield* Effect.fail(
@@ -102,19 +109,33 @@ export const approveOutboundAction = (
         );
       }
 
-      const execution = yield* outboundActionPort.execute({
-        actionType: input.actionType,
-        entityType: input.entityType,
-        entityId: input.entityId,
-      });
+      const execution = yield* outboundActionPort
+        .execute({
+          actionType: input.actionType,
+          entityType: input.entityType,
+          entityId: input.entityId,
+        })
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new ApprovalServiceError({
+                message: `failed to execute outbound action: ${toErrorMessage(error)}`,
+              }),
+          ),
+          Effect.catchAllDefect((defect) =>
+            Effect.fail(
+              new ApprovalServiceError({
+                message: toErrorMessage(defect),
+              }),
+            ),
+          ),
+        );
 
       const updatedEvent: Event = {
         ...event,
         syncState: "synced",
         updatedAt: at.toISOString(),
       };
-
-      yield* repository.saveEntity("event", updatedEvent.id, updatedEvent);
 
       const transition = yield* createAuditTransition({
         entityType: "event",
@@ -133,7 +154,57 @@ export const approveOutboundAction = (
         ),
       );
 
-      yield* repository.appendAuditTransition(transition);
+      let eventSaved = false;
+
+      yield* Effect.gen(function* () {
+        yield* repository.saveEntity("event", updatedEvent.id, updatedEvent).pipe(
+          Effect.mapError(
+            (error) =>
+              new ApprovalServiceError({
+                message: `failed to persist event sync approval: ${toErrorMessage(error)}`,
+              }),
+          ),
+        );
+        eventSaved = true;
+
+        yield* repository.appendAuditTransition(transition).pipe(
+          Effect.mapError(
+            (error) =>
+              new ApprovalServiceError({
+                message: `failed to append approval transition: ${toErrorMessage(error)}`,
+              }),
+          ),
+        );
+      }).pipe(
+        Effect.catchAllDefect((defect) =>
+          Effect.fail(
+            new ApprovalServiceError({
+              message: toErrorMessage(defect),
+            }),
+          ),
+        ),
+        Effect.catchAll((error) =>
+          Effect.gen(function* () {
+            if (!eventSaved) {
+              return yield* Effect.fail(error);
+            }
+
+            const rollbackResult = yield* Effect.either(
+              repository.saveEntity("event", event.id, event),
+            );
+
+            if (Either.isLeft(rollbackResult)) {
+              return yield* Effect.fail(
+                new ApprovalServiceError({
+                  message: `${error.message}; failed to rollback event sync approval: ${toErrorMessage(rollbackResult.left)}`,
+                }),
+              );
+            }
+
+            return yield* Effect.fail(error);
+          }),
+        ),
+      );
 
       const result: ApprovalResult = {
         approved: true,

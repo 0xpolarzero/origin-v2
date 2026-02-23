@@ -124,7 +124,9 @@ describe("event-service", () => {
       ...repository,
       saveEntity: (entityType, entityId, entity) => {
         if (entityType === "notification") {
-          return Effect.fail(new Error("notification persistence unavailable"));
+          return Effect.fail(
+            new Error("notification persistence unavailable"),
+          ).pipe(Effect.orDie);
         }
 
         return repository.saveEntity(entityType, entityId, entity);
@@ -177,7 +179,7 @@ describe("event-service", () => {
     const failingRepository: CoreRepository = {
       ...repository,
       appendAuditTransition: (_transition) =>
-        Effect.fail(new Error("audit append unavailable")),
+        Effect.fail(new Error("audit append unavailable")).pipe(Effect.orDie),
     };
 
     const result = await Effect.runPromise(
