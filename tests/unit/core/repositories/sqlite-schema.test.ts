@@ -144,6 +144,22 @@ describe("sqlite baseline schema migrations", () => {
         "entity_id",
         "at",
       ]);
+
+      const auditEntityIdIndex = db
+        .query(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_audit_transitions_entity_id_at'",
+        )
+        .get();
+
+      expect(auditEntityIdIndex).toBeDefined();
+
+      const auditEntityIdIndexColumns = db
+        .query("PRAGMA index_info('idx_audit_transitions_entity_id_at')")
+        .all() as Array<{ name: string }>;
+      expect(auditEntityIdIndexColumns.map((column) => column.name)).toEqual([
+        "entity_id",
+        "at",
+      ]);
     } finally {
       db.close();
     }

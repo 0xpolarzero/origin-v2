@@ -141,6 +141,9 @@ END;
 CREATE INDEX IF NOT EXISTS idx_audit_transitions_entity_at
 ON audit_transitions (entity_type, entity_id, at);
 
+CREATE INDEX IF NOT EXISTS idx_audit_transitions_entity_id_at
+ON audit_transitions (entity_id, at);
+
 CREATE INDEX IF NOT EXISTS idx_task_status
 ON task (status, updated_at);
 
