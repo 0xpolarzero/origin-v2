@@ -244,6 +244,149 @@ describe("approval-service", () => {
     expect(execute).toHaveBeenCalledTimes(0);
   });
 
+  test("approveOutboundAction maps event persistence failures to ApprovalServiceError", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const event = await Effect.runPromise(
+      createEvent({
+        id: "event-persistence-failure-1",
+        title: "Persistence failure candidate",
+        startAt: new Date("2026-02-25T13:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("event", event.id, event));
+    await Effect.runPromise(
+      requestEventSync(
+        repository,
+        event.id,
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T13:30:00.000Z"),
+      ),
+    );
+
+    const execute = mock(async (_action: unknown) => ({
+      executionId: "exec-event-persistence-failure-1",
+    }));
+    const outboundPort: OutboundActionPort = {
+      execute: (action) => Effect.promise(() => execute(action)),
+    };
+    const failingRepository: CoreRepository = {
+      ...repository,
+      saveEntity: (entityType, entityId, entityValue) => {
+        if (entityType === "event" && entityId === event.id) {
+          return Effect.fail(new Error("event persistence unavailable")).pipe(
+            Effect.orDie,
+          );
+        }
+
+        return repository.saveEntity(entityType, entityId, entityValue);
+      },
+    };
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        approveOutboundAction(failingRepository, outboundPort, {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: event.id,
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T13:35:00.000Z"),
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "ApprovalServiceError",
+      });
+      expect(result.left.message).toContain("event persistence unavailable");
+    }
+    expect(execute).toHaveBeenCalledTimes(1);
+
+    const persistedEvent = await Effect.runPromise(
+      repository.getEntity<{ syncState: string }>("event", event.id),
+    );
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "event",
+        entityId: event.id,
+      }),
+    );
+
+    expect(persistedEvent?.syncState).toBe("pending_approval");
+    expect(auditTrail).toHaveLength(1);
+  });
+
+  test("approveOutboundAction rolls back synced event state when audit append fails", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const event = await Effect.runPromise(
+      createEvent({
+        id: "event-audit-failure-1",
+        title: "Audit failure candidate",
+        startAt: new Date("2026-02-25T13:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("event", event.id, event));
+    await Effect.runPromise(
+      requestEventSync(
+        repository,
+        event.id,
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T13:30:00.000Z"),
+      ),
+    );
+
+    const execute = mock(async (_action: unknown) => ({
+      executionId: "exec-event-audit-failure-1",
+    }));
+    const outboundPort: OutboundActionPort = {
+      execute: (action) => Effect.promise(() => execute(action)),
+    };
+    const failingRepository: CoreRepository = {
+      ...repository,
+      appendAuditTransition: (_transition) =>
+        Effect.fail(new Error("approval audit append unavailable")).pipe(
+          Effect.orDie,
+        ),
+    };
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        approveOutboundAction(failingRepository, outboundPort, {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: event.id,
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T13:35:00.000Z"),
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "ApprovalServiceError",
+      });
+      expect(result.left.message).toContain("approval audit append unavailable");
+    }
+    expect(execute).toHaveBeenCalledTimes(1);
+
+    const persistedEvent = await Effect.runPromise(
+      repository.getEntity<{ syncState: string }>("event", event.id),
+    );
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "event",
+        entityId: event.id,
+      }),
+    );
+
+    expect(persistedEvent?.syncState).toBe("pending_approval");
+    expect(auditTrail).toHaveLength(1);
+  });
+
   test("approveOutboundAction rejects outbound_draft actions when entityType is not outbound_draft", async () => {
     const repository = makeInMemoryCoreRepository();
     const execute = mock(async (_action: unknown) => ({
