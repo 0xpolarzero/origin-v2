@@ -154,6 +154,122 @@ describe("makeSqliteCoreRepository", () => {
     }
   });
 
+  test("listJobRunHistory queries job-scoped rows with SQL filtering and ordering", async () => {
+    const { tempDir, databasePath } = makeTempDatabasePath();
+
+    try {
+      const repository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+
+      await Effect.runPromise(
+        repository.saveEntity("job", "job-history-query-1", {
+          id: "job-history-query-1",
+          name: "History query one",
+          runState: "idle",
+          retryCount: 0,
+          createdAt: "2026-02-23T00:00:00.000Z",
+          updatedAt: "2026-02-23T00:00:00.000Z",
+        }),
+      );
+      await Effect.runPromise(
+        repository.saveEntity("job", "job-history-query-2", {
+          id: "job-history-query-2",
+          name: "History query two",
+          runState: "idle",
+          retryCount: 0,
+          createdAt: "2026-02-23T00:00:00.000Z",
+          updatedAt: "2026-02-23T00:00:00.000Z",
+        }),
+      );
+
+      const rows = [
+        {
+          id: "job-run-history-query-1a",
+          jobId: "job-history-query-1",
+          outcome: "failed",
+          diagnostics: "oldest",
+          retryCount: 0,
+          actorId: "system-1",
+          actorKind: "system",
+          at: "2026-02-23T10:00:00.000Z",
+          createdAt: "2026-02-23T10:00:00.000Z",
+        },
+        {
+          id: "job-run-history-query-1b",
+          jobId: "job-history-query-1",
+          outcome: "failed",
+          diagnostics: "tie b",
+          retryCount: 1,
+          actorId: "system-1",
+          actorKind: "system",
+          at: "2026-02-23T11:00:00.000Z",
+          createdAt: "2026-02-23T11:00:00.000Z",
+        },
+        {
+          id: "job-run-history-query-1c",
+          jobId: "job-history-query-1",
+          outcome: "succeeded",
+          diagnostics: "tie c",
+          retryCount: 1,
+          actorId: "system-1",
+          actorKind: "system",
+          at: "2026-02-23T11:00:00.000Z",
+          createdAt: "2026-02-23T11:00:00.000Z",
+        },
+        {
+          id: "job-run-history-query-2a",
+          jobId: "job-history-query-2",
+          outcome: "failed",
+          diagnostics: "other job",
+          retryCount: 0,
+          actorId: "system-1",
+          actorKind: "system",
+          at: "2026-02-23T11:05:00.000Z",
+          createdAt: "2026-02-23T11:05:00.000Z",
+        },
+      ] as const;
+
+      for (const row of rows) {
+        await Effect.runPromise(repository.saveEntity("job_run_history", row.id, row));
+      }
+
+      const listJobRunHistory = (
+        repository as {
+          listJobRunHistory?: (input: {
+            jobId: string;
+            limit?: number;
+            beforeAt?: Date;
+          }) => Effect.Effect<
+            ReadonlyArray<{ id: string; jobId: string; at: string; createdAt: string }>
+          >;
+        }
+      ).listJobRunHistory;
+
+      expect(listJobRunHistory).toBeDefined();
+
+      const queried = await Effect.runPromise(
+        listJobRunHistory!({
+          jobId: "job-history-query-1",
+          beforeAt: new Date("2026-02-23T11:30:00.000Z"),
+          limit: 2,
+        }),
+      );
+
+      expect(queried.map((entry) => entry.id)).toEqual([
+        "job-run-history-query-1c",
+        "job-run-history-query-1b",
+      ]);
+      expect(queried.every((entry) => entry.jobId === "job-history-query-1")).toBe(
+        true,
+      );
+
+      await Effect.runPromise(repository.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("saveEntity returns deterministic relation-constraint errors", async () => {
     const { tempDir, databasePath } = makeTempDatabasePath();
 

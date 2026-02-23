@@ -3,7 +3,11 @@ import { Data, Effect, Exit, FiberId } from "effect";
 
 import { AuditTransition } from "../../domain/audit-transition";
 import { EntityType } from "../../domain/common";
-import { AuditTrailFilter, CoreRepository } from "../core-repository";
+import {
+  AuditTrailFilter,
+  CoreRepository,
+  JobRunHistoryQuery,
+} from "../core-repository";
 import { runSqliteMigrations } from "./migration-runner";
 import { CORE_DB_MIGRATIONS, SqliteMigration } from "./migrations";
 
@@ -501,6 +505,51 @@ export const makeSqliteCoreRepository = (
         return entities;
       });
 
+    const listJobRunHistory = (
+      query: JobRunHistoryQuery,
+    ): Effect.Effect<ReadonlyArray<unknown>, SqliteCoreRepositoryError> =>
+      Effect.gen(function* () {
+        const historyConfig = TABLE_CONFIGS.job_run_history;
+        const beforeAtIso = query.beforeAt?.toISOString();
+
+        const sqlParts = [
+          `
+            SELECT ${historyConfig.columns.join(", ")}
+            FROM ${historyConfig.tableName}
+            WHERE job_id = ?
+          `,
+        ];
+        const params: Array<SqliteValue> = [query.jobId];
+
+        if (beforeAtIso !== undefined) {
+          sqlParts.push("AND at < ?");
+          params.push(beforeAtIso);
+        }
+
+        sqlParts.push("ORDER BY at DESC, created_at DESC, id DESC");
+
+        if (query.limit !== undefined) {
+          sqlParts.push("LIMIT ?");
+          params.push(query.limit);
+        }
+
+        const rows = yield* Effect.try({
+          try: () =>
+            db.query(sqlParts.join("\n")).all(...params) as Array<
+              Record<string, unknown>
+            >,
+          catch: (cause) =>
+            toRepositoryError("failed to list job_run_history rows", cause),
+        });
+
+        const records: Array<unknown> = [];
+        for (const row of rows) {
+          records.push(yield* decodeEntity(row, historyConfig));
+        }
+
+        return records;
+      });
+
     const deleteEntity = (
       entityType: EntityType | string,
       entityId: string,
@@ -754,6 +803,7 @@ export const makeSqliteCoreRepository = (
       saveEntity,
       getEntity,
       listEntities,
+      listJobRunHistory,
       deleteEntity,
       appendAuditTransition,
       listAuditTrail,

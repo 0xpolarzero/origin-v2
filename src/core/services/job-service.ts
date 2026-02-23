@@ -288,6 +288,21 @@ export const listJobRunHistory = (
     }
 
     yield* loadJob(repository, input.jobId);
+    if (repository.listJobRunHistory) {
+      const queriedRows = yield* repository.listJobRunHistory({
+        jobId: input.jobId,
+        limit: input.limit,
+        beforeAt: input.beforeAt,
+      });
+
+      return queriedRows
+        .map((row) => toHistoryRecord(row))
+        .filter(
+          (row): row is JobRunHistoryRecord =>
+            row !== undefined && row.jobId === input.jobId,
+        );
+    }
+
     const beforeAtIso = input.beforeAt?.toISOString();
 
     const rawRows = yield* repository.listEntities<unknown>("job_run_history");

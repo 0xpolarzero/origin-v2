@@ -2,9 +2,15 @@ import { Effect } from "effect";
 
 import { AuditTransition } from "../domain/audit-transition";
 import { EntityType } from "../domain/common";
-import { AuditTrailFilter, CoreRepository } from "./core-repository";
+import {
+  AuditTrailFilter,
+  CoreRepository,
+  JobRunHistoryQuery,
+} from "./core-repository";
 
 const clone = <T>(value: T): T => structuredClone(value);
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 export const makeInMemoryCoreRepository = (): CoreRepository => {
   const entities = new Map<string, Map<string, unknown>>();
@@ -42,6 +48,41 @@ export const makeInMemoryCoreRepository = (): CoreRepository => {
       Effect.sync(() => {
         const values = Array.from(getBucket(entityType).values());
         return values.map((value) => clone(value as T));
+      }),
+    listJobRunHistory: (query: JobRunHistoryQuery) =>
+      Effect.sync(() => {
+        const beforeAtIso = query.beforeAt?.toISOString();
+        const rows = Array.from(getBucket("job_run_history").values())
+          .map((value) => clone(value))
+          .filter(isRecord)
+          .filter((row) => row.jobId === query.jobId)
+          .filter(
+            (row) =>
+              beforeAtIso === undefined ||
+              (typeof row.at === "string" && row.at < beforeAtIso),
+          )
+          .sort((left, right) => {
+            const leftAt = typeof left.at === "string" ? left.at : "";
+            const rightAt = typeof right.at === "string" ? right.at : "";
+            const leftCreatedAt =
+              typeof left.createdAt === "string" ? left.createdAt : "";
+            const rightCreatedAt =
+              typeof right.createdAt === "string" ? right.createdAt : "";
+            const leftId = typeof left.id === "string" ? left.id : "";
+            const rightId = typeof right.id === "string" ? right.id : "";
+
+            return (
+              rightAt.localeCompare(leftAt) ||
+              rightCreatedAt.localeCompare(leftCreatedAt) ||
+              rightId.localeCompare(leftId)
+            );
+          });
+
+        if (query.limit === undefined) {
+          return rows;
+        }
+
+        return rows.slice(0, query.limit);
       }),
     appendAuditTransition: (transition) =>
       Effect.sync(() => {

@@ -249,4 +249,61 @@ describe("job-service", () => {
     expect(limitedHistory[0]?.outcome).toBe("succeeded");
     expect(beforeFiltered.map((entry) => entry.outcome)).toEqual(["failed"]);
   });
+
+  test("listJobRunHistory uses repository-level filtered history query when available", async () => {
+    const baseRepository = makeInMemoryCoreRepository();
+    const job = await Effect.runPromise(
+      createJob({
+        id: "job-history-repo-query",
+        name: "History from repository query",
+      }),
+    );
+    await Effect.runPromise(baseRepository.saveEntity("job", job.id, job));
+
+    let listEntitiesCalls = 0;
+    const repository = {
+      ...baseRepository,
+      listEntities: <T>(entityType: string) => {
+        if (entityType === "job_run_history") {
+          listEntitiesCalls += 1;
+        }
+        return baseRepository.listEntities<T>(entityType);
+      },
+      listJobRunHistory: () =>
+        Effect.succeed([
+          {
+            id: "repo-history-1",
+            jobId: "job-history-repo-query",
+            outcome: "succeeded",
+            diagnostics: "queried in repository",
+            retryCount: 0,
+            actorId: "system-1",
+            actorKind: "system",
+            at: "2026-02-23T20:01:00.000Z",
+            createdAt: "2026-02-23T20:01:00.000Z",
+          },
+        ]),
+    };
+
+    const history = await Effect.runPromise(
+      listJobRunHistory(repository, {
+        jobId: "job-history-repo-query",
+        limit: 10,
+      }),
+    );
+
+    expect(history).toEqual([
+      {
+        id: "repo-history-1",
+        jobId: "job-history-repo-query",
+        outcome: "succeeded",
+        diagnostics: "queried in repository",
+        retryCount: 0,
+        actor: { id: "system-1", kind: "system" },
+        at: "2026-02-23T20:01:00.000Z",
+        createdAt: "2026-02-23T20:01:00.000Z",
+      },
+    ]);
+    expect(listEntitiesCalls).toBe(0);
+  });
 });
