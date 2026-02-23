@@ -1,21 +1,21 @@
-# Dependencies
+# dependencies
 node_modules/
 
-# Bun
-bun.lockb
-
-# Build artifacts
-dist/
-out/
-coverage/
-
-# Super Ralph / Smithers runtime artifacts
+# generated runtime artifacts
+PROGRESS.md
+smithers.db
 .smithers/
 .super-ralph/
-automation/super-ralph/.state/
-automation/super-ralph/.env
-PROGRESS.md
-docs/test-suite-findings.md
+.automation/
 
-# Local reference clones are large and read-only
-references/
+# logs
+*.log
+
+# OS/editor
+.DS_Store
+.vscode/
+
+# local secrets
+.env
+.env.*
+!.env.example

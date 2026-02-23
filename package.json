@@ -3,17 +3,10 @@
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.7",
-  "workspaces": [
-    "automation/super-ralph"
-  ],
   "scripts": {
-    "bootstrap:refs": "bash scripts/bootstrap-references.sh",
-    "automation:run": "cd automation/super-ralph && bun run run",
-    "automation:resume": "cd automation/super-ralph && bun run resume",
-    "automation:monitor": "cd automation/super-ralph && bun run monitor",
-    "automation:typecheck": "cd automation/super-ralph && bun run typecheck",
-    "typecheck:project": "echo 'typecheck not configured yet'",
-    "test:project": "echo 'tests not configured yet'",
-    "validate:project": "bun run typecheck:project && bun run test:project"
+    "super-ralph": "super-ralph"
+  },
+  "dependencies": {
+    "super-ralph": "github:evmts/super-ralph"
   }
 }
