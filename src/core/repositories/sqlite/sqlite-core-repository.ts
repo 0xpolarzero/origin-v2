@@ -17,6 +17,7 @@ export interface SqliteCoreRepositoryOptions {
   databasePath: string;
   runMigrationsOnInit?: boolean;
   migrations?: ReadonlyArray<SqliteMigration>;
+  openDatabase?: (databasePath: string) => Database;
 }
 
 interface TableConfig {
@@ -345,13 +346,30 @@ export const makeSqliteCoreRepository = (
   SqliteCoreRepositoryError
 > =>
   Effect.gen(function* () {
+    const openDatabase =
+      options.openDatabase ??
+      ((databasePath: string): Database => new Database(databasePath));
+
     const db = yield* Effect.try({
-      try: () => new Database(options.databasePath),
+      try: () => openDatabase(options.databasePath),
       catch: (cause) =>
         new SqliteCoreRepositoryError({
           message: `failed to open sqlite database: ${toErrorMessage(cause)}`,
         }),
     });
+
+    const failAfterInitClose = (
+      initError: SqliteCoreRepositoryError,
+    ): Effect.Effect<never, SqliteCoreRepositoryError> =>
+      Effect.try({
+        try: () => {
+          db.close();
+        },
+        catch: (closeCause) =>
+          new SqliteCoreRepositoryError({
+            message: `${initError.message}; failed to close sqlite database after initialization failure: ${toErrorMessage(closeCause)}`,
+          }),
+      }).pipe(Effect.flatMap(() => Effect.fail(initError)));
 
     const shouldRunMigrations = options.runMigrationsOnInit ?? true;
     const migrations = options.migrations ?? CORE_DB_MIGRATIONS;
@@ -364,6 +382,7 @@ export const makeSqliteCoreRepository = (
               message: `failed to run sqlite migrations: ${error.message}`,
             }),
         ),
+        Effect.catchAll(failAfterInitClose),
       );
     }
 

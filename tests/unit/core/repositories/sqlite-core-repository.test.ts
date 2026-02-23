@@ -19,6 +19,32 @@ const makeTempDatabasePath = (): { tempDir: string; databasePath: string } => {
 };
 
 describe("makeSqliteCoreRepository", () => {
+  test("closes the opened database handle when initialization fails during migrations", async () => {
+    let closed = false;
+    const fakeDb = {
+      exec: () => {
+        throw new Error("boom during migration");
+      },
+      close: () => {
+        closed = true;
+      },
+      query: () => {
+        throw new Error("query should not be called in this test");
+      },
+    } as unknown as Database;
+
+    await expect(
+      Effect.runPromise(
+        makeSqliteCoreRepository({
+          databasePath: ":memory:",
+          openDatabase: () => fakeDb,
+        }),
+      ),
+    ).rejects.toThrow("failed to run sqlite migrations");
+
+    expect(closed).toBe(true);
+  });
+
   test("saveEntity persists row to mapped table for a core entity", async () => {
     const { tempDir, databasePath } = makeTempDatabasePath();
 
