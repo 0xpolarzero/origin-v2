@@ -8,7 +8,11 @@ import {
 } from "./common";
 
 export type EntrySource = "manual" | "import" | "api";
-export type EntryStatus = "captured" | "accepted_as_task";
+export type EntryStatus =
+  | "captured"
+  | "suggested"
+  | "rejected"
+  | "accepted_as_task";
 
 export interface Entry {
   id: string;
@@ -18,6 +22,9 @@ export interface Entry {
   capturedAt: string;
   createdAt: string;
   updatedAt: string;
+  suggestedTaskTitle?: string;
+  suggestionUpdatedAt?: string;
+  rejectionReason?: string;
   acceptedTaskId?: string;
 }
 

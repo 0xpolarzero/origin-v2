@@ -4,6 +4,9 @@ import { Effect } from "effect";
 import {
   acceptEntryAsTask,
   captureEntry,
+  editEntrySuggestion,
+  rejectEntrySuggestion,
+  suggestEntryAsTask,
 } from "../../../../src/core/services/entry-service";
 import { makeInMemoryCoreRepository } from "../../../../src/core/repositories/in-memory-core-repository";
 
@@ -81,5 +84,96 @@ describe("entry-service", () => {
     expect(entryAuditTrail[1]?.toState).toBe("accepted_as_task");
     expect(taskAuditTrail).toHaveLength(1);
     expect(taskAuditTrail[0]?.metadata?.sourceEntryId).toBe("entry-2");
+  });
+
+  test("supports AI suggestion creation, edit, and rejection for captured entries", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    await Effect.runPromise(
+      captureEntry(repository, {
+        entryId: "entry-3",
+        content: "Need travel booking",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T10:00:00.000Z"),
+      }),
+    );
+
+    const suggested = await Effect.runPromise(
+      suggestEntryAsTask(repository, {
+        entryId: "entry-3",
+        suggestedTitle: "Book travel itinerary",
+        actor: { id: "ai-1", kind: "ai" },
+        at: new Date("2026-02-23T10:01:00.000Z"),
+      }),
+    );
+    const edited = await Effect.runPromise(
+      editEntrySuggestion(repository, {
+        entryId: "entry-3",
+        suggestedTitle: "Book conference travel itinerary",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T10:02:00.000Z"),
+      }),
+    );
+    const rejected = await Effect.runPromise(
+      rejectEntrySuggestion(repository, {
+        entryId: "entry-3",
+        reason: "Not needed anymore",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T10:03:00.000Z"),
+      }),
+    );
+
+    const persistedEntry = await Effect.runPromise(
+      repository.getEntity<{
+        status: string;
+        suggestedTaskTitle?: string;
+        rejectionReason?: string;
+      }>("entry", "entry-3"),
+    );
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({ entityType: "entry", entityId: "entry-3" }),
+    );
+
+    expect(suggested.status).toBe("suggested");
+    expect(edited.suggestedTaskTitle).toBe("Book conference travel itinerary");
+    expect(rejected.status).toBe("rejected");
+    expect(persistedEntry?.rejectionReason).toBe("Not needed anymore");
+    expect(auditTrail[auditTrail.length - 1]?.toState).toBe("rejected");
+  });
+
+  test("acceptEntryAsTask uses edited suggestion title when explicit title is omitted", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    await Effect.runPromise(
+      captureEntry(repository, {
+        entryId: "entry-4",
+        content: "Plan customer interview",
+        actor: { id: "user-1", kind: "user" },
+      }),
+    );
+    await Effect.runPromise(
+      suggestEntryAsTask(repository, {
+        entryId: "entry-4",
+        suggestedTitle: "Plan interview with top customer",
+        actor: { id: "ai-1", kind: "ai" },
+      }),
+    );
+    await Effect.runPromise(
+      editEntrySuggestion(repository, {
+        entryId: "entry-4",
+        suggestedTitle: "Plan interview with enterprise customer",
+        actor: { id: "user-1", kind: "user" },
+      }),
+    );
+
+    const task = await Effect.runPromise(
+      acceptEntryAsTask(repository, {
+        entryId: "entry-4",
+        taskId: "task-4",
+        actor: { id: "user-1", kind: "user" },
+      }),
+    );
+
+    expect(task.title).toBe("Plan interview with enterprise customer");
   });
 });

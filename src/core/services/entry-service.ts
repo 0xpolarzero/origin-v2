@@ -25,6 +25,43 @@ export interface AcceptEntryAsTaskInput {
   at?: Date;
 }
 
+export interface SuggestEntryAsTaskInput {
+  entryId: string;
+  suggestedTitle: string;
+  actor: ActorRef;
+  at?: Date;
+}
+
+export interface EditEntrySuggestionInput {
+  entryId: string;
+  suggestedTitle: string;
+  actor: ActorRef;
+  at?: Date;
+}
+
+export interface RejectEntrySuggestionInput {
+  entryId: string;
+  reason?: string;
+  actor: ActorRef;
+  at?: Date;
+}
+
+const loadEntry = (
+  repository: CoreRepository,
+  entryId: string,
+): Effect.Effect<Entry, EntryServiceError> =>
+  Effect.gen(function* () {
+    const entry = yield* repository.getEntity<Entry>("entry", entryId);
+    if (!entry) {
+      return yield* Effect.fail(
+        new EntryServiceError({
+          message: `entry ${entryId} was not found`,
+        }),
+      );
+    }
+    return entry;
+  });
+
 export const captureEntry = (
   repository: CoreRepository,
   input: CaptureEntryInput,
@@ -74,19 +111,11 @@ export const acceptEntryAsTask = (
   input: AcceptEntryAsTaskInput,
 ): Effect.Effect<Task, EntryServiceError> =>
   Effect.gen(function* () {
-    const entry = yield* repository.getEntity<Entry>("entry", input.entryId);
-
-    if (!entry) {
-      return yield* Effect.fail(
-        new EntryServiceError({
-          message: `entry ${input.entryId} was not found`,
-        }),
-      );
-    }
+    const entry = yield* loadEntry(repository, input.entryId);
 
     const task = yield* createTask({
       id: input.taskId,
-      title: input.title ?? entry.content,
+      title: input.title ?? entry.suggestedTaskTitle ?? entry.content,
       sourceEntryId: entry.id,
       createdAt: input.at,
       updatedAt: input.at,
@@ -104,6 +133,7 @@ export const acceptEntryAsTask = (
       ...entry,
       status: "accepted_as_task",
       acceptedTaskId: task.id,
+      rejectionReason: undefined,
       updatedAt: at,
     };
 
@@ -154,4 +184,134 @@ export const acceptEntryAsTask = (
     yield* repository.appendAuditTransition(taskTransition);
 
     return task;
+  });
+
+export const suggestEntryAsTask = (
+  repository: CoreRepository,
+  input: SuggestEntryAsTaskInput,
+): Effect.Effect<Entry, EntryServiceError> =>
+  Effect.gen(function* () {
+    const entry = yield* loadEntry(repository, input.entryId);
+    const at = input.at ?? new Date();
+    const atIso = at.toISOString();
+
+    const updatedEntry: Entry = {
+      ...entry,
+      status: "suggested",
+      suggestedTaskTitle: input.suggestedTitle,
+      suggestionUpdatedAt: atIso,
+      rejectionReason: undefined,
+      updatedAt: atIso,
+    };
+
+    yield* repository.saveEntity("entry", updatedEntry.id, updatedEntry);
+
+    const transition = yield* createAuditTransition({
+      entityType: "entry",
+      entityId: updatedEntry.id,
+      fromState: entry.status,
+      toState: updatedEntry.status,
+      actor: input.actor,
+      reason: "AI suggested entry conversion to task",
+      at,
+      metadata: {
+        suggestedTitle: input.suggestedTitle,
+      },
+    }).pipe(
+      Effect.mapError(
+        (error) =>
+          new EntryServiceError({
+            message: `failed to write entry suggestion audit transition: ${error.message}`,
+          }),
+      ),
+    );
+
+    yield* repository.appendAuditTransition(transition);
+    return updatedEntry;
+  });
+
+export const editEntrySuggestion = (
+  repository: CoreRepository,
+  input: EditEntrySuggestionInput,
+): Effect.Effect<Entry, EntryServiceError> =>
+  Effect.gen(function* () {
+    const entry = yield* loadEntry(repository, input.entryId);
+    const at = input.at ?? new Date();
+    const atIso = at.toISOString();
+
+    const fromState = entry.status;
+    const updatedEntry: Entry = {
+      ...entry,
+      status: "suggested",
+      suggestedTaskTitle: input.suggestedTitle,
+      suggestionUpdatedAt: atIso,
+      rejectionReason: undefined,
+      updatedAt: atIso,
+    };
+
+    yield* repository.saveEntity("entry", updatedEntry.id, updatedEntry);
+
+    const transition = yield* createAuditTransition({
+      entityType: "entry",
+      entityId: updatedEntry.id,
+      fromState,
+      toState: updatedEntry.status,
+      actor: input.actor,
+      reason: "Entry suggestion edited",
+      at,
+      metadata: {
+        suggestedTitle: input.suggestedTitle,
+      },
+    }).pipe(
+      Effect.mapError(
+        (error) =>
+          new EntryServiceError({
+            message: `failed to write entry suggestion edit audit transition: ${error.message}`,
+          }),
+      ),
+    );
+
+    yield* repository.appendAuditTransition(transition);
+    return updatedEntry;
+  });
+
+export const rejectEntrySuggestion = (
+  repository: CoreRepository,
+  input: RejectEntrySuggestionInput,
+): Effect.Effect<Entry, EntryServiceError> =>
+  Effect.gen(function* () {
+    const entry = yield* loadEntry(repository, input.entryId);
+    const at = input.at ?? new Date();
+    const atIso = at.toISOString();
+
+    const updatedEntry: Entry = {
+      ...entry,
+      status: "rejected",
+      rejectionReason: input.reason,
+      updatedAt: atIso,
+    };
+
+    yield* repository.saveEntity("entry", updatedEntry.id, updatedEntry);
+
+    const transition = yield* createAuditTransition({
+      entityType: "entry",
+      entityId: updatedEntry.id,
+      fromState: entry.status,
+      toState: updatedEntry.status,
+      actor: input.actor,
+      reason: input.reason
+        ? `Entry suggestion rejected: ${input.reason}`
+        : "Entry suggestion rejected",
+      at,
+    }).pipe(
+      Effect.mapError(
+        (error) =>
+          new EntryServiceError({
+            message: `failed to write entry rejection audit transition: ${error.message}`,
+          }),
+      ),
+    );
+
+    yield* repository.appendAuditTransition(transition);
+    return updatedEntry;
   });

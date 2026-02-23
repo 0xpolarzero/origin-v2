@@ -22,6 +22,12 @@ import {
   AcceptEntryAsTaskInput,
   captureEntry,
   CaptureEntryInput,
+  editEntrySuggestion,
+  EditEntrySuggestionInput,
+  rejectEntrySuggestion,
+  RejectEntrySuggestionInput,
+  suggestEntryAsTask,
+  SuggestEntryAsTaskInput,
 } from "../services/entry-service";
 import { requestEventSync } from "../services/event-service";
 import {
@@ -62,6 +68,15 @@ export interface CorePlatform {
   acceptEntryAsTask: (
     input: AcceptEntryAsTaskInput,
   ) => ReturnType<typeof acceptEntryAsTask>;
+  suggestEntryAsTask: (
+    input: SuggestEntryAsTaskInput,
+  ) => ReturnType<typeof suggestEntryAsTask>;
+  editEntrySuggestion: (
+    input: EditEntrySuggestionInput,
+  ) => ReturnType<typeof editEntrySuggestion>;
+  rejectEntrySuggestion: (
+    input: RejectEntrySuggestionInput,
+  ) => ReturnType<typeof rejectEntrySuggestion>;
   completeTask: (
     taskId: string,
     actor: ActorRef,
@@ -207,6 +222,10 @@ export const buildCorePlatform = (
     return {
       captureEntry: (input) => captureEntry(repository, input),
       acceptEntryAsTask: (input) => acceptEntryAsTask(repository, input),
+      suggestEntryAsTask: (input) => suggestEntryAsTask(repository, input),
+      editEntrySuggestion: (input) => editEntrySuggestion(repository, input),
+      rejectEntrySuggestion: (input) =>
+        rejectEntrySuggestion(repository, input),
       completeTask: (taskId, actor, at) =>
         completeTask(repository, taskId, actor, at),
       deferTask: (taskId, until, actor, at) =>
