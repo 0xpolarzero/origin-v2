@@ -111,6 +111,15 @@ describe("signal-service", () => {
       await Effect.runPromise(
         repository.saveEntity("signal", signal.id, signal),
       );
+      await Effect.runPromise(
+        triageSignal(
+          repository,
+          signal.id,
+          "ready_for_conversion",
+          { id: "user-2", kind: "user" },
+          new Date("2026-02-23T12:20:00.000Z"),
+        ),
+      );
 
       const converted = await Effect.runPromise(
         convertSignal(repository, {
@@ -153,6 +162,15 @@ describe("signal-service", () => {
     );
 
     await Effect.runPromise(repository.saveEntity("signal", signal.id, signal));
+    await Effect.runPromise(
+      triageSignal(
+        repository,
+        signal.id,
+        "ready_for_conversion",
+        { id: "user-2", kind: "user" },
+        new Date("2026-02-23T12:20:00.000Z"),
+      ),
+    );
 
     const converted = await Effect.runPromise(
       convertSignal(repository, {
@@ -186,6 +204,31 @@ describe("signal-service", () => {
     expect(outboundDraft?.payload).toBe(signal.payload);
     expect(auditTrail[0]?.fromState).toBe("none");
     expect(auditTrail[0]?.toState).toBe("draft");
+  });
+
+  test("convertSignal rejects conversion when signal has not been triaged", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const signal = await Effect.runPromise(
+      createSignal({
+        id: "signal-untriaged",
+        source: "api",
+        payload: "untriaged payload",
+      }),
+    );
+
+    await Effect.runPromise(repository.saveEntity("signal", signal.id, signal));
+
+    await expect(
+      Effect.runPromise(
+        convertSignal(repository, {
+          signalId: signal.id,
+          targetType: "task",
+          targetId: "task-untriaged",
+          actor: { id: "user-2", kind: "user" },
+          at: new Date("2026-02-23T12:30:00.000Z"),
+        }),
+      ),
+    ).rejects.toThrow("must be triaged before conversion");
   });
 
   test("convertSignal fails gracefully on unknown conversion target", async () => {
