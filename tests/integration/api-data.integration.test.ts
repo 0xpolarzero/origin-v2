@@ -260,6 +260,7 @@ describe("API and Data integration scaffold", () => {
     expect(draftAuditTrail.map((transition) => transition.toState)).toEqual([
       "draft",
       "pending_approval",
+      "executing",
       "executed",
     ]);
   });

@@ -296,7 +296,9 @@ describe("approval-service", () => {
       ...repository,
       saveEntity: (entityType, entityId, entity) => {
         if (entityType === "outbound_draft") {
-          return Effect.fail(new Error("outbound draft persistence unavailable"));
+          return Effect.fail(
+            new Error("outbound draft persistence unavailable"),
+          ).pipe(Effect.orDie);
         }
 
         return repository.saveEntity(entityType, entityId, entity);

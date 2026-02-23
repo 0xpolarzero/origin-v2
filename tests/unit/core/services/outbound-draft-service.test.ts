@@ -119,7 +119,9 @@ describe("outbound-draft-service", () => {
     const failingRepository: CoreRepository = {
       ...repository,
       appendAuditTransition: (_transition) =>
-        Effect.fail(new Error("audit persistence unavailable")),
+        Effect.fail(new Error("audit persistence unavailable")).pipe(
+          Effect.orDie,
+        ),
     };
 
     await expect(
@@ -170,7 +172,9 @@ describe("outbound-draft-service", () => {
       ...repository,
       saveEntity: (entityType, entityId, entity) => {
         if (entityType === "notification") {
-          return Effect.fail(new Error("notification persistence unavailable"));
+          return Effect.fail(
+            new Error("notification persistence unavailable"),
+          ).pipe(Effect.orDie);
         }
 
         return repository.saveEntity(entityType, entityId, entity);

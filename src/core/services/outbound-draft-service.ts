@@ -126,6 +126,13 @@ export const requestOutboundDraftExecution = (
         ),
       );
     }).pipe(
+      Effect.catchAllDefect((defect) =>
+        Effect.fail(
+          new OutboundDraftServiceError({
+            message: toErrorMessage(defect),
+          }),
+        ),
+      ),
       Effect.catchAll((error) =>
         Effect.gen(function* () {
           const rollbackErrors: Array<string> = [];

@@ -116,11 +116,12 @@ export const approveOutboundAction = (
 
       yield* repository.appendAuditTransition(transition);
 
-      return {
+      const result: ApprovalResult = {
         approved: true,
         executed: true,
         executionId: execution.executionId,
       };
+      return result;
     }
 
     if (input.actionType === "outbound_draft") {
@@ -311,12 +312,20 @@ export const approveOutboundAction = (
           ),
         );
 
-        return {
+        const result: ApprovalResult = {
           approved: true,
           executed: true,
           executionId,
         };
+        return result;
       }).pipe(
+        Effect.catchAllDefect((defect) =>
+          Effect.fail(
+            new ApprovalServiceError({
+              message: toErrorMessage(defect),
+            }),
+          ),
+        ),
         Effect.catchAll((error) =>
           rollbackDraftToPendingApproval("Outbound draft execution failed").pipe(
             Effect.catchAll((rollbackError) =>
