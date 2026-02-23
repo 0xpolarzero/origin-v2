@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 
-import { SuperRalph } from "../../../node_modules/super-ralph/src/components/SuperRalph";
-import { ralphOutputSchemas } from "../../../node_modules/super-ralph/src/schemas";
+import { SuperRalph } from "super-ralph/components";
+import { ralphOutputSchemas } from "super-ralph";
 
 type RenderOptions = {
   specReviewSeverity?: "none" | "minor" | "major" | "critical";

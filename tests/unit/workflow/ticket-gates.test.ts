@@ -4,7 +4,7 @@ import {
   resolveCategoryTestCommand,
   resolveTicketGateSelection,
   resolveVerifyCommands,
-} from "../../../node_modules/super-ralph/src/components/ticket-gates";
+} from "super-ralph/ticket-gates";
 
 const buildCmds = {
   typecheck: "bun run typecheck",

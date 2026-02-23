@@ -4,7 +4,7 @@ import {
   assertRequiredGateScripts,
   buildGateCommandConfig,
   resolveFocusTestCommands,
-} from "../../../node_modules/super-ralph/src/cli/gate-config";
+} from "super-ralph/gate-config";
 
 describe("gate-config", () => {
   test("buildGateCommandConfig derives deterministic base build/test commands from package scripts", () => {
