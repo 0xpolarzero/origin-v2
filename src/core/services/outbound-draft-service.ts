@@ -10,6 +10,7 @@ export class OutboundDraftServiceError extends Data.TaggedError(
   "OutboundDraftServiceError",
 )<{
   message: string;
+  code?: "conflict" | "not_found" | "invalid_request";
 }> {}
 
 const toErrorMessage = (error: unknown): string =>
@@ -34,6 +35,7 @@ export const requestOutboundDraftExecution = (
       return yield* Effect.fail(
         new OutboundDraftServiceError({
           message: `outbound draft ${draftId} was not found`,
+          code: "not_found",
         }),
       );
     }
@@ -42,6 +44,7 @@ export const requestOutboundDraftExecution = (
       return yield* Effect.fail(
         new OutboundDraftServiceError({
           message: `outbound draft ${draft.id} must be in draft before requesting approval`,
+          code: "conflict",
         }),
       );
     }

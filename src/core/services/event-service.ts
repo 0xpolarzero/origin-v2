@@ -8,6 +8,7 @@ import { CoreRepository } from "../repositories/core-repository";
 
 export class EventServiceError extends Data.TaggedError("EventServiceError")<{
   message: string;
+  code?: "conflict" | "not_found" | "invalid_request";
 }> {}
 
 export const requestEventSync = (
@@ -24,7 +25,19 @@ export const requestEventSync = (
 
     if (!event) {
       return yield* Effect.fail(
-        new EventServiceError({ message: `event ${eventId} was not found` }),
+        new EventServiceError({
+          message: `event ${eventId} was not found`,
+          code: "not_found",
+        }),
+      );
+    }
+
+    if (event.syncState !== "local_only") {
+      return yield* Effect.fail(
+        new EventServiceError({
+          message: `event ${event.id} must be local_only before requesting sync`,
+          code: "conflict",
+        }),
       );
     }
 

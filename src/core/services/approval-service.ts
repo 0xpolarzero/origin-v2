@@ -10,6 +10,7 @@ export class ApprovalServiceError extends Data.TaggedError(
   "ApprovalServiceError",
 )<{
   message: string;
+  code?: "forbidden" | "conflict" | "not_found" | "invalid_request";
 }> {}
 
 const toErrorMessage = (error: unknown): string =>
@@ -40,6 +41,18 @@ export interface ApprovalResult {
   executionId: string;
 }
 
+export const assertApprovalActorAuthorized = (
+  actor: ActorRef,
+): Effect.Effect<void, ApprovalServiceError> =>
+  actor.kind === "user"
+    ? Effect.void
+    : Effect.fail(
+        new ApprovalServiceError({
+          message: "only user actors may approve outbound actions",
+          code: "forbidden",
+        }),
+      );
+
 export const approveOutboundAction = (
   repository: CoreRepository,
   outboundActionPort: OutboundActionPort,
@@ -50,9 +63,12 @@ export const approveOutboundAction = (
       return yield* Effect.fail(
         new ApprovalServiceError({
           message: "outbound actions require explicit approval",
+          code: "invalid_request",
         }),
       );
     }
+
+    yield* assertApprovalActorAuthorized(input.actor);
 
     const at = input.at ?? new Date();
 
@@ -61,6 +77,7 @@ export const approveOutboundAction = (
         return yield* Effect.fail(
           new ApprovalServiceError({
             message: "event_sync action must target entityType=event",
+            code: "invalid_request",
           }),
         );
       }
@@ -71,6 +88,7 @@ export const approveOutboundAction = (
         return yield* Effect.fail(
           new ApprovalServiceError({
             message: `event ${input.entityId} was not found`,
+            code: "not_found",
           }),
         );
       }
@@ -79,6 +97,7 @@ export const approveOutboundAction = (
         return yield* Effect.fail(
           new ApprovalServiceError({
             message: `event ${event.id} must be in pending_approval before sync approval`,
+            code: "conflict",
           }),
         );
       }
@@ -130,6 +149,7 @@ export const approveOutboundAction = (
           new ApprovalServiceError({
             message:
               "outbound_draft action must target entityType=outbound_draft",
+            code: "invalid_request",
           }),
         );
       }
@@ -143,6 +163,7 @@ export const approveOutboundAction = (
         return yield* Effect.fail(
           new ApprovalServiceError({
             message: `outbound draft ${input.entityId} was not found`,
+            code: "not_found",
           }),
         );
       }
@@ -151,6 +172,7 @@ export const approveOutboundAction = (
         return yield* Effect.fail(
           new ApprovalServiceError({
             message: `outbound draft ${draft.id} must be in pending_approval before execution approval`,
+            code: "conflict",
           }),
         );
       }
@@ -259,7 +281,8 @@ export const approveOutboundAction = (
         if (executionId.length === 0) {
           return yield* Effect.fail(
             new ApprovalServiceError({
-              message: "outbound action execution must return non-empty executionId",
+              message:
+                "outbound action execution must return non-empty executionId",
             }),
           );
         }
@@ -327,7 +350,9 @@ export const approveOutboundAction = (
           ),
         ),
         Effect.catchAll((error) =>
-          rollbackDraftToPendingApproval("Outbound draft execution failed").pipe(
+          rollbackDraftToPendingApproval(
+            "Outbound draft execution failed",
+          ).pipe(
             Effect.catchAll((rollbackError) =>
               Effect.fail(
                 new ApprovalServiceError({
@@ -344,6 +369,7 @@ export const approveOutboundAction = (
     return yield* Effect.fail(
       new ApprovalServiceError({
         message: `unsupported outbound action type: ${input.actionType}`,
+        code: "invalid_request",
       }),
     );
   });
