@@ -150,6 +150,96 @@ describe("database-backed core platform", () => {
     }
   });
 
+  test("database backend persists job_run_history across restart and stays consistent with latest job state", async () => {
+    const { tempDir, databasePath } = createTempPaths();
+
+    try {
+      const platformA = await Effect.runPromise(
+        buildCorePlatform({
+          databasePath,
+        }),
+      );
+
+      await Effect.runPromise(
+        platformA.createJob({
+          jobId: "job-db-history-1",
+          name: "History durability",
+          actor: { id: "system-1", kind: "system" },
+          at: new Date("2026-02-23T14:00:00.000Z"),
+        }),
+      );
+      await Effect.runPromise(
+        platformA.recordJobRun({
+          jobId: "job-db-history-1",
+          outcome: "failed",
+          diagnostics: "First failure",
+          actor: { id: "system-1", kind: "system" },
+          at: new Date("2026-02-23T14:01:00.000Z"),
+        }),
+      );
+      await Effect.runPromise(
+        platformA.retryJob(
+          "job-db-history-1",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T14:02:00.000Z"),
+        ),
+      );
+      await Effect.runPromise(
+        platformA.recordJobRun({
+          jobId: "job-db-history-1",
+          outcome: "succeeded",
+          diagnostics: "Recovered",
+          actor: { id: "system-1", kind: "system" },
+          at: new Date("2026-02-23T14:03:00.000Z"),
+        }),
+      );
+
+      const historyBeforeRestart = await Effect.runPromise(
+        platformA.listJobRunHistory("job-db-history-1"),
+      );
+      expect(historyBeforeRestart.map((entry) => entry.outcome)).toEqual([
+        "succeeded",
+        "failed",
+      ]);
+
+      if (!platformA.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platformA.close());
+
+      const platformB = await Effect.runPromise(
+        buildCorePlatform({
+          databasePath,
+        }),
+      );
+
+      const inspection = await Effect.runPromise(
+        platformB.inspectJobRun("job-db-history-1"),
+      );
+      const historyAfterRestart = await Effect.runPromise(
+        platformB.listJobRunHistory("job-db-history-1"),
+      );
+
+      expect(historyAfterRestart).toHaveLength(2);
+      expect(historyAfterRestart.map((entry) => entry.outcome)).toEqual([
+        "succeeded",
+        "failed",
+      ]);
+      expect(inspection.runState).toBe("succeeded");
+      expect(inspection.diagnostics).toBe("Recovered");
+      expect(historyAfterRestart[0]?.retryCount).toBe(1);
+      expect(historyAfterRestart[0]?.outcome).toBe("succeeded");
+      expect(historyAfterRestart[0]?.diagnostics).toBe("Recovered");
+
+      if (!platformB.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platformB.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("database backend converts triaged signals into tasks without entry links", async () => {
     const { tempDir, databasePath } = createTempPaths();
 

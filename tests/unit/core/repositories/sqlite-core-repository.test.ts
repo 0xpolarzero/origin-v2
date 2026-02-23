@@ -83,6 +83,77 @@ describe("makeSqliteCoreRepository", () => {
     }
   });
 
+  test("saveEntity persists and listEntities returns job_run_history rows", async () => {
+    const { tempDir, databasePath } = makeTempDatabasePath();
+
+    try {
+      const repository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+
+      await Effect.runPromise(
+        repository.saveEntity("job", "job-history-sqlite-1", {
+          id: "job-history-sqlite-1",
+          name: "History job",
+          runState: "idle",
+          retryCount: 0,
+          createdAt: "2026-02-23T00:00:00.000Z",
+          updatedAt: "2026-02-23T00:00:00.000Z",
+        }),
+      );
+      await Effect.runPromise(
+        repository.saveEntity("job_run_history", "job-run-history-sqlite-1", {
+          id: "job-run-history-sqlite-1",
+          jobId: "job-history-sqlite-1",
+          outcome: "failed",
+          diagnostics: "timeout",
+          retryCount: 0,
+          actorId: "system-1",
+          actorKind: "system",
+          at: "2026-02-23T00:01:00.000Z",
+          createdAt: "2026-02-23T00:01:00.000Z",
+        }),
+      );
+
+      const fetched = await Effect.runPromise(
+        repository.getEntity<{
+          id: string;
+          jobId: string;
+          outcome: string;
+          diagnostics: string;
+          retryCount: number;
+          actorId: string;
+          actorKind: string;
+          at: string;
+          createdAt: string;
+        }>("job_run_history", "job-run-history-sqlite-1"),
+      );
+      const listed = await Effect.runPromise(
+        repository.listEntities<{ id: string; jobId: string }>(
+          "job_run_history",
+        ),
+      );
+
+      expect(fetched).toEqual({
+        id: "job-run-history-sqlite-1",
+        jobId: "job-history-sqlite-1",
+        outcome: "failed",
+        diagnostics: "timeout",
+        retryCount: 0,
+        actorId: "system-1",
+        actorKind: "system",
+        at: "2026-02-23T00:01:00.000Z",
+        createdAt: "2026-02-23T00:01:00.000Z",
+      });
+      expect(listed.map((row) => row.id)).toEqual(["job-run-history-sqlite-1"]);
+      expect(listed[0]?.jobId).toBe("job-history-sqlite-1");
+
+      await Effect.runPromise(repository.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("saveEntity returns deterministic relation-constraint errors", async () => {
     const { tempDir, databasePath } = makeTempDatabasePath();
 

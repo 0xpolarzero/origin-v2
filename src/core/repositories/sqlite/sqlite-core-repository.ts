@@ -148,6 +148,20 @@ const TABLE_CONFIGS: Record<string, TableConfig> = {
       "updated_at",
     ],
   },
+  job_run_history: {
+    tableName: "job_run_history",
+    columns: [
+      "id",
+      "job_id",
+      "outcome",
+      "diagnostics",
+      "retry_count",
+      "actor_id",
+      "actor_kind",
+      "at",
+      "created_at",
+    ],
+  },
   notification: {
     tableName: "notification",
     columns: [
@@ -466,10 +480,9 @@ export const makeSqliteCoreRepository = (
                     LIMIT ? OFFSET ?
                   `,
                 )
-                .all(
-                  LIST_ENTITIES_PAGE_SIZE,
-                  offset,
-                ) as Array<Record<string, unknown>>,
+                .all(LIST_ENTITIES_PAGE_SIZE, offset) as Array<
+                Record<string, unknown>
+              >,
             catch: (cause) =>
               toRepositoryError(`failed to list ${entityType} entities`, cause),
           });

@@ -53,4 +53,9 @@ export const CORE_DB_MIGRATIONS: ReadonlyArray<SqliteMigration> = [
     "Track per-entity audit versions with backfill and monotonic updates",
     "../../database/migrations/004_audit_entity_versions.sql",
   ),
+  defineMigration(
+    "005_job_run_history",
+    "Add explicit job run history table, constraints, indexes, and backfill",
+    "../../database/migrations/005_job_run_history.sql",
+  ),
 ];
