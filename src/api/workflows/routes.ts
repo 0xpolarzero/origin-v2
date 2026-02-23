@@ -5,6 +5,7 @@ import {
   CompleteTaskRequest,
   DeferTaskRequest,
   InspectJobRunRequest,
+  ListJobRunHistoryRequest,
   KeepCheckpointRequest,
   RecoverCheckpointRequest,
   RequestEventSyncRequest,
@@ -38,6 +39,7 @@ export const WORKFLOW_ROUTE_PATHS: Record<WorkflowRouteKey, string> = {
   "job.create": "/api/workflows/job/create",
   "job.recordRun": "/api/workflows/job/record-run",
   "job.inspectRun": "/api/workflows/job/inspect-run",
+  "job.listHistory": "/api/workflows/job/list-history",
   "job.retry": "/api/workflows/job/retry",
   "checkpoint.create": "/api/workflows/checkpoint/create",
   "checkpoint.keep": "/api/workflows/checkpoint/keep",
@@ -52,9 +54,15 @@ interface ActorRefPayload {
 }
 
 type CaptureEntryRequest = Parameters<WorkflowApi["captureEntry"]>[0];
-type SuggestEntryAsTaskRequest = Parameters<WorkflowApi["suggestEntryAsTask"]>[0];
-type EditEntrySuggestionRequest = Parameters<WorkflowApi["editEntrySuggestion"]>[0];
-type RejectEntrySuggestionRequest = Parameters<WorkflowApi["rejectEntrySuggestion"]>[0];
+type SuggestEntryAsTaskRequest = Parameters<
+  WorkflowApi["suggestEntryAsTask"]
+>[0];
+type EditEntrySuggestionRequest = Parameters<
+  WorkflowApi["editEntrySuggestion"]
+>[0];
+type RejectEntrySuggestionRequest = Parameters<
+  WorkflowApi["rejectEntrySuggestion"]
+>[0];
 type AcceptEntryAsTaskRequest = Parameters<WorkflowApi["acceptEntryAsTask"]>[0];
 type IngestSignalRequest = Parameters<WorkflowApi["ingestSignal"]>[0];
 type ConvertSignalRequest = Parameters<WorkflowApi["convertSignal"]>[0];
@@ -83,6 +91,8 @@ const SIGNAL_CONVERSION_TARGETS = [
 ] as const;
 const OUTBOUND_ACTION_TYPES = ["event_sync", "outbound_draft"] as const;
 const JOB_RUN_OUTCOMES = ["succeeded", "failed"] as const;
+const ISO_8601_UTC_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 
 const valid = <Input>(value: Input): RouteValidation<Input> => ({
   ok: true,
@@ -102,6 +112,19 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isDate = (value: unknown): value is Date =>
   value instanceof Date && !Number.isNaN(value.getTime());
+
+const parseDateLike = (value: unknown): Date | undefined => {
+  if (isDate(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string" || !ISO_8601_UTC_PATTERN.test(value)) {
+    return undefined;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+};
 
 const parseRecord = (
   route: WorkflowRouteKey,
@@ -162,9 +185,10 @@ function parseDateField(
       : invalid(route, `${field} is required and must be a Date`);
   }
 
-  return isDate(value)
-    ? valid(value)
-    : invalid(route, `${field} must be a valid Date`);
+  const parsed = parseDateLike(value);
+  return parsed === undefined
+    ? invalid(route, `${field} must be a valid Date`)
+    : valid(parsed);
 }
 
 function parseActorField(
@@ -237,6 +261,38 @@ const parseNumberField = (
     : invalid(route, `${field} must be a finite number`);
 };
 
+function parsePositiveIntegerField(
+  route: WorkflowRouteKey,
+  source: Record<string, unknown>,
+  field: string,
+): RouteValidation<number>;
+function parsePositiveIntegerField(
+  route: WorkflowRouteKey,
+  source: Record<string, unknown>,
+  field: string,
+  optional: true,
+): RouteValidation<number | undefined>;
+function parsePositiveIntegerField(
+  route: WorkflowRouteKey,
+  source: Record<string, unknown>,
+  field: string,
+  optional = false,
+): RouteValidation<number | undefined> {
+  const value = source[field];
+  if (value === undefined) {
+    return optional
+      ? valid(undefined)
+      : invalid(route, `${field} is required and must be a positive integer`);
+  }
+
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    Number.isFinite(value) &&
+    value > 0
+    ? valid(value)
+    : invalid(route, `${field} must be a positive integer`);
+}
+
 const parseLiteralStringField = <T extends string>(
   route: WorkflowRouteKey,
   source: Record<string, unknown>,
@@ -248,7 +304,9 @@ const parseLiteralStringField = <T extends string>(
     return valueResult;
   }
 
-  const matched = allowedValues.find((candidate) => candidate === valueResult.value);
+  const matched = allowedValues.find(
+    (candidate) => candidate === valueResult.value,
+  );
   if (matched === undefined) {
     return invalid(
       route,
@@ -263,7 +321,9 @@ const parseEntityReferencesField = (
   route: WorkflowRouteKey,
   source: Record<string, unknown>,
   field: string,
-): RouteValidation<ReadonlyArray<{ entityType: EntityType; entityId: string }>> => {
+): RouteValidation<
+  ReadonlyArray<{ entityType: EntityType; entityId: string }>
+> => {
   const value = source[field];
   if (!Array.isArray(value)) {
     return invalid(route, `${field} must be an array`);
@@ -304,7 +364,9 @@ const parseEntityReferencesField = (
   return valid(parsed);
 };
 
-const validateCaptureEntryRequest: RouteValidator<CaptureEntryRequest> = (input) => {
+const validateCaptureEntryRequest: RouteValidator<CaptureEntryRequest> = (
+  input,
+) => {
   const route: WorkflowRouteKey = "capture.entry";
   const sourceResult = parseRecord(route, input);
   if (!sourceResult.ok) {
@@ -339,9 +401,9 @@ const validateCaptureEntryRequest: RouteValidator<CaptureEntryRequest> = (input)
   });
 };
 
-const validateSuggestEntryAsTaskRequest: RouteValidator<SuggestEntryAsTaskRequest> = (
-  input,
-) => {
+const validateSuggestEntryAsTaskRequest: RouteValidator<
+  SuggestEntryAsTaskRequest
+> = (input) => {
   const route: WorkflowRouteKey = "capture.suggest";
   const sourceResult = parseRecord(route, input);
   if (!sourceResult.ok) {
@@ -380,9 +442,9 @@ const validateSuggestEntryAsTaskRequest: RouteValidator<SuggestEntryAsTaskReques
   });
 };
 
-const validateEditEntrySuggestionRequest: RouteValidator<EditEntrySuggestionRequest> = (
-  input,
-) => {
+const validateEditEntrySuggestionRequest: RouteValidator<
+  EditEntrySuggestionRequest
+> = (input) => {
   const route: WorkflowRouteKey = "capture.editSuggestion";
   const sourceResult = parseRecord(route, input);
   if (!sourceResult.ok) {
@@ -421,9 +483,9 @@ const validateEditEntrySuggestionRequest: RouteValidator<EditEntrySuggestionRequ
   });
 };
 
-const validateRejectEntrySuggestionRequest: RouteValidator<RejectEntrySuggestionRequest> = (
-  input,
-) => {
+const validateRejectEntrySuggestionRequest: RouteValidator<
+  RejectEntrySuggestionRequest
+> = (input) => {
   const route: WorkflowRouteKey = "capture.rejectSuggestion";
   const sourceResult = parseRecord(route, input);
   if (!sourceResult.ok) {
@@ -458,9 +520,9 @@ const validateRejectEntrySuggestionRequest: RouteValidator<RejectEntrySuggestion
   });
 };
 
-const validateAcceptEntryAsTaskRequest: RouteValidator<AcceptEntryAsTaskRequest> = (
-  input,
-) => {
+const validateAcceptEntryAsTaskRequest: RouteValidator<
+  AcceptEntryAsTaskRequest
+> = (input) => {
   const route: WorkflowRouteKey = "capture.acceptAsTask";
   const sourceResult = parseRecord(route, input);
   if (!sourceResult.ok) {
@@ -501,14 +563,21 @@ const validateAcceptEntryAsTaskRequest: RouteValidator<AcceptEntryAsTaskRequest>
   });
 };
 
-const validateIngestSignalRequest: RouteValidator<IngestSignalRequest> = (input) => {
+const validateIngestSignalRequest: RouteValidator<IngestSignalRequest> = (
+  input,
+) => {
   const route: WorkflowRouteKey = "signal.ingest";
   const sourceResult = parseRecord(route, input);
   if (!sourceResult.ok) {
     return sourceResult;
   }
 
-  const signalId = parseStringField(route, sourceResult.value, "signalId", true);
+  const signalId = parseStringField(
+    route,
+    sourceResult.value,
+    "signalId",
+    true,
+  );
   if (!signalId.ok) {
     return signalId;
   }
@@ -542,7 +611,9 @@ const validateIngestSignalRequest: RouteValidator<IngestSignalRequest> = (input)
   });
 };
 
-const validateTriageSignalRequest: RouteValidator<TriageSignalRequest> = (input) => {
+const validateTriageSignalRequest: RouteValidator<TriageSignalRequest> = (
+  input,
+) => {
   const route: WorkflowRouteKey = "signal.triage";
   const sourceResult = parseRecord(route, input);
   if (!sourceResult.ok) {
@@ -577,7 +648,9 @@ const validateTriageSignalRequest: RouteValidator<TriageSignalRequest> = (input)
   });
 };
 
-const validateConvertSignalRequest: RouteValidator<ConvertSignalRequest> = (input) => {
+const validateConvertSignalRequest: RouteValidator<ConvertSignalRequest> = (
+  input,
+) => {
   const route: WorkflowRouteKey = "signal.convert";
   const sourceResult = parseRecord(route, input);
   if (!sourceResult.ok) {
@@ -599,7 +672,12 @@ const validateConvertSignalRequest: RouteValidator<ConvertSignalRequest> = (inpu
     return targetType;
   }
 
-  const targetId = parseStringField(route, sourceResult.value, "targetId", true);
+  const targetId = parseStringField(
+    route,
+    sourceResult.value,
+    "targetId",
+    true,
+  );
   if (!targetId.ok) {
     return targetId;
   }
@@ -623,7 +701,9 @@ const validateConvertSignalRequest: RouteValidator<ConvertSignalRequest> = (inpu
   });
 };
 
-const validateCompleteTaskRequest: RouteValidator<CompleteTaskRequest> = (input) => {
+const validateCompleteTaskRequest: RouteValidator<CompleteTaskRequest> = (
+  input,
+) => {
   const route: WorkflowRouteKey = "planning.completeTask";
   const sourceResult = parseRecord(route, input);
   if (!sourceResult.ok) {
@@ -724,9 +804,9 @@ const validateRescheduleTaskRequest: RouteValidator<RescheduleTaskRequest> = (
   });
 };
 
-const validateRequestEventSyncRequest: RouteValidator<RequestEventSyncRequest> = (
-  input,
-) => {
+const validateRequestEventSyncRequest: RouteValidator<
+  RequestEventSyncRequest
+> = (input) => {
   const route: WorkflowRouteKey = "approval.requestEventSync";
   const sourceResult = parseRecord(route, input);
   if (!sourceResult.ok) {
@@ -899,7 +979,11 @@ const validateRecordJobRunRequest: RouteValidator<RecordJobRunRequest> = (
     return outcome;
   }
 
-  const diagnostics = parseStringField(route, sourceResult.value, "diagnostics");
+  const diagnostics = parseStringField(
+    route,
+    sourceResult.value,
+    "diagnostics",
+  );
   if (!diagnostics.ok) {
     return diagnostics;
   }
@@ -939,6 +1023,42 @@ const validateInspectJobRunRequest: RouteValidator<InspectJobRunRequest> = (
 
   return valid({
     jobId: jobId.value,
+  });
+};
+
+const validateListJobRunHistoryRequest: RouteValidator<
+  ListJobRunHistoryRequest
+> = (input) => {
+  const route: WorkflowRouteKey = "job.listHistory";
+  const sourceResult = parseRecord(route, input);
+  if (!sourceResult.ok) {
+    return sourceResult;
+  }
+
+  const jobId = parseStringField(route, sourceResult.value, "jobId");
+  if (!jobId.ok) {
+    return jobId;
+  }
+
+  const limit = parsePositiveIntegerField(
+    route,
+    sourceResult.value,
+    "limit",
+    true,
+  );
+  if (!limit.ok) {
+    return limit;
+  }
+
+  const beforeAt = parseDateField(route, sourceResult.value, "beforeAt", true);
+  if (!beforeAt.ok) {
+    return beforeAt;
+  }
+
+  return valid({
+    jobId: jobId.value,
+    limit: limit.value,
+    beforeAt: beforeAt.value,
   });
 };
 
@@ -1004,7 +1124,11 @@ const validateCreateWorkflowCheckpointRequest: RouteValidator<
     return snapshotEntityRefs;
   }
 
-  const auditCursor = parseNumberField(route, sourceResult.value, "auditCursor");
+  const auditCursor = parseNumberField(
+    route,
+    sourceResult.value,
+    "auditCursor",
+  );
   if (!auditCursor.ok) {
     return auditCursor;
   }
@@ -1048,7 +1172,11 @@ const validateKeepCheckpointRequest: RouteValidator<KeepCheckpointRequest> = (
     return sourceResult;
   }
 
-  const checkpointId = parseStringField(route, sourceResult.value, "checkpointId");
+  const checkpointId = parseStringField(
+    route,
+    sourceResult.value,
+    "checkpointId",
+  );
   if (!checkpointId.ok) {
     return checkpointId;
   }
@@ -1070,16 +1198,20 @@ const validateKeepCheckpointRequest: RouteValidator<KeepCheckpointRequest> = (
   });
 };
 
-const validateRecoverCheckpointRequest: RouteValidator<RecoverCheckpointRequest> = (
-  input,
-) => {
+const validateRecoverCheckpointRequest: RouteValidator<
+  RecoverCheckpointRequest
+> = (input) => {
   const route: WorkflowRouteKey = "checkpoint.recover";
   const sourceResult = parseRecord(route, input);
   if (!sourceResult.ok) {
     return sourceResult;
   }
 
-  const checkpointId = parseStringField(route, sourceResult.value, "checkpointId");
+  const checkpointId = parseStringField(
+    route,
+    sourceResult.value,
+    "checkpointId",
+  );
   if (!checkpointId.ok) {
     return checkpointId;
   }
@@ -1269,7 +1401,11 @@ export const makeWorkflowRoutes = (
     key: "job.create",
     method: "POST",
     path: WORKFLOW_ROUTE_PATHS["job.create"],
-    handle: toRouteHandler("job.create", validateCreateJobRequest, api.createJob),
+    handle: toRouteHandler(
+      "job.create",
+      validateCreateJobRequest,
+      api.createJob,
+    ),
   },
   {
     key: "job.recordRun",
@@ -1289,6 +1425,16 @@ export const makeWorkflowRoutes = (
       "job.inspectRun",
       validateInspectJobRunRequest,
       api.inspectJobRun,
+    ),
+  },
+  {
+    key: "job.listHistory",
+    method: "POST",
+    path: WORKFLOW_ROUTE_PATHS["job.listHistory"],
+    handle: toRouteHandler(
+      "job.listHistory",
+      validateListJobRunHistoryRequest,
+      api.listJobRunHistory,
     ),
   },
   {

@@ -417,7 +417,7 @@ describe("workflow-api integration", () => {
     expect(persistedDraft?.status).toBe("executed");
   });
 
-  test("job run -> inspect -> retry workflow executes through API handlers", async () => {
+  test("job run -> inspect -> retry -> listHistory workflow executes through API handlers", async () => {
     const platform = await Effect.runPromise(buildCorePlatform());
     const api = makeWorkflowApi({ platform });
 
@@ -433,6 +433,7 @@ describe("workflow-api integration", () => {
         outcome: "failed",
         diagnostics: "Webhook timeout",
         actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T17:00:00.000Z"),
       }),
     );
 
@@ -456,6 +457,12 @@ describe("workflow-api integration", () => {
         outcome: "succeeded",
         diagnostics: "Retried successfully",
         actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T17:11:00.000Z"),
+      }),
+    );
+    const history = await Effect.runPromise(
+      api.listJobRunHistory({
+        jobId: "job-api-flow-1",
       }),
     );
 
@@ -465,6 +472,13 @@ describe("workflow-api integration", () => {
 
     expect(inspection.runState).toBe("succeeded");
     expect(inspection.retryCount).toBe(1);
+    expect(history).toHaveLength(2);
+    expect(history.map((entry) => entry.outcome)).toEqual([
+      "succeeded",
+      "failed",
+    ]);
+    expect(history[0]?.retryCount).toBe(1);
+    expect(history[1]?.retryCount).toBe(0);
   });
 
   test("checkpoint create/keep/recover stays auditable and reversible through API handlers", async () => {

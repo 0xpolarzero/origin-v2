@@ -31,6 +31,7 @@ const REQUIRED_ROUTE_KEYS: ReadonlyArray<WorkflowRouteKey> = [
   "job.create",
   "job.recordRun",
   "job.inspectRun",
+  "job.listHistory",
   "job.retry",
   "checkpoint.create",
   "checkpoint.keep",
@@ -139,6 +140,11 @@ const VALID_ROUTE_INPUTS: Record<WorkflowRouteKey, unknown> = {
   "job.inspectRun": {
     jobId: "job-route-1",
   },
+  "job.listHistory": {
+    jobId: "job-route-1",
+    limit: 10,
+    beforeAt: new Date("2026-02-24T00:00:00.000Z"),
+  },
   "job.retry": {
     jobId: "job-route-1",
     actor: ACTOR,
@@ -183,6 +189,7 @@ const makeApiStub = (): WorkflowApi => ({
   createJob: (_input) => Effect.die("unused"),
   recordJobRun: (_input) => Effect.die("unused"),
   inspectJobRun: (_input) => Effect.die("unused"),
+  listJobRunHistory: (_input) => Effect.die("unused"),
   retryJob: (_input) => Effect.die("unused"),
   createWorkflowCheckpoint: (_input) => Effect.die("unused"),
   keepCheckpoint: (_input) => Effect.die("unused"),
@@ -277,6 +284,11 @@ const makeApiSpy = (
       Effect.sync(() => {
         onCall("job.inspectRun", input);
         return "job.inspectRun";
+      }),
+    listJobRunHistory: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("job.listHistory", input);
+        return "job.listHistory";
       }),
     retryJob: (input: unknown) =>
       Effect.sync(() => {
@@ -386,7 +398,7 @@ describe("api/workflows/routes", () => {
       Effect.either(
         deferRoute!.handle({
           taskId: "task-route-1",
-          until: "2026-02-24T10:00:00.000Z",
+          until: "not-a-date",
           actor: ACTOR,
           at: AT,
         }),
@@ -400,6 +412,136 @@ describe("api/workflows/routes", () => {
         route: "planning.deferTask",
       });
       expect(result.left.message).toContain("until");
+    }
+  });
+
+  test("job.listHistory validator requires jobId and enforces optional filters", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const listHistoryRoute = byKey.get("job.listHistory");
+
+    expect(listHistoryRoute).toBeDefined();
+
+    const missingJobId = await Effect.runPromise(
+      Effect.either(listHistoryRoute!.handle({ limit: 5 })),
+    );
+    expect(Either.isLeft(missingJobId)).toBe(true);
+    if (Either.isLeft(missingJobId)) {
+      expect(missingJobId.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "job.listHistory",
+      });
+      expect(missingJobId.left.message).toContain("jobId");
+    }
+
+    const invalidLimit = await Effect.runPromise(
+      Effect.either(
+        listHistoryRoute!.handle({
+          jobId: "job-route-1",
+          limit: 0,
+        }),
+      ),
+    );
+    expect(Either.isLeft(invalidLimit)).toBe(true);
+    if (Either.isLeft(invalidLimit)) {
+      expect(invalidLimit.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "job.listHistory",
+      });
+      expect(invalidLimit.left.message).toContain("limit");
+    }
+
+    const invalidBeforeAt = await Effect.runPromise(
+      Effect.either(
+        listHistoryRoute!.handle({
+          jobId: "job-route-1",
+          beforeAt: "invalid-date",
+        }),
+      ),
+    );
+    expect(Either.isLeft(invalidBeforeAt)).toBe(true);
+    if (Either.isLeft(invalidBeforeAt)) {
+      expect(invalidBeforeAt.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "job.listHistory",
+      });
+      expect(invalidBeforeAt.left.message).toContain("beforeAt");
+    }
+  });
+
+  test("route handlers coerce ISO timestamp strings for workflow payloads", async () => {
+    const calls: Array<{ route: WorkflowRouteKey; input: unknown }> = [];
+    const routes = makeWorkflowRoutes(
+      makeApiSpy((route, input) => {
+        calls.push({ route, input });
+      }),
+    );
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+
+    const dateString = "2026-02-23T10:00:00.000Z";
+
+    const cases: ReadonlyArray<{ key: WorkflowRouteKey; payload: unknown }> = [
+      {
+        key: "capture.entry",
+        payload: {
+          entryId: "entry-route-iso-1",
+          content: "Capture content",
+          actor: ACTOR,
+          at: dateString,
+        },
+      },
+      {
+        key: "signal.triage",
+        payload: {
+          signalId: "signal-route-iso-1",
+          decision: "ready_for_conversion",
+          actor: ACTOR,
+          at: dateString,
+        },
+      },
+      {
+        key: "job.retry",
+        payload: {
+          jobId: "job-route-1",
+          actor: ACTOR,
+          at: dateString,
+        },
+      },
+      {
+        key: "checkpoint.recover",
+        payload: {
+          checkpointId: "checkpoint-route-1",
+          actor: ACTOR,
+          at: dateString,
+        },
+      },
+      {
+        key: "job.listHistory",
+        payload: {
+          jobId: "job-route-1",
+          beforeAt: dateString,
+          limit: 5,
+        },
+      },
+    ];
+
+    for (const entry of cases) {
+      const route = byKey.get(entry.key);
+      expect(route).toBeDefined();
+      await Effect.runPromise(route!.handle(entry.payload));
+    }
+
+    const callByRoute = new Map(calls.map((call) => [call.route, call]));
+    for (const entry of cases) {
+      const call = callByRoute.get(entry.key);
+      expect(call).toBeDefined();
+      const payload = call!.input as { at?: unknown; beforeAt?: unknown };
+      if ("at" in (entry.payload as Record<string, unknown>)) {
+        expect(payload.at).toBeInstanceOf(Date);
+      }
+      if ("beforeAt" in (entry.payload as Record<string, unknown>)) {
+        expect(payload.beforeAt).toBeInstanceOf(Date);
+      }
     }
   });
 });

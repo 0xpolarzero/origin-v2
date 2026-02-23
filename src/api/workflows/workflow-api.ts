@@ -5,6 +5,7 @@ import {
   CompleteTaskRequest,
   DeferTaskRequest,
   InspectJobRunRequest,
+  ListJobRunHistoryRequest,
   KeepCheckpointRequest,
   RecoverCheckpointRequest,
   RequestEventSyncRequest,
@@ -116,6 +117,14 @@ export const makeWorkflowApi = (
     inspectJobRun: wrapHandler(
       "job.inspectRun",
       (input: InspectJobRunRequest) => platform.inspectJobRun(input.jobId),
+    ),
+    listJobRunHistory: wrapHandler(
+      "job.listHistory",
+      (input: ListJobRunHistoryRequest) =>
+        platform.listJobRunHistory(input.jobId, {
+          limit: input.limit,
+          beforeAt: input.beforeAt,
+        }),
     ),
     retryJob: wrapHandler("job.retry", (input: RetryJobRequest) =>
       platform.retryJob(input.jobId, input.actor, input.at),

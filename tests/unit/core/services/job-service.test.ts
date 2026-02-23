@@ -5,6 +5,7 @@ import { createJob } from "../../../../src/core/domain/job";
 import { makeInMemoryCoreRepository } from "../../../../src/core/repositories/in-memory-core-repository";
 import {
   inspectJobRun,
+  listJobRunHistory,
   recordJobRun,
   retryJobRun,
 } from "../../../../src/core/services/job-service";
@@ -44,6 +45,76 @@ describe("job-service", () => {
     expect(failed.lastFailureReason).toBe("Timeout while fetching signals");
     expect(succeeded.runState).toBe("succeeded");
     expect(succeeded.diagnostics).toBe("All checks passed");
+  });
+
+  test("recordJobRun appends one job_run_history row per run with diagnostics and retry snapshot", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const job = await Effect.runPromise(
+      createJob({
+        id: "job-history-1",
+        name: "History audit",
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("job", job.id, job));
+
+    await Effect.runPromise(
+      recordJobRun(repository, {
+        jobId: "job-history-1",
+        outcome: "failed",
+        diagnostics: "First failure",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T15:00:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      retryJobRun(
+        repository,
+        "job-history-1",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T15:01:00.000Z"),
+      ),
+    );
+
+    await Effect.runPromise(
+      recordJobRun(repository, {
+        jobId: "job-history-1",
+        outcome: "succeeded",
+        diagnostics: "Recovered",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T15:02:00.000Z"),
+      }),
+    );
+
+    const history = await Effect.runPromise(
+      repository.listEntities<{
+        id: string;
+        jobId: string;
+        outcome: "succeeded" | "failed";
+        diagnostics: string;
+        retryCount: number;
+        actor: { id: string; kind: "user" | "system" | "ai" };
+        at: string;
+        createdAt: string;
+      }>("job_run_history"),
+    );
+
+    expect(history).toHaveLength(2);
+    expect(history.map((entry) => entry.outcome)).toEqual([
+      "failed",
+      "succeeded",
+    ]);
+    expect(history.map((entry) => entry.diagnostics)).toEqual([
+      "First failure",
+      "Recovered",
+    ]);
+    expect(history.map((entry) => entry.retryCount)).toEqual([0, 1]);
+    expect(history.map((entry) => entry.actor.id)).toEqual([
+      "system-1",
+      "system-1",
+    ]);
+    expect(history[0]?.at).toBe("2026-02-23T15:00:00.000Z");
+    expect(history[1]?.at).toBe("2026-02-23T15:02:00.000Z");
   });
 
   test("retryJobRun increments retry count and links prior failure", async () => {
@@ -104,7 +175,9 @@ describe("job-service", () => {
       }),
     );
 
-    const inspected = await Effect.runPromise(inspectJobRun(repository, "job-3"));
+    const inspected = await Effect.runPromise(
+      inspectJobRun(repository, "job-3"),
+    );
     expect(inspected.jobId).toBe("job-3");
     expect(inspected.runState).toBe("failed");
     expect(inspected.lastFailureReason).toBe("Provider timeout");
@@ -116,5 +189,64 @@ describe("job-service", () => {
     await expect(
       Effect.runPromise(inspectJobRun(repository, "job-missing")),
     ).rejects.toThrow("job job-missing was not found");
+  });
+
+  test("listJobRunHistory returns newest-first and honors limit/beforeAt filters", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const job = await Effect.runPromise(
+      createJob({
+        id: "job-history-2",
+        name: "History list",
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("job", job.id, job));
+
+    await Effect.runPromise(
+      recordJobRun(repository, {
+        jobId: "job-history-2",
+        outcome: "failed",
+        diagnostics: "first",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T16:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      retryJobRun(
+        repository,
+        "job-history-2",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T16:01:00.000Z"),
+      ),
+    );
+    await Effect.runPromise(
+      recordJobRun(repository, {
+        jobId: "job-history-2",
+        outcome: "succeeded",
+        diagnostics: "second",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T16:02:00.000Z"),
+      }),
+    );
+
+    const allHistory = await Effect.runPromise(
+      listJobRunHistory(repository, { jobId: "job-history-2" }),
+    );
+    const limitedHistory = await Effect.runPromise(
+      listJobRunHistory(repository, { jobId: "job-history-2", limit: 1 }),
+    );
+    const beforeFiltered = await Effect.runPromise(
+      listJobRunHistory(repository, {
+        jobId: "job-history-2",
+        beforeAt: new Date("2026-02-23T16:01:30.000Z"),
+      }),
+    );
+
+    expect(allHistory.map((entry) => entry.outcome)).toEqual([
+      "succeeded",
+      "failed",
+    ]);
+    expect(limitedHistory).toHaveLength(1);
+    expect(limitedHistory[0]?.outcome).toBe("succeeded");
+    expect(beforeFiltered.map((entry) => entry.outcome)).toEqual(["failed"]);
   });
 });
