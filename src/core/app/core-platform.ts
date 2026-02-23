@@ -1,11 +1,12 @@
 import { Effect } from "effect";
 
 import { createAuditTransition } from "../domain/audit-transition";
-import { ActorRef } from "../domain/common";
+import { ActorRef, ENTITY_TYPES } from "../domain/common";
 import { createJob, CreateJobInput, Job } from "../domain/job";
 import { CoreRepository } from "../repositories/core-repository";
 import { makeFileCoreRepository } from "../repositories/file-core-repository";
 import { makeInMemoryCoreRepository } from "../repositories/in-memory-core-repository";
+import { makeSqliteCoreRepository } from "../repositories/sqlite/sqlite-core-repository";
 import {
   approveOutboundAction,
   ApproveOutboundActionInput,
@@ -55,8 +56,11 @@ import {
 
 export interface BuildCorePlatformOptions {
   repository?: CoreRepository;
+  databasePath?: string;
+  runMigrationsOnInit?: boolean;
   snapshotPath?: string;
   loadSnapshotOnInit?: boolean;
+  importSnapshotIntoDatabase?: boolean;
   outboundActionPort?: OutboundActionPort;
 }
 
@@ -154,7 +158,73 @@ export interface CorePlatform {
   }) => ReturnType<CoreRepository["listAuditTrail"]>;
   persistSnapshot: () => Effect.Effect<void, Error>;
   loadSnapshot: () => Effect.Effect<void, Error>;
+  close?: () => Effect.Effect<void, Error>;
 }
+
+const toNativeError = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isRepositoryEmpty = (
+  repository: CoreRepository,
+): Effect.Effect<boolean> =>
+  Effect.gen(function* () {
+    const auditTrail = yield* repository.listAuditTrail();
+    if (auditTrail.length > 0) {
+      return false;
+    }
+
+    for (const entityType of ENTITY_TYPES) {
+      const entities = yield* repository.listEntities(entityType);
+      if (entities.length > 0) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+const importLegacySnapshotIntoEmptyRepository = (
+  repository: CoreRepository,
+  snapshotPath: string,
+): Effect.Effect<void, Error> =>
+  Effect.gen(function* () {
+    const shouldImport = yield* isRepositoryEmpty(repository);
+    if (!shouldImport) {
+      return;
+    }
+
+    const snapshotRepository = yield* makeFileCoreRepository(snapshotPath).pipe(
+      Effect.mapError((error) => new Error(error.message)),
+    );
+
+    if (snapshotRepository.loadSnapshot) {
+      yield* snapshotRepository.loadSnapshot(snapshotPath);
+    }
+
+    for (const entityType of ENTITY_TYPES) {
+      const entities = yield* snapshotRepository.listEntities(entityType);
+      for (const entity of entities) {
+        if (!isRecord(entity)) {
+          continue;
+        }
+
+        const entityId = entity.id;
+        if (typeof entityId !== "string" || entityId.trim().length === 0) {
+          continue;
+        }
+
+        yield* repository.saveEntity(entityType, entityId, entity);
+      }
+    }
+
+    const auditTrail = yield* snapshotRepository.listAuditTrail();
+    for (const transition of auditTrail) {
+      yield* repository.appendAuditTransition(transition);
+    }
+  });
 
 export const buildCorePlatform = (
   options: BuildCorePlatformOptions = {},
@@ -163,6 +233,13 @@ export const buildCorePlatform = (
     const repository = yield* ((): Effect.Effect<CoreRepository, Error> => {
       if (options.repository) {
         return Effect.succeed(options.repository);
+      }
+
+      if (options.databasePath) {
+        return makeSqliteCoreRepository({
+          databasePath: options.databasePath,
+          runMigrationsOnInit: options.runMigrationsOnInit,
+        }).pipe(Effect.mapError((error) => new Error(error.message)));
       }
 
       if (options.snapshotPath) {
@@ -190,6 +267,13 @@ export const buildCorePlatform = (
       yield* repository
         .loadSnapshot(options.snapshotPath)
         .pipe(Effect.catchAll(() => Effect.void));
+    }
+
+    if (options.importSnapshotIntoDatabase && options.snapshotPath) {
+      yield* importLegacySnapshotIntoEmptyRepository(
+        repository,
+        options.snapshotPath,
+      );
     }
 
     const createJobInPlatform = (
@@ -283,5 +367,8 @@ export const buildCorePlatform = (
 
         return Effect.void;
       },
+      close: repository.close
+        ? () => repository.close!().pipe(Effect.mapError(toNativeError))
+        : undefined,
     };
   });

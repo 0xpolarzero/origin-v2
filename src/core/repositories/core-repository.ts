@@ -31,4 +31,5 @@ export interface CoreRepository {
   ) => Effect.Effect<ReadonlyArray<AuditTransition>>;
   persistSnapshot?: (path: string) => Effect.Effect<void, Error>;
   loadSnapshot?: (path: string) => Effect.Effect<void, Error>;
+  close?: () => Effect.Effect<void, Error>;
 }
