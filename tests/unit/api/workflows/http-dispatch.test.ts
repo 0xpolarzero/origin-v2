@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 
 import { WorkflowApi } from "../../../../src/api/workflows/contracts";
+import { WorkflowRouteDefinition } from "../../../../src/api/workflows/contracts";
 import { makeWorkflowHttpDispatcher } from "../../../../src/api/workflows/http-dispatch";
 import { makeWorkflowRoutes } from "../../../../src/api/workflows/routes";
 
@@ -98,10 +99,17 @@ describe("api/workflows/http-dispatch", () => {
     expect(response.status).toBe(400);
     expect(response.body).toEqual(
       expect.objectContaining({
-        _tag: "WorkflowApiError",
+        error: "workflow request failed",
         route: "capture.entry",
       }),
     );
+    expect(response.body).toMatchObject({
+      message: expect.stringContaining(
+        "invalid request payload for capture.entry",
+      ),
+    });
+    expect(response.body).not.toHaveProperty("cause");
+    expect(response.body).not.toHaveProperty("_tag");
   });
 
   test("returns 200 with handler output for valid JSON payloads", async () => {
@@ -131,5 +139,31 @@ describe("api/workflows/http-dispatch", () => {
     expect(
       (response.body as { input: { at: unknown } }).input.at,
     ).toBeInstanceOf(Date);
+  });
+
+  test("returns sanitized 500 body when a route defects", async () => {
+    const routes: ReadonlyArray<WorkflowRouteDefinition> = [
+      {
+        key: "capture.entry",
+        method: "POST",
+        path: "/api/workflows/capture/entry",
+        handle: () => Effect.die(new Error("sensitive defect details")),
+      },
+    ];
+    const dispatcher = makeWorkflowHttpDispatcher(routes);
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: "/api/workflows/capture/entry",
+        body: {},
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({
+      error: "workflow route dispatch failed",
+      message: "internal server error",
+    });
   });
 });

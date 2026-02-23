@@ -1246,7 +1246,6 @@ const toRouteHandler =
         new WorkflowApiError({
           route,
           message: validationResult.message,
-          cause: input,
         }),
       );
     }

@@ -1,6 +1,7 @@
 import { Either, Effect } from "effect";
 
 import { WorkflowRouteDefinition } from "./contracts";
+import { WorkflowApiError } from "./errors";
 
 export interface WorkflowHttpRequest {
   method: string;
@@ -14,6 +15,18 @@ export interface WorkflowHttpResponse {
 }
 
 const normalizeMethod = (method: string): string => method.trim().toUpperCase();
+
+const toClientErrorBody = (
+  error: WorkflowApiError,
+): {
+  error: string;
+  route: string;
+  message: string;
+} => ({
+  error: "workflow request failed",
+  route: error.route,
+  message: error.message,
+});
 
 export const makeWorkflowHttpDispatcher =
   (routes: ReadonlyArray<WorkflowRouteDefinition>) =>
@@ -49,7 +62,7 @@ export const makeWorkflowHttpDispatcher =
       if (Either.isLeft(result)) {
         return {
           status: 400,
-          body: result.left,
+          body: toClientErrorBody(result.left),
         };
       }
 
@@ -63,7 +76,7 @@ export const makeWorkflowHttpDispatcher =
           status: 500,
           body: {
             error: "workflow route dispatch failed",
-            cause: defect,
+            message: "internal server error",
           },
         }),
       ),
