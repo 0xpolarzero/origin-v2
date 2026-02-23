@@ -8,7 +8,7 @@ import {
 } from "../../../../src/api/workflows/errors";
 
 describe("api/workflows/errors", () => {
-  test("toWorkflowApiError maps forbidden and conflict service errors to status metadata", () => {
+  test("toWorkflowApiError maps forbidden, conflict, and not_found service errors to status metadata", () => {
     const forbidden = toWorkflowApiError(
       "approval.approveOutboundAction",
       new ApprovalServiceError({
@@ -23,6 +23,13 @@ describe("api/workflows/errors", () => {
         code: "conflict",
       }),
     );
+    const notFound = toWorkflowApiError(
+      "approval.requestEventSync",
+      new EventServiceError({
+        message: "event event-404 was not found",
+        code: "not_found",
+      }),
+    );
 
     expect(forbidden).toMatchObject({
       route: "approval.approveOutboundAction",
@@ -35,6 +42,12 @@ describe("api/workflows/errors", () => {
       message: "event event-1 must be local_only before requesting sync",
       code: "conflict",
       statusCode: 409,
+    });
+    expect(notFound).toMatchObject({
+      route: "approval.requestEventSync",
+      message: "event event-404 was not found",
+      code: "not_found",
+      statusCode: 404,
     });
   });
 
