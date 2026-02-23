@@ -1178,7 +1178,7 @@ const validateCreateWorkflowCheckpointRequest: RouteValidator<
     return auditCursor;
   }
 
-  const rollbackTarget = parseStringField(
+  const rollbackTarget = parseNonEmptyStringField(
     route,
     sourceResult.value,
     "rollbackTarget",
