@@ -212,7 +212,10 @@ describe("database-backed core platform", () => {
         }),
       );
       const event = await Effect.runPromise(
-        platform.getEntity<{ syncState: string }>("event", "event-db-approval-1"),
+        platform.getEntity<{ syncState: string }>(
+          "event",
+          "event-db-approval-1",
+        ),
       );
       const eventAudit = await Effect.runPromise(
         platform.listAuditTrail({
@@ -434,6 +437,225 @@ describe("database-backed core platform", () => {
         throw new Error("database-backed platform should expose close()");
       }
       await Effect.runPromise(platformB.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("capture/signal/approval/checkpoint workflows preserve relations and audit-version sync", async () => {
+    const { tempDir, databasePath } = createTempPaths();
+
+    try {
+      const execute = mock(async (_action: unknown) => ({
+        executionId: "exec-sqlite-api-002-1",
+      }));
+      const platform = await Effect.runPromise(
+        buildCorePlatform({
+          databasePath,
+          outboundActionPort: {
+            execute: (action) => Effect.promise(() => execute(action)),
+          },
+        }),
+      );
+
+      await Effect.runPromise(
+        platform.captureEntry({
+          entryId: "entry-api-002-1",
+          content: "Capture for relation regression",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T18:00:00.000Z"),
+        }),
+      );
+      await Effect.runPromise(
+        platform.acceptEntryAsTask({
+          entryId: "entry-api-002-1",
+          taskId: "task-api-002-1",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T18:01:00.000Z"),
+        }),
+      );
+
+      await Effect.runPromise(
+        platform.ingestSignal({
+          signalId: "signal-api-002-1",
+          source: "email",
+          payload: "Draft an outbound update",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T18:02:00.000Z"),
+        }),
+      );
+      await Effect.runPromise(
+        platform.triageSignal(
+          "signal-api-002-1",
+          "requires_outbound",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T18:03:00.000Z"),
+        ),
+      );
+      await Effect.runPromise(
+        platform.convertSignal({
+          signalId: "signal-api-002-1",
+          targetType: "outbound_draft",
+          targetId: "outbound-draft-api-002-1",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T18:04:00.000Z"),
+        }),
+      );
+      await Effect.runPromise(
+        platform.requestOutboundDraftExecution(
+          "outbound-draft-api-002-1",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T18:05:00.000Z"),
+        ),
+      );
+      await Effect.runPromise(
+        platform.approveOutboundAction({
+          actionType: "outbound_draft",
+          entityType: "outbound_draft",
+          entityId: "outbound-draft-api-002-1",
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T18:06:00.000Z"),
+        }),
+      );
+
+      await Effect.runPromise(
+        platform.saveView({
+          viewId: "view-api-002-1",
+          name: "API-002 view",
+          query: "status:planned",
+          filters: { status: "planned" },
+        }),
+      );
+      await Effect.runPromise(
+        platform.createWorkflowCheckpoint({
+          checkpointId: "checkpoint-api-002-1",
+          name: "API-002 checkpoint",
+          snapshotEntityRefs: [
+            { entityType: "view", entityId: "view-api-002-1" },
+          ],
+          auditCursor: 42,
+          rollbackTarget: "audit-42",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T18:07:00.000Z"),
+        }),
+      );
+      await Effect.runPromise(
+        platform.keepCheckpoint(
+          "checkpoint-api-002-1",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T18:08:00.000Z"),
+        ),
+      );
+      await Effect.runPromise(
+        platform.recoverCheckpoint(
+          "checkpoint-api-002-1",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T18:09:00.000Z"),
+        ),
+      );
+
+      const db = new Database(databasePath, { readonly: true });
+
+      const taskLink = db
+        .query("SELECT source_entry_id AS sourceEntryId FROM task WHERE id = ?")
+        .get("task-api-002-1") as { sourceEntryId: string } | null;
+      const entryLink = db
+        .query(
+          "SELECT accepted_task_id AS acceptedTaskId FROM entry WHERE id = ?",
+        )
+        .get("entry-api-002-1") as { acceptedTaskId: string } | null;
+      const signalLink = db
+        .query(
+          `
+            SELECT
+              converted_entity_type AS convertedEntityType,
+              converted_entity_id AS convertedEntityId
+            FROM signal
+            WHERE id = ?
+          `,
+        )
+        .get("signal-api-002-1") as {
+        convertedEntityType: string;
+        convertedEntityId: string;
+      } | null;
+      const draftLink = db
+        .query(
+          "SELECT source_signal_id AS sourceSignalId FROM outbound_draft WHERE id = ?",
+        )
+        .get("outbound-draft-api-002-1") as { sourceSignalId: string } | null;
+      const relatedNotification = db
+        .query(
+          `
+            SELECT id
+            FROM notification
+            WHERE related_entity_type = ? AND related_entity_id = ?
+            LIMIT 1
+          `,
+        )
+        .get("outbound_draft", "outbound-draft-api-002-1");
+
+      const missingVersionRows = db
+        .query(
+          `
+            SELECT COUNT(*) AS count
+            FROM audit_transitions transition
+            LEFT JOIN entity_versions version
+              ON version.entity_type = transition.entity_type
+              AND version.entity_id = transition.entity_id
+            WHERE version.entity_type IS NULL
+          `,
+        )
+        .get() as { count: number };
+      const mismatchedVersionRows = db
+        .query(
+          `
+            SELECT COUNT(*) AS count
+            FROM (
+              SELECT
+                transition.entity_type,
+                transition.entity_id,
+                COUNT(*) AS transition_count,
+                version.latest_version AS latest_version
+              FROM audit_transitions transition
+              JOIN entity_versions version
+                ON version.entity_type = transition.entity_type
+                AND version.entity_id = transition.entity_id
+              GROUP BY transition.entity_type, transition.entity_id
+              HAVING transition_count != latest_version
+            )
+          `,
+        )
+        .get() as { count: number };
+      const checkpointVersion = db
+        .query(
+          `
+            SELECT latest_version AS latestVersion
+            FROM entity_versions
+            WHERE entity_type = 'checkpoint' AND entity_id = 'checkpoint-api-002-1'
+          `,
+        )
+        .get() as { latestVersion: number } | null;
+
+      db.close();
+
+      expect(taskLink?.sourceEntryId).toBe("entry-api-002-1");
+      expect(entryLink?.acceptedTaskId).toBe("task-api-002-1");
+      expect(signalLink).toEqual({
+        convertedEntityType: "outbound_draft",
+        convertedEntityId: "outbound-draft-api-002-1",
+      });
+      expect(draftLink?.sourceSignalId).toBe("signal-api-002-1");
+      expect(relatedNotification).not.toBeNull();
+
+      expect(missingVersionRows.count).toBe(0);
+      expect(mismatchedVersionRows.count).toBe(0);
+      expect(checkpointVersion?.latestVersion).toBe(3);
+
+      if (!platform.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platform.close());
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

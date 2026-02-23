@@ -83,6 +83,34 @@ describe("makeSqliteCoreRepository", () => {
     }
   });
 
+  test("saveEntity returns deterministic relation-constraint errors", async () => {
+    const { tempDir, databasePath } = makeTempDatabasePath();
+
+    try {
+      const repository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+      const task = await Effect.runPromise(
+        createTask({
+          id: "task-invalid-project-ref",
+          title: "Task with missing project",
+          projectId: "project-missing",
+        }),
+      );
+
+      await expect(
+        Effect.runPromise(repository.saveEntity("task", task.id, task)),
+      ).rejects.toThrow("failed to persist task:task-invalid-project-ref");
+      await expect(
+        Effect.runPromise(repository.saveEntity("task", task.id, task)),
+      ).rejects.toThrow("invalid task.project_id");
+
+      await Effect.runPromise(repository.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("withTransaction rolls back writes when a later step fails", async () => {
     const { tempDir, databasePath } = makeTempDatabasePath();
 
@@ -210,7 +238,8 @@ describe("makeSqliteCoreRepository", () => {
       query: (sql: string) => {
         queriedSql.push(sql);
         return {
-          all: (limit: number, offset: number) => rows.slice(offset, offset + limit),
+          all: (limit: number, offset: number) =>
+            rows.slice(offset, offset + limit),
         };
       },
     } as unknown as Database;
@@ -227,8 +256,14 @@ describe("makeSqliteCoreRepository", () => {
       repository.listEntities<{ id: string }>("task"),
     );
 
-    expect(queriedSql.some((sql) => sql.includes("LIMIT ? OFFSET ?"))).toBe(true);
-    expect(listed.map((task) => task.id)).toEqual(["task-a", "task-b", "task-c"]);
+    expect(queriedSql.some((sql) => sql.includes("LIMIT ? OFFSET ?"))).toBe(
+      true,
+    );
+    expect(listed.map((task) => task.id)).toEqual([
+      "task-a",
+      "task-b",
+      "task-c",
+    ]);
 
     await Effect.runPromise(repository.close());
   });
@@ -299,6 +334,13 @@ describe("makeSqliteCoreRepository", () => {
       const repository = await Effect.runPromise(
         makeSqliteCoreRepository({ databasePath }),
       );
+      const task = await Effect.runPromise(
+        createTask({
+          id: "task-append-audit",
+          title: "Task for audit appends",
+        }),
+      );
+      await Effect.runPromise(repository.saveEntity("task", task.id, task));
 
       const first = await Effect.runPromise(
         createAuditTransition({
@@ -379,6 +421,20 @@ describe("makeSqliteCoreRepository", () => {
       const repository = await Effect.runPromise(
         makeSqliteCoreRepository({ databasePath }),
       );
+      const task1 = await Effect.runPromise(
+        createTask({
+          id: "task-1",
+          title: "Task 1",
+        }),
+      );
+      const task2 = await Effect.runPromise(
+        createTask({
+          id: "task-2",
+          title: "Task 2",
+        }),
+      );
+      await Effect.runPromise(repository.saveEntity("task", task1.id, task1));
+      await Effect.runPromise(repository.saveEntity("task", task2.id, task2));
 
       const transitions = await Promise.all([
         Effect.runPromise(

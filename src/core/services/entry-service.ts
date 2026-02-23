@@ -137,8 +137,8 @@ export const acceptEntryAsTask = (
       updatedAt: at,
     };
 
-    yield* repository.saveEntity("entry", updatedEntry.id, updatedEntry);
     yield* repository.saveEntity("task", task.id, task);
+    yield* repository.saveEntity("entry", updatedEntry.id, updatedEntry);
 
     const entryTransition = yield* createAuditTransition({
       entityType: "entry",

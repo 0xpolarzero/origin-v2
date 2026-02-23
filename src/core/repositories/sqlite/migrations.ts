@@ -43,4 +43,14 @@ export const CORE_DB_MIGRATIONS: ReadonlyArray<SqliteMigration> = [
     "Enforce lifecycle constraints and add core lookup indexes",
     "../../database/migrations/002_core_constraints_indexes.sql",
   ),
+  defineMigration(
+    "003_relation_integrity",
+    "Enforce relation integrity and add relation-focused indexes",
+    "../../database/migrations/003_relation_integrity.sql",
+  ),
+  defineMigration(
+    "004_audit_entity_versions",
+    "Track per-entity audit versions with backfill and monotonic updates",
+    "../../database/migrations/004_audit_entity_versions.sql",
+  ),
 ];
