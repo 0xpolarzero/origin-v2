@@ -544,4 +544,31 @@ describe("api/workflows/routes", () => {
       }
     }
   });
+
+  test("route handlers accept ISO timestamp offsets in payload date fields", async () => {
+    const calls: Array<{ route: WorkflowRouteKey; input: unknown }> = [];
+    const routes = makeWorkflowRoutes(
+      makeApiSpy((route, input) => {
+        calls.push({ route, input });
+      }),
+    );
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const listHistoryRoute = byKey.get("job.listHistory");
+
+    expect(listHistoryRoute).toBeDefined();
+
+    await Effect.runPromise(
+      listHistoryRoute!.handle({
+        jobId: "job-route-offset-1",
+        beforeAt: "2026-02-23T10:00:00+01:00",
+        limit: 5,
+      }),
+    );
+
+    const call = calls.find((entry) => entry.route === "job.listHistory");
+    expect(call).toBeDefined();
+    expect((call!.input as { beforeAt: Date }).beforeAt.toISOString()).toBe(
+      "2026-02-23T09:00:00.000Z",
+    );
+  });
 });

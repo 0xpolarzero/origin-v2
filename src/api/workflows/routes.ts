@@ -91,8 +91,8 @@ const SIGNAL_CONVERSION_TARGETS = [
 ] as const;
 const OUTBOUND_ACTION_TYPES = ["event_sync", "outbound_draft"] as const;
 const JOB_RUN_OUTCOMES = ["succeeded", "failed"] as const;
-const ISO_8601_UTC_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+const ISO_8601_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 const valid = <Input>(value: Input): RouteValidation<Input> => ({
   ok: true,
@@ -118,7 +118,7 @@ const parseDateLike = (value: unknown): Date | undefined => {
     return value;
   }
 
-  if (typeof value !== "string" || !ISO_8601_UTC_PATTERN.test(value)) {
+  if (typeof value !== "string" || !ISO_8601_PATTERN.test(value)) {
     return undefined;
   }
 
