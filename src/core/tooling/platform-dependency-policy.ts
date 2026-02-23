@@ -122,12 +122,12 @@ export const findManifestDependencyViolations = (
   const violations: ManifestDependencyViolation[] = [];
 
   for (const spec of specs) {
+    const actualSection = flipSection(spec.expectedSection);
     const inExpectedSection =
       manifest[spec.expectedSection]?.[spec.packageName] ?? null;
+    const inOtherSection = manifest[actualSection]?.[spec.packageName] ?? null;
+
     if (inExpectedSection === null) {
-      const actualSection = flipSection(spec.expectedSection);
-      const inOtherSection =
-        manifest[actualSection]?.[spec.packageName] ?? null;
       if (inOtherSection === null) {
         violations.push({
           packageName: spec.packageName,
@@ -146,6 +146,17 @@ export const findManifestDependencyViolations = (
         });
       }
       continue;
+    }
+
+    if (inOtherSection !== null) {
+      violations.push({
+        packageName: spec.packageName,
+        issue: "wrong-section",
+        expectedSection: spec.expectedSection,
+        expectedVersion: spec.expectedVersion,
+        actualSection,
+        actualVersion: inOtherSection,
+      });
     }
 
     if (!isExactVersionPin(inExpectedSection)) {

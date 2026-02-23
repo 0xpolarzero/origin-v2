@@ -155,4 +155,36 @@ describe("platform-dependency-policy", () => {
       },
     ]);
   });
+
+  test("findManifestDependencyViolations flags mandated packages declared in both sections", () => {
+    const violations = findManifestDependencyViolations(
+      {
+        dependencies: {
+          react: "19.2.4",
+        },
+        devDependencies: {
+          react: "19.2.4",
+        },
+      },
+      [
+        {
+          stackItem: "react",
+          packageName: "react",
+          expectedSection: "dependencies",
+          expectedVersion: "19.2.4",
+        },
+      ],
+    );
+
+    expect(violations).toEqual([
+      {
+        packageName: "react",
+        issue: "wrong-section",
+        expectedSection: "dependencies",
+        expectedVersion: "19.2.4",
+        actualSection: "devDependencies",
+        actualVersion: "19.2.4",
+      },
+    ]);
+  });
 });
