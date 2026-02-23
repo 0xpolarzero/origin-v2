@@ -30,7 +30,7 @@ describe("approval-service", () => {
       ),
     );
 
-    const execute = mock(async () => ({ executionId: "exec-1" }));
+    const execute = mock(async (_action: unknown) => ({ executionId: "exec-1" }));
 
     const outboundPort: OutboundActionPort = {
       execute: (action) => Effect.promise(() => execute(action)),
@@ -73,7 +73,7 @@ describe("approval-service", () => {
 
   test("approveOutboundAction validates event existence before executing outbound sync", async () => {
     const repository = makeInMemoryCoreRepository();
-    const execute = mock(async () => ({ executionId: "exec-2" }));
+    const execute = mock(async (_action: unknown) => ({ executionId: "exec-2" }));
     const outboundPort: OutboundActionPort = {
       execute: (action) => Effect.promise(() => execute(action)),
     };
@@ -105,7 +105,7 @@ describe("approval-service", () => {
     );
     await Effect.runPromise(repository.saveEntity("event", event.id, event));
 
-    const execute = mock(async () => ({ executionId: "exec-3" }));
+    const execute = mock(async (_action: unknown) => ({ executionId: "exec-3" }));
     const outboundPort: OutboundActionPort = {
       execute: (action) => Effect.promise(() => execute(action)),
     };

@@ -29,19 +29,19 @@ export const makeInMemoryCoreRepository = (): CoreRepository => {
       Effect.sync(() => {
         getBucket(entityType).delete(entityId);
       }),
-    getEntity: (entityType, entityId) =>
+    getEntity: <T>(entityType: EntityType | string, entityId: string) =>
       Effect.sync(() => {
         const value = getBucket(entityType).get(entityId);
         if (value === undefined) {
           return undefined;
         }
 
-        return clone(value);
+        return clone(value as T);
       }),
-    listEntities: (entityType) =>
+    listEntities: <T>(entityType: EntityType | string) =>
       Effect.sync(() => {
         const values = Array.from(getBucket(entityType).values());
-        return values.map((value) => clone(value));
+        return values.map((value) => clone(value as T));
       }),
     appendAuditTransition: (transition) =>
       Effect.sync(() => {

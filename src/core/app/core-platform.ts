@@ -137,10 +137,10 @@ export interface CorePlatform {
   getEntity: <T>(
     entityType: string,
     entityId: string,
-  ) => ReturnType<CoreRepository["getEntity<T>"]>;
+  ) => Effect.Effect<T | undefined>;
   listEntities: <T>(
     entityType: string,
-  ) => ReturnType<CoreRepository["listEntities<T>"]>;
+  ) => Effect.Effect<ReadonlyArray<T>>;
   listAuditTrail: (filter?: {
     entityType?: string;
     entityId?: string;
@@ -254,9 +254,10 @@ export const buildCorePlatform = (
         recoverCheckpoint(repository, checkpointId, actor, at),
       saveView: (input) => saveView(repository, input),
       upsertMemory: (input) => upsertMemory(repository, input),
-      getEntity: (entityType, entityId) =>
-        repository.getEntity(entityType, entityId),
-      listEntities: (entityType) => repository.listEntities(entityType),
+      getEntity: <T>(entityType: string, entityId: string) =>
+        repository.getEntity<T>(entityType, entityId),
+      listEntities: <T>(entityType: string) =>
+        repository.listEntities<T>(entityType),
       listAuditTrail: (filter) => repository.listAuditTrail(filter),
       persistSnapshot: () => {
         if (repository.persistSnapshot && options.snapshotPath) {
