@@ -2,8 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { buildGateCommandConfig } from "../../node_modules/super-ralph/src/cli/gate-config";
-import { resolveTicketGateSelection } from "../../node_modules/super-ralph/src/components/ticket-gates";
+import { buildFallbackConfig } from "super-ralph/cli/fallback-config";
+import { buildGateCommandConfig } from "super-ralph/gate-config";
+import { resolveTicketGateSelection } from "super-ralph/ticket-gates";
 
 function readPackageScripts() {
   const packageJsonPath = resolve(process.cwd(), "package.json");
@@ -15,6 +16,25 @@ function readPackageScripts() {
 }
 
 describe("workflow gate policy integration", () => {
+  test("CLI fallback config uses deterministic gate command wiring for this repo", () => {
+    const scripts = readPackageScripts();
+    const fallbackConfig = buildFallbackConfig(
+      process.cwd(),
+      "docs/plans/CORE-REV-004.md",
+      scripts,
+    );
+
+    expect(fallbackConfig.buildCmds.typecheck).toBe("bun run typecheck");
+    expect(fallbackConfig.testCmds.core).toBe("bun run test:core");
+    expect(fallbackConfig.testCmds.api).toBe("bun run test:integration:api");
+    expect(fallbackConfig.testCmds.workflow).toBe(
+      "bun run test:integration:workflow",
+    );
+    expect(fallbackConfig.testCmds.db).toBe("bun run test:integration:db");
+    expect(fallbackConfig.preLandChecks).toEqual(Object.values(fallbackConfig.buildCmds));
+    expect(fallbackConfig.postLandChecks).toEqual(Object.values(fallbackConfig.testCmds));
+  });
+
   test("maps this repo's scripts to runnable gate commands", () => {
     const scripts = readPackageScripts();
     const config = buildGateCommandConfig("bun", scripts);
@@ -24,6 +44,7 @@ describe("workflow gate policy integration", () => {
     expect(config.testCmds.core).toBe("bun run test:core");
     expect(config.testCmds.api).toBe("bun run test:integration:api");
     expect(config.testCmds.workflow).toBe("bun run test:integration:workflow");
+    expect(config.testCmds.db).toBe("bun run test:integration:db");
 
     const allCommands = [
       ...Object.values(config.buildCmds),
@@ -56,6 +77,12 @@ describe("workflow gate policy integration", () => {
       testCmds: config.testCmds,
       preLandChecks: config.preLandChecks,
     });
+    const db = resolveTicketGateSelection({
+      ticketCategory: "db",
+      buildCmds: config.buildCmds,
+      testCmds: config.testCmds,
+      preLandChecks: config.preLandChecks,
+    });
 
     expect(core.verifyCommands).toContain("bun run typecheck");
     expect(core.verifyCommands).toContain("bun run test:core");
@@ -67,6 +94,8 @@ describe("workflow gate policy integration", () => {
     expect(workflow.verifyCommands).toContain(
       "bun run test:integration:workflow",
     );
+    expect(db.verifyCommands).toContain("bun run typecheck");
+    expect(db.verifyCommands).toContain("bun run test:integration:db");
   });
 
   test("falls back to default test command for unknown categories", () => {

@@ -1,119 +1,49 @@
-diff --git a/src/cli/gate-config.ts b/src/cli/gate-config.ts
-new file mode 100644
-index 0000000..23febe5
---- /dev/null
-+++ b/src/cli/gate-config.ts
-@@ -0,0 +1,92 @@
-+export type ScriptRunner = "bun" | "pnpm" | "yarn" | "npm";
-+
-+export type GateCommandConfig = {
-+  buildCmds: Record<string, string>;
-+  testCmds: Record<string, string>;
-+  preLandChecks: string[];
-+  postLandChecks: string[];
-+};
-+
-+const REQUIRED_GATE_SCRIPTS = ["test", "typecheck"] as const;
-+
-+function hasScript(packageScripts: Record<string, string>, scriptName: string): boolean {
-+  const command = packageScripts[scriptName];
-+  return typeof command === "string" && command.trim().length > 0;
-+}
-+
-+function scriptCommand(runner: ScriptRunner, scriptName: string): string {
-+  if (runner === "bun") return `bun run ${scriptName}`;
-+  if (runner === "pnpm") return `pnpm run ${scriptName}`;
-+  if (runner === "yarn") return `yarn ${scriptName}`;
-+  return `npm run ${scriptName}`;
-+}
-+
-+function firstExistingScript(packageScripts: Record<string, string>, candidates: string[]): string | null {
-+  for (const scriptName of candidates) {
-+    if (hasScript(packageScripts, scriptName)) {
-+      return scriptName;
-+    }
-+  }
-+
-+  return null;
-+}
-+
-+export const assertRequiredGateScripts = (packageScripts: Record<string, string>): void => {
-+  const missingScripts = REQUIRED_GATE_SCRIPTS.filter((scriptName) => !hasScript(packageScripts, scriptName));
-+
-+  if (missingScripts.length > 0) {
-+    throw new Error(`Missing required package scripts: ${missingScripts.join(", ")}`);
-+  }
-+};
-+
-+export const resolveFocusTestCommands = (
-+  runner: ScriptRunner,
-+  packageScripts: Record<string, string>,
-+): Record<string, string> => {
-+  const testCmds: Record<string, string> = {
-+    test: scriptCommand(runner, "test"),
-+  };
-+
-+  const focusScriptCandidates: Record<string, string[]> = {
-+    core: ["test:core", "test:unit:core", "test:integration:core"],
-+    api: ["test:integration:api", "test:api"],
-+    workflow: ["test:integration:workflow", "test:workflow"],
-+    db: ["test:integration:db", "test:db"],
-+  };
-+
-+  for (const [focus, candidates] of Object.entries(focusScriptCandidates)) {
-+    const selectedScript = firstExistingScript(packageScripts, candidates);
-+    if (selectedScript) {
-+      testCmds[focus] = scriptCommand(runner, selectedScript);
-+    }
-+  }
-+
-+  return testCmds;
-+};
-+
-+export const buildGateCommandConfig = (
-+  runner: ScriptRunner,
-+  packageScripts: Record<string, string>,
-+): GateCommandConfig => {
-+  assertRequiredGateScripts(packageScripts);
-+
-+  const buildCmds: Record<string, string> = {
-+    typecheck: scriptCommand(runner, "typecheck"),
-+  };
-+
-+  if (hasScript(packageScripts, "build")) {
-+    buildCmds.build = scriptCommand(runner, "build");
-+  }
-+  if (hasScript(packageScripts, "lint")) {
-+    buildCmds.lint = scriptCommand(runner, "lint");
-+  }
-+
-+  const testCmds = resolveFocusTestCommands(runner, packageScripts);
-+
-+  return {
-+    buildCmds,
-+    testCmds,
-+    preLandChecks: Object.values(buildCmds),
-+    postLandChecks: Object.values(testCmds),
-+  };
-+};
+diff --git a/package.json b/package.json
+index 2368a78..093cbea 100644
+--- a/package.json
++++ b/package.json
+@@ -13,7 +13,11 @@
+     ".": "./src/index.ts",
+     "./selectors": "./src/selectors.ts",
+     "./components": "./src/components/index.ts",
+-    "./cli/clarifications": "./src/cli/clarifications.ts"
++    "./schemas": "./src/schemas.ts",
++    "./gate-config": "./src/cli/gate-config.ts",
++    "./ticket-gates": "./src/components/ticket-gates.ts",
++    "./cli/clarifications": "./src/cli/clarifications.ts",
++    "./cli/fallback-config": "./src/cli/fallback-config.ts"
+   },
+   "files": [
+     "src/",
 diff --git a/src/cli/index.ts b/src/cli/index.ts
 old mode 100644
 new mode 100755
-index 633e857..0eaeac1
+index 633e857..c60186d
 --- a/src/cli/index.ts
 +++ b/src/cli/index.ts
-@@ -21,6 +21,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
- import { basename, dirname, join, resolve } from "node:path";
+@@ -18,9 +18,10 @@
+ 
+ import { existsSync } from "node:fs";
+ import { mkdir, readFile, writeFile } from "node:fs/promises";
+-import { basename, dirname, join, resolve } from "node:path";
++import { dirname, join, resolve } from "node:path";
  import { fileURLToPath } from "node:url";
  import { randomUUID } from "node:crypto";
-+import { buildGateCommandConfig } from "./gate-config";
++import { buildFallbackConfig } from "./fallback-config";
  
  type ParsedArgs = {
    positional: string[];
-@@ -120,13 +121,6 @@ function detectScriptRunner(repoRoot: string): "bun" | "pnpm" | "yarn" | "npm" {
-   return "npm";
+@@ -113,27 +114,6 @@ async function loadPackageScripts(repoRoot: string): Promise<Record<string, stri
+   }
  }
  
+-function detectScriptRunner(repoRoot: string): "bun" | "pnpm" | "yarn" | "npm" {
+-  if (existsSync(join(repoRoot, "bun.lock")) || existsSync(join(repoRoot, "bun.lockb"))) return "bun";
+-  if (existsSync(join(repoRoot, "pnpm-lock.yaml"))) return "pnpm";
+-  if (existsSync(join(repoRoot, "yarn.lock"))) return "yarn";
+-  return "npm";
+-}
+-
 -function scriptCommand(runner: "bun" | "pnpm" | "yarn" | "npm", scriptName: string): string {
 -  if (runner === "bun") return `bun run ${scriptName}`;
 -  if (runner === "pnpm") return `pnpm run ${scriptName}`;
@@ -121,13 +51,22 @@ index 633e857..0eaeac1
 -  return `npm run ${scriptName}`;
 -}
 -
- function slugify(value: string): string {
-   return value
-     .toLowerCase()
-@@ -156,23 +150,9 @@ async function detectAgents(repoRoot: string): Promise<{ claude: boolean; codex:
+-function slugify(value: string): string {
+-  return value
+-    .toLowerCase()
+-    .replace(/[^a-z0-9]+/g, "-")
+-    .replace(/^-+|-+$/g, "") || "project";
+-}
+-
+ async function commandExists(command: string, cwd: string): Promise<boolean> {
+   try {
+     const proc = Bun.spawn(["which", command], { cwd, stdout: "pipe", stderr: "pipe" });
+@@ -154,85 +134,6 @@ async function detectAgents(repoRoot: string): Promise<{ claude: boolean; codex:
+   return { claude, codex, gh };
+ }
  
- function buildFallbackConfig(repoRoot: string, promptSpecPath: string, packageScripts: Record<string, string>) {
-   const runner = detectScriptRunner(repoRoot);
+-function buildFallbackConfig(repoRoot: string, promptSpecPath: string, packageScripts: Record<string, string>) {
+-  const runner = detectScriptRunner(repoRoot);
 -
 -  const buildCmds: Record<string, string> = {};
 -  const testCmds: Record<string, string> = {};
@@ -145,16 +84,17 @@ index 633e857..0eaeac1
 -  if (packageScripts.test) {
 -    testCmds.test = scriptCommand(runner, "test");
 -  }
-+  const gateConfig = buildGateCommandConfig(runner, packageScripts);
-+  const buildCmds: Record<string, string> = { ...gateConfig.buildCmds };
-+  const testCmds: Record<string, string> = { ...gateConfig.testCmds };
- 
-   if (existsSync(join(repoRoot, "go.mod"))) {
-     buildCmds.go = buildCmds.go ?? "go build ./...";
-@@ -184,14 +164,6 @@ function buildFallbackConfig(repoRoot: string, promptSpecPath: string, packageSc
-     testCmds.rust = testCmds.rust ?? "cargo test";
-   }
- 
+-
+-  if (existsSync(join(repoRoot, "go.mod"))) {
+-    buildCmds.go = buildCmds.go ?? "go build ./...";
+-    testCmds.go = testCmds.go ?? "go test ./...";
+-  }
+-
+-  if (existsSync(join(repoRoot, "Cargo.toml"))) {
+-    buildCmds.rust = buildCmds.rust ?? "cargo build";
+-    testCmds.rust = testCmds.rust ?? "cargo test";
+-  }
+-
 -  if (Object.keys(buildCmds).length === 0) {
 -    buildCmds.verify = runner === "bun" ? "bun run typecheck" : "echo \"Add build/typecheck command\"";
 -  }
@@ -163,10 +103,51 @@ index 633e857..0eaeac1
 -    testCmds.tests = runner === "bun" ? "bun test" : "echo \"Add test command\"";
 -  }
 -
-   const specsPathCandidates = [
-     join(repoRoot, "docs/specs/engineering.md"),
-     join(repoRoot, "docs/specs"),
-@@ -360,51 +332,94 @@ const testingAgent = choose("claude", "Run tests and validate behavior changes."
+-  const specsPathCandidates = [
+-    join(repoRoot, "docs/specs/engineering.md"),
+-    join(repoRoot, "docs/specs"),
+-    join(repoRoot, "specs"),
+-    promptSpecPath,
+-  ];
+-
+-  const chosenSpecs = specsPathCandidates.find((candidate) => existsSync(candidate)) ?? promptSpecPath;
+-
+-  const projectName = basename(repoRoot);
+-  const maxConcurrency = Math.min(Math.max(Number(process.env.WORKFLOW_MAX_CONCURRENCY ?? "6") || 6, 1), 32);
+-
+-  return {
+-    projectName,
+-    projectId: slugify(projectName),
+-    focuses: [
+-      { id: "core", name: "Core Platform" },
+-      { id: "api", name: "API and Data" },
+-      { id: "workflow", name: "Workflow and Automation" },
+-    ],
+-    specsPath: chosenSpecs,
+-    referenceFiles: [
+-      promptSpecPath,
+-      existsSync(join(repoRoot, "README.md")) ? "README.md" : "",
+-      existsSync(join(repoRoot, "docs")) ? "docs" : "",
+-    ].filter(Boolean),
+-    buildCmds,
+-    testCmds,
+-    preLandChecks: Object.values(buildCmds),
+-    postLandChecks: Object.values(testCmds),
+-    codeStyle: "Follow existing project conventions and keep changes minimal and test-driven.",
+-    reviewChecklist: [
+-      "Spec compliance",
+-      "Tests cover behavior changes",
+-      "No regression risk in existing flows",
+-      "Error handling and observability",
+-    ],
+-    maxConcurrency,
+-  };
+-}
+-
+ function findSmithersCliPath(repoRoot: string): string | null {
+   const candidates = [
+     join(repoRoot, "node_modules/smithers-orchestrator/src/cli/index.ts"),
+@@ -360,51 +261,94 @@ const testingAgent = choose("claude", "Run tests and validate behavior changes."
  const reviewingAgent = choose("codex", "Review for regressions, spec drift, and correctness.");
  const reportingAgent = choose("claude", "Write concise, accurate ticket status reports.");
  
@@ -395,6 +376,230 @@ index 96d1c69..a2711d3 100644
                                  commitPrefix={`🐛 fix`}
                                  mainBranch={mainBranch}
                                  emojiPrefixes={emojiPrefixes}
+diff --git a/src/schemas.ts b/src/schemas.ts
+index f616890..72bd642 100644
+--- a/src/schemas.ts
++++ b/src/schemas.ts
+@@ -14,9 +14,9 @@ const discoverTicketSchema = z.object({
+   description: z.string(),
+   category: z.string(),
+   priority: z.enum(["critical", "high", "medium", "low"]),
+-  acceptanceCriteria: z.array(z.string()).nullable().optional(),
+-  relevantFiles: z.array(z.string()).nullable().optional(),
+-  referenceFiles: z.array(z.string()).nullable().optional(),
++  acceptanceCriteria: z.array(z.string()).nullable(),
++  relevantFiles: z.array(z.string()).nullable(),
++  referenceFiles: z.array(z.string()).nullable(),
+ });
+ 
+ export const ralphOutputSchemas = {
+@@ -165,11 +165,11 @@ export const ralphOutputSchemas = {
+     mergeCommit: z.string().nullable(),
+     ciPassed: z.boolean(),
+     summary: z.string(),
+-    evicted: z.boolean().default(false),
+-    evictionReason: z.string().nullable().optional(),
+-    evictionDetails: z.string().nullable().optional(),
+-    attemptedLog: z.string().nullable().optional(),
+-    attemptedDiffSummary: z.string().nullable().optional(),
+-    landedOnMainSinceBranch: z.string().nullable().optional(),
++    evicted: z.boolean(),
++    evictionReason: z.string().nullable(),
++    evictionDetails: z.string().nullable(),
++    attemptedLog: z.string().nullable(),
++    attemptedDiffSummary: z.string().nullable(),
++    landedOnMainSinceBranch: z.string().nullable(),
+   }),
+ };
+diff --git a/src/cli/gate-config.ts b/src/cli/gate-config.ts
+new file mode 100644
+index 0000000..23febe5
+--- /dev/null
++++ b/src/cli/gate-config.ts
+@@ -0,0 +1,92 @@
++export type ScriptRunner = "bun" | "pnpm" | "yarn" | "npm";
++
++export type GateCommandConfig = {
++  buildCmds: Record<string, string>;
++  testCmds: Record<string, string>;
++  preLandChecks: string[];
++  postLandChecks: string[];
++};
++
++const REQUIRED_GATE_SCRIPTS = ["test", "typecheck"] as const;
++
++function hasScript(packageScripts: Record<string, string>, scriptName: string): boolean {
++  const command = packageScripts[scriptName];
++  return typeof command === "string" && command.trim().length > 0;
++}
++
++function scriptCommand(runner: ScriptRunner, scriptName: string): string {
++  if (runner === "bun") return `bun run ${scriptName}`;
++  if (runner === "pnpm") return `pnpm run ${scriptName}`;
++  if (runner === "yarn") return `yarn ${scriptName}`;
++  return `npm run ${scriptName}`;
++}
++
++function firstExistingScript(packageScripts: Record<string, string>, candidates: string[]): string | null {
++  for (const scriptName of candidates) {
++    if (hasScript(packageScripts, scriptName)) {
++      return scriptName;
++    }
++  }
++
++  return null;
++}
++
++export const assertRequiredGateScripts = (packageScripts: Record<string, string>): void => {
++  const missingScripts = REQUIRED_GATE_SCRIPTS.filter((scriptName) => !hasScript(packageScripts, scriptName));
++
++  if (missingScripts.length > 0) {
++    throw new Error(`Missing required package scripts: ${missingScripts.join(", ")}`);
++  }
++};
++
++export const resolveFocusTestCommands = (
++  runner: ScriptRunner,
++  packageScripts: Record<string, string>,
++): Record<string, string> => {
++  const testCmds: Record<string, string> = {
++    test: scriptCommand(runner, "test"),
++  };
++
++  const focusScriptCandidates: Record<string, string[]> = {
++    core: ["test:core", "test:unit:core", "test:integration:core"],
++    api: ["test:integration:api", "test:api"],
++    workflow: ["test:integration:workflow", "test:workflow"],
++    db: ["test:integration:db", "test:db"],
++  };
++
++  for (const [focus, candidates] of Object.entries(focusScriptCandidates)) {
++    const selectedScript = firstExistingScript(packageScripts, candidates);
++    if (selectedScript) {
++      testCmds[focus] = scriptCommand(runner, selectedScript);
++    }
++  }
++
++  return testCmds;
++};
++
++export const buildGateCommandConfig = (
++  runner: ScriptRunner,
++  packageScripts: Record<string, string>,
++): GateCommandConfig => {
++  assertRequiredGateScripts(packageScripts);
++
++  const buildCmds: Record<string, string> = {
++    typecheck: scriptCommand(runner, "typecheck"),
++  };
++
++  if (hasScript(packageScripts, "build")) {
++    buildCmds.build = scriptCommand(runner, "build");
++  }
++  if (hasScript(packageScripts, "lint")) {
++    buildCmds.lint = scriptCommand(runner, "lint");
++  }
++
++  const testCmds = resolveFocusTestCommands(runner, packageScripts);
++
++  return {
++    buildCmds,
++    testCmds,
++    preLandChecks: Object.values(buildCmds),
++    postLandChecks: Object.values(testCmds),
++  };
++};
+diff --git a/src/cli/fallback-config.ts b/src/cli/fallback-config.ts
+new file mode 100644
+index 0000000..965dccd
+--- /dev/null
++++ b/src/cli/fallback-config.ts
+@@ -0,0 +1,85 @@
++import { existsSync } from "node:fs";
++import { basename, join } from "node:path";
++
++import {
++  buildGateCommandConfig,
++  type ScriptRunner,
++} from "./gate-config";
++
++export function detectScriptRunner(repoRoot: string): ScriptRunner {
++  if (existsSync(join(repoRoot, "bun.lock")) || existsSync(join(repoRoot, "bun.lockb"))) return "bun";
++  if (existsSync(join(repoRoot, "pnpm-lock.yaml"))) return "pnpm";
++  if (existsSync(join(repoRoot, "yarn.lock"))) return "yarn";
++  return "npm";
++}
++
++function slugify(value: string): string {
++  return value
++    .toLowerCase()
++    .replace(/[^a-z0-9]+/g, "-")
++    .replace(/^-+|-+$/g, "") || "project";
++}
++
++export function buildFallbackConfig(
++  repoRoot: string,
++  promptSpecPath: string,
++  packageScripts: Record<string, string>,
++) {
++  const runner = detectScriptRunner(repoRoot);
++  const gateConfig = buildGateCommandConfig(runner, packageScripts);
++  const buildCmds: Record<string, string> = { ...gateConfig.buildCmds };
++  const testCmds: Record<string, string> = { ...gateConfig.testCmds };
++
++  if (existsSync(join(repoRoot, "go.mod"))) {
++    buildCmds.go = buildCmds.go ?? "go build ./...";
++    testCmds.go = testCmds.go ?? "go test ./...";
++  }
++
++  if (existsSync(join(repoRoot, "Cargo.toml"))) {
++    buildCmds.rust = buildCmds.rust ?? "cargo build";
++    testCmds.rust = testCmds.rust ?? "cargo test";
++  }
++
++  const specsPathCandidates = [
++    join(repoRoot, "docs/specs/engineering.md"),
++    join(repoRoot, "docs/specs"),
++    join(repoRoot, "specs"),
++    promptSpecPath,
++  ];
++
++  const chosenSpecs = specsPathCandidates.find((candidate) => existsSync(candidate)) ?? promptSpecPath;
++
++  const projectName = basename(repoRoot);
++  const maxConcurrency = Math.min(
++    Math.max(Number(process.env.WORKFLOW_MAX_CONCURRENCY ?? "6") || 6, 1),
++    32,
++  );
++
++  return {
++    projectName,
++    projectId: slugify(projectName),
++    focuses: [
++      { id: "core", name: "Core Platform" },
++      { id: "api", name: "API and Data" },
++      { id: "workflow", name: "Workflow and Automation" },
++    ],
++    specsPath: chosenSpecs,
++    referenceFiles: [
++      promptSpecPath,
++      existsSync(join(repoRoot, "README.md")) ? "README.md" : "",
++      existsSync(join(repoRoot, "docs")) ? "docs" : "",
++    ].filter(Boolean),
++    buildCmds,
++    testCmds,
++    preLandChecks: Object.values(buildCmds),
++    postLandChecks: Object.values(testCmds),
++    codeStyle: "Follow existing project conventions and keep changes minimal and test-driven.",
++    reviewChecklist: [
++      "Spec compliance",
++      "Tests cover behavior changes",
++      "No regression risk in existing flows",
++      "Error handling and observability",
++    ],
++    maxConcurrency,
++  };
++}
 diff --git a/src/components/ticket-gates.ts b/src/components/ticket-gates.ts
 new file mode 100644
 index 0000000..eb92c44
@@ -499,38 +704,3 @@ index 0000000..eb92c44
 +    ],
 +  };
 +};
-diff --git a/src/schemas.ts b/src/schemas.ts
-index f616890..72bd642 100644
---- a/src/schemas.ts
-+++ b/src/schemas.ts
-@@ -14,9 +14,9 @@ const discoverTicketSchema = z.object({
-   description: z.string(),
-   category: z.string(),
-   priority: z.enum(["critical", "high", "medium", "low"]),
--  acceptanceCriteria: z.array(z.string()).nullable().optional(),
--  relevantFiles: z.array(z.string()).nullable().optional(),
--  referenceFiles: z.array(z.string()).nullable().optional(),
-+  acceptanceCriteria: z.array(z.string()).nullable(),
-+  relevantFiles: z.array(z.string()).nullable(),
-+  referenceFiles: z.array(z.string()).nullable(),
- });
- 
- export const ralphOutputSchemas = {
-@@ -165,11 +165,11 @@ export const ralphOutputSchemas = {
-     mergeCommit: z.string().nullable(),
-     ciPassed: z.boolean(),
-     summary: z.string(),
--    evicted: z.boolean().default(false),
--    evictionReason: z.string().nullable().optional(),
--    evictionDetails: z.string().nullable().optional(),
--    attemptedLog: z.string().nullable().optional(),
--    attemptedDiffSummary: z.string().nullable().optional(),
--    landedOnMainSinceBranch: z.string().nullable().optional(),
-+    evicted: z.boolean(),
-+    evictionReason: z.string().nullable(),
-+    evictionDetails: z.string().nullable(),
-+    attemptedLog: z.string().nullable(),
-+    attemptedDiffSummary: z.string().nullable(),
-+    landedOnMainSinceBranch: z.string().nullable(),
-   }),
- };
