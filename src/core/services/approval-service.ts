@@ -52,13 +52,15 @@ export const approveOutboundAction = (
 
     const at = input.at ?? new Date();
 
-    const execution = yield* outboundActionPort.execute({
-      actionType: input.actionType,
-      entityType: input.entityType,
-      entityId: input.entityId,
-    });
+    if (input.actionType === "event_sync") {
+      if (input.entityType !== "event") {
+        return yield* Effect.fail(
+          new ApprovalServiceError({
+            message: "event_sync action must target entityType=event",
+          }),
+        );
+      }
 
-    if (input.entityType === "event" && input.actionType === "event_sync") {
       const event = yield* repository.getEntity<Event>("event", input.entityId);
 
       if (!event) {
@@ -68,6 +70,20 @@ export const approveOutboundAction = (
           }),
         );
       }
+
+      if (event.syncState !== "pending_approval") {
+        return yield* Effect.fail(
+          new ApprovalServiceError({
+            message: `event ${event.id} must be in pending_approval before sync approval`,
+          }),
+        );
+      }
+
+      const execution = yield* outboundActionPort.execute({
+        actionType: input.actionType,
+        entityType: input.entityType,
+        entityId: input.entityId,
+      });
 
       const updatedEvent: Event = {
         ...event,
@@ -95,7 +111,19 @@ export const approveOutboundAction = (
       );
 
       yield* repository.appendAuditTransition(transition);
+
+      return {
+        approved: true,
+        executed: true,
+        executionId: execution.executionId,
+      };
     }
+
+    const execution = yield* outboundActionPort.execute({
+      actionType: input.actionType,
+      entityType: input.entityType,
+      entityId: input.entityId,
+    });
 
     return {
       approved: true,

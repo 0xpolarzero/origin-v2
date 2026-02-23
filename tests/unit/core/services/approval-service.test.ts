@@ -70,4 +70,59 @@ describe("approval-service", () => {
     expect(execute).toHaveBeenCalledTimes(1);
     expect(persistedEvent?.syncState).toBe("synced");
   });
+
+  test("approveOutboundAction validates event existence before executing outbound sync", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const execute = mock(async () => ({ executionId: "exec-2" }));
+    const outboundPort: OutboundActionPort = {
+      execute: (action) => Effect.promise(() => execute(action)),
+    };
+
+    await expect(
+      Effect.runPromise(
+        approveOutboundAction(repository, outboundPort, {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: "event-missing",
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T13:35:00.000Z"),
+        }),
+      ),
+    ).rejects.toThrow("event event-missing was not found");
+
+    expect(execute).toHaveBeenCalledTimes(0);
+  });
+
+  test("approveOutboundAction requires event to be pending_approval before execute", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const event = await Effect.runPromise(
+      createEvent({
+        id: "event-3",
+        title: "Local-only event",
+        startAt: new Date("2026-02-25T13:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("event", event.id, event));
+
+    const execute = mock(async () => ({ executionId: "exec-3" }));
+    const outboundPort: OutboundActionPort = {
+      execute: (action) => Effect.promise(() => execute(action)),
+    };
+
+    await expect(
+      Effect.runPromise(
+        approveOutboundAction(repository, outboundPort, {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: event.id,
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T13:35:00.000Z"),
+        }),
+      ),
+    ).rejects.toThrow("must be in pending_approval");
+
+    expect(execute).toHaveBeenCalledTimes(0);
+  });
 });
