@@ -1,4 +1,4 @@
-import { Data, Effect } from "effect";
+import { Data, Effect, Either } from "effect";
 
 import { createAuditTransition } from "../domain/audit-transition";
 import { ActorRef } from "../domain/common";
@@ -11,6 +11,9 @@ export class OutboundDraftServiceError extends Data.TaggedError(
 )<{
   message: string;
 }> {}
+
+const toErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 
 export const requestOutboundDraftExecution = (
   repository: CoreRepository,
@@ -66,13 +69,6 @@ export const requestOutboundDraftExecution = (
       ),
     );
 
-    yield* repository.saveEntity(
-      "outbound_draft",
-      updatedDraft.id,
-      updatedDraft,
-    );
-    yield* repository.saveEntity("notification", notification.id, notification);
-
     const transition = yield* createAuditTransition({
       entityType: "outbound_draft",
       entityId: updatedDraft.id,
@@ -93,7 +89,83 @@ export const requestOutboundDraftExecution = (
       ),
     );
 
-    yield* repository.appendAuditTransition(transition);
+    let notificationSaved = false;
+    let draftSaved = false;
+
+    yield* Effect.gen(function* () {
+      yield* repository
+        .saveEntity("notification", notification.id, notification)
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new OutboundDraftServiceError({
+                message: `failed to persist approval notification: ${toErrorMessage(error)}`,
+              }),
+          ),
+        );
+      notificationSaved = true;
+
+      yield* repository
+        .saveEntity("outbound_draft", updatedDraft.id, updatedDraft)
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new OutboundDraftServiceError({
+                message: `failed to persist outbound draft approval request: ${toErrorMessage(error)}`,
+              }),
+          ),
+        );
+      draftSaved = true;
+
+      yield* repository.appendAuditTransition(transition).pipe(
+        Effect.mapError(
+          (error) =>
+            new OutboundDraftServiceError({
+              message: `failed to append outbound draft transition: ${toErrorMessage(error)}`,
+            }),
+        ),
+      );
+    }).pipe(
+      Effect.catchAll((error) =>
+        Effect.gen(function* () {
+          const rollbackErrors: Array<string> = [];
+
+          if (draftSaved) {
+            const rollbackDraftResult = yield* Effect.either(
+              repository.saveEntity("outbound_draft", draft.id, draft),
+            );
+
+            if (Either.isLeft(rollbackDraftResult)) {
+              rollbackErrors.push(
+                `failed to rollback outbound draft: ${toErrorMessage(rollbackDraftResult.left)}`,
+              );
+            }
+          }
+
+          if (notificationSaved) {
+            const rollbackNotificationResult = yield* Effect.either(
+              repository.deleteEntity("notification", notification.id),
+            );
+
+            if (Either.isLeft(rollbackNotificationResult)) {
+              rollbackErrors.push(
+                `failed to rollback approval notification: ${toErrorMessage(rollbackNotificationResult.left)}`,
+              );
+            }
+          }
+
+          if (rollbackErrors.length > 0) {
+            return yield* Effect.fail(
+              new OutboundDraftServiceError({
+                message: `${toErrorMessage(error)}; ${rollbackErrors.join("; ")}`,
+              }),
+            );
+          }
+
+          return yield* Effect.fail(error);
+        }),
+      ),
+    );
 
     return {
       draft: updatedDraft,
