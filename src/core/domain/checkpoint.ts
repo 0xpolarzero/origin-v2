@@ -10,10 +10,16 @@ import {
 
 export type CheckpointStatus = "created" | "kept" | "recovered";
 
+export interface CheckpointEntitySnapshot extends EntityReference {
+  existed: boolean;
+  state?: unknown;
+}
+
 export interface Checkpoint {
   id: string;
   name: string;
   snapshotEntityRefs: ReadonlyArray<EntityReference>;
+  snapshotEntities: ReadonlyArray<CheckpointEntitySnapshot>;
   auditCursor: number;
   rollbackTarget: string;
   status: CheckpointStatus;
@@ -26,6 +32,7 @@ export interface CreateCheckpointInput {
   id?: string;
   name: string;
   snapshotEntityRefs: ReadonlyArray<EntityReference>;
+  snapshotEntities: ReadonlyArray<CheckpointEntitySnapshot>;
   auditCursor: number;
   rollbackTarget: string;
   createdAt?: Date;
@@ -57,6 +64,12 @@ export const createCheckpoint = (
     id: input.id ?? createId("checkpoint"),
     name: input.name,
     snapshotEntityRefs: [...input.snapshotEntityRefs],
+    snapshotEntities: input.snapshotEntities.map((snapshot) => ({
+      entityType: snapshot.entityType,
+      entityId: snapshot.entityId,
+      existed: snapshot.existed,
+      state: snapshot.state,
+    })),
     auditCursor: input.auditCursor,
     rollbackTarget: input.rollbackTarget,
     status: "created",

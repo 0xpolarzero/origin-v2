@@ -14,6 +14,10 @@ export interface CoreRepository {
     entityId: string,
     entity: T,
   ) => Effect.Effect<void>;
+  deleteEntity: (
+    entityType: EntityType | string,
+    entityId: string,
+  ) => Effect.Effect<void>;
   getEntity: <T>(
     entityType: EntityType | string,
     entityId: string,

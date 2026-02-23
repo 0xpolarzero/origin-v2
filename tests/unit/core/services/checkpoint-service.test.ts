@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 
+import { createTask } from "../../../../src/core/domain/task";
 import { makeInMemoryCoreRepository } from "../../../../src/core/repositories/in-memory-core-repository";
 import {
   createWorkflowCheckpoint,
@@ -38,16 +39,40 @@ describe("checkpoint-service", () => {
 
   test("recoverCheckpoint restores prior state and appends recovery transition", async () => {
     const repository = makeInMemoryCoreRepository();
+    const originalTask = await Effect.runPromise(
+      createTask({
+        id: "task-22",
+        title: "Original task title",
+      }),
+    );
+    await Effect.runPromise(
+      repository.saveEntity("task", originalTask.id, originalTask),
+    );
 
     await Effect.runPromise(
       createWorkflowCheckpoint(repository, {
         checkpointId: "checkpoint-2",
         name: "Before import",
-        snapshotEntityRefs: [{ entityType: "task", entityId: "task-22" }],
+        snapshotEntityRefs: [
+          { entityType: "task", entityId: "task-22" },
+          { entityType: "task", entityId: "task-created-later" },
+        ],
         auditCursor: 7,
         rollbackTarget: "audit-7",
         actor: { id: "user-1", kind: "user" },
         at: new Date("2026-02-23T15:10:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      repository.saveEntity("task", "task-22", {
+        ...originalTask,
+        title: "Mutated task title",
+      }),
+    );
+    await Effect.runPromise(
+      repository.saveEntity("task", "task-created-later", {
+        id: "task-created-later",
+        title: "Created after checkpoint",
       }),
     );
 
@@ -75,12 +100,36 @@ describe("checkpoint-service", () => {
         entityId: "checkpoint-2",
       }),
     );
+    const restoredTask = await Effect.runPromise(
+      repository.getEntity<{ title: string }>("task", "task-22"),
+    );
+    const removedTask = await Effect.runPromise(
+      repository.getEntity("task", "task-created-later"),
+    );
 
     expect(kept.status).toBe("kept");
     expect(recovered.checkpoint.status).toBe("recovered");
     expect(recovered.recoveredEntityRefs).toEqual([
       { entityType: "task", entityId: "task-22" },
+      { entityType: "task", entityId: "task-created-later" },
     ]);
+    expect(restoredTask?.title).toBe("Original task title");
+    expect(removedTask).toBeUndefined();
     expect(auditTrail[auditTrail.length - 1]?.toState).toBe("recovered");
+  });
+
+  test("recoverCheckpoint fails when checkpoint is missing", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    await expect(
+      Effect.runPromise(
+        recoverCheckpoint(
+          repository,
+          "checkpoint-missing",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T15:12:00.000Z"),
+        ),
+      ),
+    ).rejects.toThrow("checkpoint checkpoint-missing was not found");
   });
 });

@@ -25,6 +25,10 @@ export const makeInMemoryCoreRepository = (): CoreRepository => {
       Effect.sync(() => {
         getBucket(entityType).set(entityId, clone(entity));
       }),
+    deleteEntity: (entityType, entityId) =>
+      Effect.sync(() => {
+        getBucket(entityType).delete(entityId);
+      }),
     getEntity: (entityType, entityId) =>
       Effect.sync(() => {
         const value = getBucket(entityType).get(entityId);

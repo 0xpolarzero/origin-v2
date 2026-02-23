@@ -1,7 +1,11 @@
 import { Data, Effect } from "effect";
 
 import { createAuditTransition } from "../domain/audit-transition";
-import { createCheckpoint, Checkpoint } from "../domain/checkpoint";
+import {
+  Checkpoint,
+  CheckpointEntitySnapshot,
+  createCheckpoint,
+} from "../domain/checkpoint";
 import { ActorRef, EntityReference } from "../domain/common";
 import { CoreRepository } from "../repositories/core-repository";
 
@@ -53,10 +57,25 @@ export const createWorkflowCheckpoint = (
   input: CreateWorkflowCheckpointInput,
 ): Effect.Effect<Checkpoint, CheckpointServiceError> =>
   Effect.gen(function* () {
+    const snapshotEntities: Array<CheckpointEntitySnapshot> = [];
+    for (const snapshotRef of input.snapshotEntityRefs) {
+      const entity = yield* repository.getEntity(
+        snapshotRef.entityType,
+        snapshotRef.entityId,
+      );
+      snapshotEntities.push({
+        entityType: snapshotRef.entityType,
+        entityId: snapshotRef.entityId,
+        existed: entity !== undefined,
+        state: entity,
+      });
+    }
+
     const checkpoint = yield* createCheckpoint({
       id: input.checkpointId,
       name: input.name,
       snapshotEntityRefs: input.snapshotEntityRefs,
+      snapshotEntities,
       auditCursor: input.auditCursor,
       rollbackTarget: input.rollbackTarget,
       createdAt: input.at,
@@ -143,6 +162,27 @@ export const recoverCheckpoint = (
 ): Effect.Effect<RecoveryResult, CheckpointServiceError> =>
   Effect.gen(function* () {
     const checkpoint = yield* loadCheckpoint(repository, checkpointId);
+
+    for (const snapshot of checkpoint.snapshotEntities) {
+      if (snapshot.existed) {
+        if (snapshot.state === undefined) {
+          return yield* Effect.fail(
+            new CheckpointServiceError({
+              message: `checkpoint ${checkpoint.id} has an invalid snapshot for ${snapshot.entityType}:${snapshot.entityId}`,
+            }),
+          );
+        }
+        yield* repository.saveEntity(
+          snapshot.entityType,
+          snapshot.entityId,
+          snapshot.state,
+        );
+        continue;
+      }
+
+      yield* repository.deleteEntity(snapshot.entityType, snapshot.entityId);
+    }
+
     const updated: Checkpoint = {
       ...checkpoint,
       status: "recovered",
