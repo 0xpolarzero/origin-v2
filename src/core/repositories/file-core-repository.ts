@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 import { Data, Effect } from "effect";
 
@@ -18,6 +19,46 @@ interface Snapshot {
   entities: Record<string, Array<unknown>>;
   auditTrail: Array<AuditTransition>;
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const parseSnapshot = (raw: string): Snapshot => {
+  const parsed = JSON.parse(raw) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error("invalid snapshot shape: expected object");
+  }
+  if (parsed.version !== 1) {
+    throw new Error("invalid snapshot shape: unsupported version");
+  }
+  if (!isRecord(parsed.entities)) {
+    throw new Error("invalid snapshot shape: entities must be an object");
+  }
+  if (!Array.isArray(parsed.auditTrail)) {
+    throw new Error("invalid snapshot shape: auditTrail must be an array");
+  }
+
+  const entities: Record<string, Array<unknown>> = {};
+  for (const entityType of ENTITY_TYPES) {
+    const entry = parsed.entities[entityType];
+    if (entry === undefined) {
+      entities[entityType] = [];
+      continue;
+    }
+    if (!Array.isArray(entry)) {
+      throw new Error(
+        `invalid snapshot shape: entities.${entityType} must be an array`,
+      );
+    }
+    entities[entityType] = [...entry];
+  }
+
+  return {
+    version: 1,
+    entities,
+    auditTrail: [...parsed.auditTrail],
+  };
+};
 
 export const makeFileCoreRepository = (
   defaultPath: string,
@@ -43,6 +84,7 @@ export const makeFileCoreRepository = (
 
         yield* Effect.try({
           try: () => {
+            mkdirSync(dirname(path), { recursive: true });
             writeFileSync(path, JSON.stringify(snapshot, null, 2), "utf8");
           },
           catch: (cause) =>
@@ -63,7 +105,7 @@ export const makeFileCoreRepository = (
         }
 
         const snapshot = yield* Effect.try({
-          try: () => JSON.parse(readFileSync(path, "utf8")) as Snapshot,
+          try: () => parseSnapshot(readFileSync(path, "utf8")),
           catch: (cause) =>
             new FileRepositoryError({
               message: `failed to load snapshot: ${String(cause)}`,
