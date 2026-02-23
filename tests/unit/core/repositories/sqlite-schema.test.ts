@@ -46,6 +46,13 @@ const expectIndex = (
   expect(indexColumns.map((column) => column.name)).toEqual(expectedColumns);
 };
 
+const expectNoIndex = (db: Database, indexName: string): void => {
+  const indexRow = db
+    .query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?")
+    .get(indexName);
+  expect(indexRow).toBeNull();
+};
+
 describe("sqlite baseline schema migrations", () => {
   test("baseline migration creates required core, audit, and auxiliary tables", async () => {
     const db = new Database(":memory:");
@@ -218,10 +225,7 @@ describe("sqlite baseline schema migrations", () => {
         "source_signal_id",
       ]);
       expectIndex(db, "idx_memory_key_index_memory_id", ["memory_id"]);
-      expectIndex(db, "idx_audit_transitions_entity_ref", [
-        "entity_type",
-        "entity_id",
-      ]);
+      expectNoIndex(db, "idx_audit_transitions_entity_ref");
     } finally {
       db.close();
     }
@@ -531,6 +535,234 @@ describe("sqlite baseline schema migrations", () => {
           VALUES (?, ?, ?, ?)
         `,
       ).run("memory-index-good", "favorite_color", "memory-2", ISO_1);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("linked references reject parent deletes that would orphan child rows", async () => {
+    const db = new Database(":memory:");
+
+    try {
+      await applyCoreMigrations(db);
+
+      db.query(
+        `
+          INSERT INTO project (id, name, lifecycle, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?)
+        `,
+      ).run("project-delete-task-ref", "Project", "active", ISO_1, ISO_1);
+      db.query(
+        `
+          INSERT INTO task (
+            id,
+            title,
+            status,
+            project_id,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "task-delete-project-ref",
+        "Task",
+        "planned",
+        "project-delete-task-ref",
+        ISO_1,
+        ISO_1,
+      );
+      expectAbort(() => {
+        db.query("DELETE FROM project WHERE id = ?").run("project-delete-task-ref");
+      }, "project.id referenced by task.project_id");
+
+      db.query(
+        `
+          INSERT INTO task (id, title, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?)
+        `,
+      ).run("task-delete-entry-ref", "Task", "planned", ISO_1, ISO_1);
+      db.query(
+        `
+          INSERT INTO entry (
+            id,
+            content,
+            source,
+            status,
+            captured_at,
+            created_at,
+            updated_at,
+            accepted_task_id
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "entry-delete-task-ref",
+        "Entry",
+        "manual",
+        "accepted_as_task",
+        ISO_1,
+        ISO_1,
+        ISO_1,
+        "task-delete-entry-ref",
+      );
+      expectAbort(() => {
+        db.query("DELETE FROM task WHERE id = ?").run("task-delete-entry-ref");
+      }, "task.id referenced by entry.accepted_task_id");
+
+      db.query(
+        `
+          INSERT INTO signal (
+            id,
+            source,
+            payload,
+            triage_state,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "signal-delete-outbound-ref",
+        "email",
+        "Payload",
+        "untriaged",
+        ISO_1,
+        ISO_1,
+      );
+      db.query(
+        `
+          INSERT INTO outbound_draft (
+            id,
+            payload,
+            source_signal_id,
+            status,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "outbound-delete-signal-ref",
+        "Draft payload",
+        "signal-delete-outbound-ref",
+        "draft",
+        ISO_1,
+        ISO_1,
+      );
+      expectAbort(() => {
+        db.query("DELETE FROM signal WHERE id = ?").run("signal-delete-outbound-ref");
+      }, "signal.id referenced by outbound_draft.source_signal_id");
+
+      db.query(
+        `
+          INSERT INTO project (id, name, lifecycle, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?)
+        `,
+      ).run("project-delete-signal-ref", "Project", "active", ISO_1, ISO_1);
+      db.query(
+        `
+          INSERT INTO signal (
+            id,
+            source,
+            payload,
+            triage_state,
+            converted_entity_type,
+            converted_entity_id,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "signal-delete-converted-ref",
+        "email",
+        "Payload",
+        "converted",
+        "project",
+        "project-delete-signal-ref",
+        ISO_1,
+        ISO_1,
+      );
+      expectAbort(() => {
+        db.query("DELETE FROM project WHERE id = ?").run("project-delete-signal-ref");
+      }, "project.id referenced by signal.converted_entity");
+
+      db.query(
+        `
+          INSERT INTO task (id, title, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?)
+        `,
+      ).run("task-delete-notification-ref", "Task", "planned", ISO_1, ISO_1);
+      db.query(
+        `
+          INSERT INTO notification (
+            id,
+            type,
+            message,
+            status,
+            related_entity_type,
+            related_entity_id,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "notification-delete-task-ref",
+        "approval_required",
+        "Needs approval",
+        "pending",
+        "task",
+        "task-delete-notification-ref",
+        ISO_1,
+        ISO_1,
+      );
+      expectAbort(() => {
+        db.query("DELETE FROM task WHERE id = ?").run("task-delete-notification-ref");
+      }, "task.id referenced by notification.related_entity");
+
+      db.query(
+        `
+          INSERT INTO memory (
+            id,
+            key,
+            value,
+            source,
+            confidence,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "memory-delete-index-ref",
+        "favorite_food",
+        "ramen",
+        "user",
+        0.8,
+        ISO_1,
+        ISO_1,
+      );
+      db.query(
+        `
+          INSERT INTO memory_key_index (
+            id,
+            key,
+            memory_id,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?)
+        `,
+      ).run(
+        "memory-index-delete-ref",
+        "favorite_food",
+        "memory-delete-index-ref",
+        ISO_1,
+      );
+      expectAbort(() => {
+        db.query("DELETE FROM memory WHERE id = ?").run("memory-delete-index-ref");
+      }, "memory.id referenced by memory_key_index.memory_id");
     } finally {
       db.close();
     }
