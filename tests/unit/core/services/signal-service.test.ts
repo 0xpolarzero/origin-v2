@@ -65,6 +65,11 @@ describe("signal-service", () => {
         targetType: "project" as const,
         targetId: "project-99",
       },
+      {
+        signalId: "signal-outbound-draft",
+        targetType: "outbound_draft" as const,
+        targetId: "outbound-draft-99",
+      },
     ];
 
     for (const conversion of conversionCases) {
@@ -107,5 +112,29 @@ describe("signal-service", () => {
       expect(target).toBeDefined();
       expect(auditTrail[auditTrail.length - 1]?.toState).toBe("converted");
     }
+  });
+
+  test("convertSignal fails gracefully on unknown conversion target", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const signal = await Effect.runPromise(
+      createSignal({
+        id: "signal-unknown-target",
+        source: "api",
+        payload: "payload for unknown target",
+      }),
+    );
+
+    await Effect.runPromise(repository.saveEntity("signal", signal.id, signal));
+
+    await expect(
+      Effect.runPromise(
+        convertSignal(repository, {
+          signalId: signal.id,
+          targetType: "unknown_target" as never,
+          actor: { id: "user-2", kind: "user" },
+          at: new Date("2026-02-23T12:30:00.000Z"),
+        }),
+      ),
+    ).rejects.toThrow("unsupported signal conversion target");
   });
 });

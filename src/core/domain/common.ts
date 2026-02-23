@@ -11,7 +11,8 @@ export type EntityType =
   | "notification"
   | "view"
   | "memory"
-  | "checkpoint";
+  | "checkpoint"
+  | "outbound_draft";
 
 export const ENTITY_TYPES: ReadonlyArray<EntityType> = [
   "entry",
@@ -25,6 +26,7 @@ export const ENTITY_TYPES: ReadonlyArray<EntityType> = [
   "view",
   "memory",
   "checkpoint",
+  "outbound_draft",
 ];
 
 export type ActorKind = "user" | "system" | "ai";

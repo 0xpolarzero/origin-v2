@@ -1,7 +1,7 @@
 import { Data, Effect } from "effect";
 
 import { createAuditTransition } from "../domain/audit-transition";
-import { ActorRef } from "../domain/common";
+import { ActorRef, createId } from "../domain/common";
 import { createEvent } from "../domain/event";
 import { createNote } from "../domain/note";
 import { createProject } from "../domain/project";
@@ -15,7 +15,12 @@ export class SignalServiceError extends Data.TaggedError("SignalServiceError")<{
 
 export type SignalTriageDecision = string;
 
-export type SignalConversionTarget = "task" | "event" | "note" | "project";
+export type SignalConversionTarget =
+  | "task"
+  | "event"
+  | "note"
+  | "project"
+  | "outbound_draft";
 
 export interface ConvertedEntityRef {
   entityType: SignalConversionTarget;
@@ -179,6 +184,35 @@ export const convertSignal = (
         converted = { entityType: "project", entityId: project.id };
         targetState = project.lifecycle;
         break;
+      }
+      case "outbound_draft": {
+        const outboundDraftId = input.targetId ?? createId("outbound-draft");
+        const outboundDraft = {
+          id: outboundDraftId,
+          payload: signal.payload,
+          sourceSignalId: signal.id,
+          status: "draft",
+          createdAt: atIso,
+          updatedAt: atIso,
+        };
+        yield* repository.saveEntity(
+          "outbound_draft",
+          outboundDraft.id,
+          outboundDraft,
+        );
+        converted = {
+          entityType: "outbound_draft",
+          entityId: outboundDraft.id,
+        };
+        targetState = outboundDraft.status;
+        break;
+      }
+      default: {
+        return yield* Effect.fail(
+          new SignalServiceError({
+            message: `unsupported signal conversion target: ${String(input.targetType)}`,
+          }),
+        );
       }
     }
 
