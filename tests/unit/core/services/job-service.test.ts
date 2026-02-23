@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { createJob } from "../../../../src/core/domain/job";
 import { makeInMemoryCoreRepository } from "../../../../src/core/repositories/in-memory-core-repository";
 import {
+  inspectJobRun,
   recordJobRun,
   retryJobRun,
 } from "../../../../src/core/services/job-service";
@@ -82,5 +83,38 @@ describe("job-service", () => {
     expect(retried.retryCount).toBe(1);
     expect(retried.diagnostics).toContain("Retry requested");
     expect(auditTrail[auditTrail.length - 1]?.toState).toBe("retrying");
+  });
+
+  test("inspectJobRun returns current status snapshot for a job", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const job = await Effect.runPromise(
+      createJob({
+        id: "job-3",
+        name: "Digest generator",
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("job", job.id, job));
+
+    await Effect.runPromise(
+      recordJobRun(repository, {
+        jobId: "job-3",
+        outcome: "failed",
+        diagnostics: "Provider timeout",
+        actor: { id: "system-1", kind: "system" },
+      }),
+    );
+
+    const inspected = await Effect.runPromise(inspectJobRun(repository, "job-3"));
+    expect(inspected.jobId).toBe("job-3");
+    expect(inspected.runState).toBe("failed");
+    expect(inspected.lastFailureReason).toBe("Provider timeout");
+  });
+
+  test("inspectJobRun fails for missing jobs", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    await expect(
+      Effect.runPromise(inspectJobRun(repository, "job-missing")),
+    ).rejects.toThrow("job job-missing was not found");
   });
 });

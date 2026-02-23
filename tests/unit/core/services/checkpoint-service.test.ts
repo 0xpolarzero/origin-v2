@@ -132,4 +132,19 @@ describe("checkpoint-service", () => {
       ),
     ).rejects.toThrow("checkpoint checkpoint-missing was not found");
   });
+
+  test("keepCheckpoint fails when checkpoint is missing", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    await expect(
+      Effect.runPromise(
+        keepCheckpoint(
+          repository,
+          "checkpoint-missing",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T15:12:00.000Z"),
+        ),
+      ),
+    ).rejects.toThrow("checkpoint checkpoint-missing was not found");
+  });
 });
