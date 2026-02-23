@@ -28,6 +28,29 @@ const toClientErrorBody = (
   message: error.message,
 });
 
+const toHttpStatus = (error: WorkflowApiError): number => {
+  if (
+    Number.isInteger(error.statusCode) &&
+    error.statusCode >= 100 &&
+    error.statusCode <= 599
+  ) {
+    return error.statusCode;
+  }
+
+  switch (error.code) {
+    case "forbidden":
+      return 403;
+    case "conflict":
+      return 409;
+    case "not_found":
+      return 404;
+    case "validation":
+    case "unknown":
+    default:
+      return 400;
+  }
+};
+
 export const makeWorkflowHttpDispatcher =
   (routes: ReadonlyArray<WorkflowRouteDefinition>) =>
   (request: WorkflowHttpRequest): Effect.Effect<WorkflowHttpResponse, never> =>
@@ -61,7 +84,7 @@ export const makeWorkflowHttpDispatcher =
       const result = yield* Effect.either(route.handle(request.body));
       if (Either.isLeft(result)) {
         return {
-          status: 400,
+          status: toHttpStatus(result.left),
           body: toClientErrorBody(result.left),
         };
       }
