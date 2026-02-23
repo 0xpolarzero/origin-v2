@@ -150,4 +150,59 @@ describe("outbound-draft-service", () => {
     expect(notifications).toHaveLength(0);
     expect(auditTrail).toHaveLength(0);
   });
+
+  test("requestOutboundDraftExecution does not move draft when notification save fails", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const draft = await Effect.runPromise(
+      createOutboundDraft({
+        id: "outbound-draft-notification-fail",
+        payload: "Email customer launch details",
+        sourceSignalId: "signal-notification-fail",
+        createdAt: new Date("2026-02-23T14:00:00.000Z"),
+        updatedAt: new Date("2026-02-23T14:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      repository.saveEntity("outbound_draft", draft.id, draft),
+    );
+
+    const failingRepository: CoreRepository = {
+      ...repository,
+      saveEntity: (entityType, entityId, entity) => {
+        if (entityType === "notification") {
+          return Effect.fail(new Error("notification persistence unavailable"));
+        }
+
+        return repository.saveEntity(entityType, entityId, entity);
+      },
+    };
+
+    await expect(
+      Effect.runPromise(
+        requestOutboundDraftExecution(
+          failingRepository,
+          draft.id,
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T14:05:00.000Z"),
+        ),
+      ),
+    ).rejects.toThrow("notification persistence unavailable");
+
+    const persistedDraft = await Effect.runPromise(
+      repository.getEntity<OutboundDraft>("outbound_draft", draft.id),
+    );
+    const notifications = await Effect.runPromise(
+      repository.listEntities("notification"),
+    );
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "outbound_draft",
+        entityId: draft.id,
+      }),
+    );
+
+    expect(persistedDraft?.status).toBe("draft");
+    expect(notifications).toHaveLength(0);
+    expect(auditTrail).toHaveLength(0);
+  });
 });
