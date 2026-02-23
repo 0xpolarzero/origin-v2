@@ -528,6 +528,37 @@ describe("api/workflows/routes", () => {
     }
   });
 
+  test("checkpoint.create rejects blank rollbackTarget", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const checkpointCreateRoute = byKey.get("checkpoint.create");
+
+    expect(checkpointCreateRoute).toBeDefined();
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        checkpointCreateRoute!.handle({
+          checkpointId: "checkpoint-route-1",
+          name: "Before conversion",
+          snapshotEntityRefs: [{ entityType: "task", entityId: "task-route-1" }],
+          auditCursor: 1,
+          rollbackTarget: "   ",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "checkpoint.create",
+      });
+      expect(result.left.message).toContain("rollbackTarget");
+    }
+  });
+
   test("job.listHistory validator requires jobId and enforces optional filters", async () => {
     const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
     const byKey = new Map(routes.map((route) => [route.key, route]));
