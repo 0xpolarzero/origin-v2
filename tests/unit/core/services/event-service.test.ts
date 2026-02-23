@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Either, Effect } from "effect";
 
 import { createEvent } from "../../../../src/core/domain/event";
+import { CoreRepository } from "../../../../src/core/repositories/core-repository";
 import { makeInMemoryCoreRepository } from "../../../../src/core/repositories/in-memory-core-repository";
 import { requestEventSync } from "../../../../src/core/services/event-service";
 
@@ -106,5 +107,113 @@ describe("event-service", () => {
         code: "conflict",
       });
     }
+  });
+
+  test("requestEventSync rolls back event state when notification persistence fails", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const event = await Effect.runPromise(
+      createEvent({
+        id: "event-notification-failure-1",
+        title: "Notification failure candidate",
+        startAt: new Date("2026-02-25T10:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("event", event.id, event));
+
+    const failingRepository: CoreRepository = {
+      ...repository,
+      saveEntity: (entityType, entityId, entity) => {
+        if (entityType === "notification") {
+          return Effect.fail(new Error("notification persistence unavailable"));
+        }
+
+        return repository.saveEntity(entityType, entityId, entity);
+      },
+    };
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        requestEventSync(
+          failingRepository,
+          event.id,
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T13:00:00.000Z"),
+        ),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "EventServiceError",
+      });
+      expect(result.left.message).toContain(
+        "notification persistence unavailable",
+      );
+    }
+
+    const persistedEvent = await Effect.runPromise(
+      repository.getEntity<{ syncState: string }>("event", event.id),
+    );
+    const notifications = await Effect.runPromise(
+      repository.listEntities("notification"),
+    );
+
+    expect(persistedEvent?.syncState).toBe("local_only");
+    expect(notifications).toHaveLength(0);
+  });
+
+  test("requestEventSync rolls back event and notification when audit append fails", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const event = await Effect.runPromise(
+      createEvent({
+        id: "event-audit-failure-1",
+        title: "Audit failure candidate",
+        startAt: new Date("2026-02-25T10:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("event", event.id, event));
+
+    const failingRepository: CoreRepository = {
+      ...repository,
+      appendAuditTransition: (_transition) =>
+        Effect.fail(new Error("audit append unavailable")),
+    };
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        requestEventSync(
+          failingRepository,
+          event.id,
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T13:00:00.000Z"),
+        ),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "EventServiceError",
+      });
+      expect(result.left.message).toContain("audit append unavailable");
+    }
+
+    const persistedEvent = await Effect.runPromise(
+      repository.getEntity<{ syncState: string }>("event", event.id),
+    );
+    const notifications = await Effect.runPromise(
+      repository.listEntities("notification"),
+    );
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "event",
+        entityId: event.id,
+      }),
+    );
+
+    expect(persistedEvent?.syncState).toBe("local_only");
+    expect(notifications).toHaveLength(0);
+    expect(auditTrail).toHaveLength(0);
   });
 });
