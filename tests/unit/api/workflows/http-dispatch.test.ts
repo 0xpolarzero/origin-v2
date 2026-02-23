@@ -8,43 +8,62 @@ import { makeWorkflowRoutes } from "../../../../src/api/workflows/routes";
 
 const ACTOR = { id: "user-1", kind: "user" } as const;
 
-const makeApiStub = (): WorkflowApi => ({
-  captureEntry: (input: unknown) =>
-    Effect.sync(() => ({
-      route: "capture.entry",
-      input,
-    })),
-  suggestEntryAsTask: (_input: unknown) => Effect.die("unused"),
-  editEntrySuggestion: (_input: unknown) => Effect.die("unused"),
-  rejectEntrySuggestion: (_input: unknown) => Effect.die("unused"),
-  acceptEntryAsTask: (_input: unknown) => Effect.die("unused"),
-  ingestSignal: (_input: unknown) => Effect.die("unused"),
-  triageSignal: (_input: unknown) => Effect.die("unused"),
-  convertSignal: (_input: unknown) => Effect.die("unused"),
-  completeTask: (_input: unknown) => Effect.die("unused"),
-  deferTask: (_input: unknown) => Effect.die("unused"),
-  rescheduleTask: (_input: unknown) => Effect.die("unused"),
-  requestEventSync: (_input: unknown) => Effect.die("unused"),
-  requestOutboundDraftExecution: (_input: unknown) => Effect.die("unused"),
-  approveOutboundAction: (_input: unknown) => Effect.die("unused"),
-  createJob: (_input: unknown) => Effect.die("unused"),
-  recordJobRun: (_input: unknown) => Effect.die("unused"),
-  inspectJobRun: (_input: unknown) => Effect.die("unused"),
-  listJobRunHistory: (input: unknown) =>
-    Effect.sync(() => ({
-      route: "job.listHistory",
-      input,
-    })),
-  retryJob: (_input: unknown) => Effect.die("unused"),
-  createWorkflowCheckpoint: (_input: unknown) => Effect.die("unused"),
-  keepCheckpoint: (_input: unknown) => Effect.die("unused"),
-  recoverCheckpoint: (_input: unknown) => Effect.die("unused"),
-});
+type StubCall = {
+  route: "capture.entry" | "job.listHistory";
+  input: unknown;
+};
+
+const makeApiStub = (): { api: WorkflowApi; calls: Array<StubCall> } => {
+  const calls: Array<StubCall> = [];
+  const api: WorkflowApi = {
+    captureEntry: (input) =>
+      Effect.sync(() => {
+        calls.push({ route: "capture.entry", input });
+        const atIso = (input.at ?? new Date()).toISOString();
+        return {
+          id: input.entryId ?? "entry-http-generated",
+          content: input.content,
+          source: "manual",
+          status: "captured",
+          capturedAt: atIso,
+          createdAt: atIso,
+          updatedAt: atIso,
+        };
+      }),
+    suggestEntryAsTask: (_input) => Effect.die("unused"),
+    editEntrySuggestion: (_input) => Effect.die("unused"),
+    rejectEntrySuggestion: (_input) => Effect.die("unused"),
+    acceptEntryAsTask: (_input) => Effect.die("unused"),
+    ingestSignal: (_input) => Effect.die("unused"),
+    triageSignal: (_input) => Effect.die("unused"),
+    convertSignal: (_input) => Effect.die("unused"),
+    completeTask: (_input) => Effect.die("unused"),
+    deferTask: (_input) => Effect.die("unused"),
+    rescheduleTask: (_input) => Effect.die("unused"),
+    requestEventSync: (_input) => Effect.die("unused"),
+    requestOutboundDraftExecution: (_input) => Effect.die("unused"),
+    approveOutboundAction: (_input) => Effect.die("unused"),
+    createJob: (_input) => Effect.die("unused"),
+    recordJobRun: (_input) => Effect.die("unused"),
+    inspectJobRun: (_input) => Effect.die("unused"),
+    listJobRunHistory: (input) =>
+      Effect.sync(() => {
+        calls.push({ route: "job.listHistory", input });
+        return [];
+      }),
+    retryJob: (_input) => Effect.die("unused"),
+    createWorkflowCheckpoint: (_input) => Effect.die("unused"),
+    keepCheckpoint: (_input) => Effect.die("unused"),
+    recoverCheckpoint: (_input) => Effect.die("unused"),
+  };
+  return { api, calls };
+};
 
 describe("api/workflows/http-dispatch", () => {
   test("returns 404 when no workflow route matches the path", async () => {
+    const stub = makeApiStub();
     const dispatcher = makeWorkflowHttpDispatcher(
-      makeWorkflowRoutes(makeApiStub()),
+      makeWorkflowRoutes(stub.api),
     );
 
     const response = await Effect.runPromise(
@@ -64,8 +83,9 @@ describe("api/workflows/http-dispatch", () => {
   });
 
   test("returns 405 when path exists but method is unsupported", async () => {
+    const stub = makeApiStub();
     const dispatcher = makeWorkflowHttpDispatcher(
-      makeWorkflowRoutes(makeApiStub()),
+      makeWorkflowRoutes(stub.api),
     );
 
     const response = await Effect.runPromise(
@@ -85,8 +105,9 @@ describe("api/workflows/http-dispatch", () => {
   });
 
   test("returns 400 when payload fails route validation", async () => {
+    const stub = makeApiStub();
     const dispatcher = makeWorkflowHttpDispatcher(
-      makeWorkflowRoutes(makeApiStub()),
+      makeWorkflowRoutes(stub.api),
     );
 
     const response = await Effect.runPromise(
@@ -117,8 +138,9 @@ describe("api/workflows/http-dispatch", () => {
   });
 
   test("returns 200 with handler output for valid JSON payloads", async () => {
+    const stub = makeApiStub();
     const dispatcher = makeWorkflowHttpDispatcher(
-      makeWorkflowRoutes(makeApiStub()),
+      makeWorkflowRoutes(stub.api),
     );
 
     const response = await Effect.runPromise(
@@ -135,19 +157,20 @@ describe("api/workflows/http-dispatch", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual(
-      expect.objectContaining({
-        route: "capture.entry",
-      }),
-    );
-    expect(
-      (response.body as { input: { at: unknown } }).input.at,
-    ).toBeInstanceOf(Date);
+    expect(response.body).toMatchObject({
+      id: "entry-http-1",
+      content: "Use dispatcher",
+    });
+
+    const captureCall = stub.calls.find((call) => call.route === "capture.entry");
+    expect(captureCall).toBeDefined();
+    expect((captureCall!.input as { at: unknown }).at).toBeInstanceOf(Date);
   });
 
   test("dispatches job.listHistory route with the API stub", async () => {
+    const stub = makeApiStub();
     const dispatcher = makeWorkflowHttpDispatcher(
-      makeWorkflowRoutes(makeApiStub()),
+      makeWorkflowRoutes(stub.api),
     );
 
     const response = await Effect.runPromise(
@@ -163,13 +186,12 @@ describe("api/workflows/http-dispatch", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual(
-      expect.objectContaining({
-        route: "job.listHistory",
-      }),
-    );
+    expect(response.body).toEqual([]);
+
+    const historyCall = stub.calls.find((call) => call.route === "job.listHistory");
+    expect(historyCall).toBeDefined();
     expect(
-      (response.body as { input: { beforeAt: unknown } }).input.beforeAt,
+      (historyCall!.input as { beforeAt: unknown }).beforeAt,
     ).toBeInstanceOf(Date);
   });
 
