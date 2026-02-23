@@ -1,0 +1,82 @@
+diff --git a/src/cli/index.ts b/src/cli/index.ts
+index 633e857..6eb8603 100755
+--- a/src/cli/index.ts
++++ b/src/cli/index.ts
+@@ -185,11 +185,15 @@ function buildFallbackConfig(repoRoot: string, promptSpecPath: string, packageSc
+   }
+ 
+   if (Object.keys(buildCmds).length === 0) {
+-    buildCmds.verify = runner === "bun" ? "bun run typecheck" : "echo \"Add build/typecheck command\"";
++    // Keep fallback commands non-failing for freshly initialized repos
++    // that don't yet define build/typecheck scripts.
++    buildCmds.verify = "echo \"No build/typecheck command configured yet\"";
+   }
+ 
+   if (Object.keys(testCmds).length === 0) {
+-    testCmds.tests = runner === "bun" ? "bun test" : "echo \"Add test command\"";
++    // Same rationale for tests: avoid immediate hard failure before
++    // the project has introduced a real test command.
++    testCmds.tests = "echo \"No test command configured yet\"";
+   }
+ 
+   const specsPathCandidates = [
+diff --git a/src/components/InterpretConfig.tsx b/src/components/InterpretConfig.tsx
+index 77be1f5..08019e3 100644
+--- a/src/components/InterpretConfig.tsx
++++ b/src/components/InterpretConfig.tsx
+@@ -14,14 +14,17 @@ export const interpretConfigOutputSchema = z.object({
+   focuses: z.array(focusSchema).min(1).max(12),
+   specsPath: z.string().min(1),
+   referenceFiles: z.array(z.string()),
+-  buildCmds: z.record(z.string(), z.string()),
+-  testCmds: z.record(z.string(), z.string()),
++  // Avoid emitting JSON Schema `propertyNames` from z.record(...)
++  // because Codex structured output rejects it.
++  buildCmds: z.object({}).catchall(z.string()),
++  testCmds: z.object({}).catchall(z.string()),
+   preLandChecks: z.array(z.string()),
+   postLandChecks: z.array(z.string()),
+   codeStyle: z.string().min(1),
+   reviewChecklist: z.array(z.string()).min(1),
+   maxConcurrency: z.number().int().min(1).max(64),
+-  reasoning: z.string().optional(),
++  // Codex structured output expects every declared property in `required`.
++  reasoning: z.string(),
+ });
+ 
+ export type InterpretConfigOutput = z.infer<typeof interpretConfigOutputSchema>;
+diff --git a/src/schemas.ts b/src/schemas.ts
+index f616890..72bd642 100644
+--- a/src/schemas.ts
++++ b/src/schemas.ts
+@@ -14,9 +14,9 @@ const discoverTicketSchema = z.object({
+   description: z.string(),
+   category: z.string(),
+   priority: z.enum(["critical", "high", "medium", "low"]),
+-  acceptanceCriteria: z.array(z.string()).nullable().optional(),
+-  relevantFiles: z.array(z.string()).nullable().optional(),
+-  referenceFiles: z.array(z.string()).nullable().optional(),
++  acceptanceCriteria: z.array(z.string()).nullable(),
++  relevantFiles: z.array(z.string()).nullable(),
++  referenceFiles: z.array(z.string()).nullable(),
+ });
+ 
+ export const ralphOutputSchemas = {
+@@ -165,11 +165,11 @@ export const ralphOutputSchemas = {
+     mergeCommit: z.string().nullable(),
+     ciPassed: z.boolean(),
+     summary: z.string(),
+-    evicted: z.boolean().default(false),
+-    evictionReason: z.string().nullable().optional(),
+-    evictionDetails: z.string().nullable().optional(),
+-    attemptedLog: z.string().nullable().optional(),
+-    attemptedDiffSummary: z.string().nullable().optional(),
+-    landedOnMainSinceBranch: z.string().nullable().optional(),
++    evicted: z.boolean(),
++    evictionReason: z.string().nullable(),
++    evictionDetails: z.string().nullable(),
++    attemptedLog: z.string().nullable(),
++    attemptedDiffSummary: z.string().nullable(),
++    landedOnMainSinceBranch: z.string().nullable(),
+   }),
+ };
