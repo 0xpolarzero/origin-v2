@@ -52,6 +52,34 @@ const loadCheckpoint = (
     return checkpoint;
   });
 
+const ensureCanKeep = (
+  checkpoint: Checkpoint,
+): Effect.Effect<void, CheckpointServiceError> => {
+  if (checkpoint.status === "created") {
+    return Effect.void;
+  }
+
+  return Effect.fail(
+    new CheckpointServiceError({
+      message: `checkpoint ${checkpoint.id} cannot transition ${checkpoint.status} -> kept`,
+    }),
+  );
+};
+
+const ensureCanRecover = (
+  checkpoint: Checkpoint,
+): Effect.Effect<void, CheckpointServiceError> => {
+  if (checkpoint.status === "created" || checkpoint.status === "kept") {
+    return Effect.void;
+  }
+
+  return Effect.fail(
+    new CheckpointServiceError({
+      message: `checkpoint ${checkpoint.id} cannot transition ${checkpoint.status} -> recovered`,
+    }),
+  );
+};
+
 export const createWorkflowCheckpoint = (
   repository: CoreRepository,
   input: CreateWorkflowCheckpointInput,
@@ -124,6 +152,8 @@ export const keepCheckpoint = (
 ): Effect.Effect<Checkpoint, CheckpointServiceError> =>
   Effect.gen(function* () {
     const checkpoint = yield* loadCheckpoint(repository, checkpointId);
+    yield* ensureCanKeep(checkpoint);
+
     const updated: Checkpoint = {
       ...checkpoint,
       status: "kept",
@@ -162,6 +192,7 @@ export const recoverCheckpoint = (
 ): Effect.Effect<RecoveryResult, CheckpointServiceError> =>
   Effect.gen(function* () {
     const checkpoint = yield* loadCheckpoint(repository, checkpointId);
+    yield* ensureCanRecover(checkpoint);
 
     for (const snapshot of checkpoint.snapshotEntities) {
       if (snapshot.existed) {

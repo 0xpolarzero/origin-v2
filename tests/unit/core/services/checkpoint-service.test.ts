@@ -147,4 +147,80 @@ describe("checkpoint-service", () => {
       ),
     ).rejects.toThrow("checkpoint checkpoint-missing was not found");
   });
+
+  test("keepCheckpoint rejects recovered checkpoints", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    await Effect.runPromise(
+      createWorkflowCheckpoint(repository, {
+        checkpointId: "checkpoint-keep-recovered",
+        name: "Before risky rewrite",
+        snapshotEntityRefs: [],
+        auditCursor: 2,
+        rollbackTarget: "audit-2",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T15:20:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      recoverCheckpoint(
+        repository,
+        "checkpoint-keep-recovered",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T15:21:00.000Z"),
+      ),
+    );
+
+    await expect(
+      Effect.runPromise(
+        keepCheckpoint(
+          repository,
+          "checkpoint-keep-recovered",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T15:22:00.000Z"),
+        ),
+      ),
+    ).rejects.toThrow(
+      "checkpoint checkpoint-keep-recovered cannot transition recovered -> kept",
+    );
+  });
+
+  test("recoverCheckpoint rejects already recovered checkpoints", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    await Effect.runPromise(
+      createWorkflowCheckpoint(repository, {
+        checkpointId: "checkpoint-recovered-twice",
+        name: "Before data rewrite",
+        snapshotEntityRefs: [],
+        auditCursor: 3,
+        rollbackTarget: "audit-3",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T15:30:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      recoverCheckpoint(
+        repository,
+        "checkpoint-recovered-twice",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T15:31:00.000Z"),
+      ),
+    );
+
+    await expect(
+      Effect.runPromise(
+        recoverCheckpoint(
+          repository,
+          "checkpoint-recovered-twice",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T15:32:00.000Z"),
+        ),
+      ),
+    ).rejects.toThrow(
+      "checkpoint checkpoint-recovered-twice cannot transition recovered -> recovered",
+    );
+  });
 });
