@@ -2,11 +2,8 @@
 node_modules/
 
 # generated runtime artifacts
-PROGRESS.md
-smithers.db
 .smithers/
 .super-ralph/
-.automation/
 
 # logs
 *.log
