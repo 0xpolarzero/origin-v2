@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -145,6 +145,180 @@ describe("database-backed core platform", () => {
         throw new Error("database-backed platform should expose close()");
       }
       await Effect.runPromise(platformB.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("database backend executes approved event_sync actions and persists synced state", async () => {
+    const { tempDir, databasePath } = createTempPaths();
+
+    try {
+      const execute = mock(async (_action: unknown) => ({
+        executionId: "exec-sqlite-event-sync-1",
+      }));
+      const platform = await Effect.runPromise(
+        buildCorePlatform({
+          databasePath,
+          outboundActionPort: {
+            execute: (action) => Effect.promise(() => execute(action)),
+          },
+        }),
+      );
+
+      await Effect.runPromise(
+        platform.ingestSignal({
+          signalId: "signal-db-event-approval-1",
+          source: "calendar",
+          payload: "Board review",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T16:00:00.000Z"),
+        }),
+      );
+      await Effect.runPromise(
+        platform.triageSignal(
+          "signal-db-event-approval-1",
+          "schedule_event",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T16:01:00.000Z"),
+        ),
+      );
+      await Effect.runPromise(
+        platform.convertSignal({
+          signalId: "signal-db-event-approval-1",
+          targetType: "event",
+          targetId: "event-db-approval-1",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T16:02:00.000Z"),
+        }),
+      );
+
+      await Effect.runPromise(
+        platform.requestEventSync(
+          "event-db-approval-1",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T16:03:00.000Z"),
+        ),
+      );
+
+      const approved = await Effect.runPromise(
+        platform.approveOutboundAction({
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: "event-db-approval-1",
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T16:04:00.000Z"),
+        }),
+      );
+      const event = await Effect.runPromise(
+        platform.getEntity<{ syncState: string }>("event", "event-db-approval-1"),
+      );
+      const eventAudit = await Effect.runPromise(
+        platform.listAuditTrail({
+          entityType: "event",
+          entityId: "event-db-approval-1",
+        }),
+      );
+
+      expect(approved.executionId).toBe("exec-sqlite-event-sync-1");
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(event?.syncState).toBe("synced");
+      expect(eventAudit[eventAudit.length - 1]?.toState).toBe("synced");
+
+      if (!platform.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platform.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("database backend executes approved outbound_draft actions and persists execution metadata", async () => {
+    const { tempDir, databasePath } = createTempPaths();
+
+    try {
+      const execute = mock(async (_action: unknown) => ({
+        executionId: "exec-sqlite-outbound-1",
+      }));
+      const platform = await Effect.runPromise(
+        buildCorePlatform({
+          databasePath,
+          outboundActionPort: {
+            execute: (action) => Effect.promise(() => execute(action)),
+          },
+        }),
+      );
+
+      await Effect.runPromise(
+        platform.ingestSignal({
+          signalId: "signal-db-outbound-approval-1",
+          source: "email",
+          payload: "Send partner update",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T17:00:00.000Z"),
+        }),
+      );
+      await Effect.runPromise(
+        platform.triageSignal(
+          "signal-db-outbound-approval-1",
+          "requires_outbound",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T17:01:00.000Z"),
+        ),
+      );
+      await Effect.runPromise(
+        platform.convertSignal({
+          signalId: "signal-db-outbound-approval-1",
+          targetType: "outbound_draft",
+          targetId: "outbound-draft-db-approval-1",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T17:02:00.000Z"),
+        }),
+      );
+
+      await Effect.runPromise(
+        platform.requestOutboundDraftExecution(
+          "outbound-draft-db-approval-1",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T17:03:00.000Z"),
+        ),
+      );
+
+      const approved = await Effect.runPromise(
+        platform.approveOutboundAction({
+          actionType: "outbound_draft",
+          entityType: "outbound_draft",
+          entityId: "outbound-draft-db-approval-1",
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T17:04:00.000Z"),
+        }),
+      );
+      const draft = await Effect.runPromise(
+        platform.getEntity<{ status: string; executionId?: string }>(
+          "outbound_draft",
+          "outbound-draft-db-approval-1",
+        ),
+      );
+      const draftAudit = await Effect.runPromise(
+        platform.listAuditTrail({
+          entityType: "outbound_draft",
+          entityId: "outbound-draft-db-approval-1",
+        }),
+      );
+
+      expect(approved.executionId).toBe("exec-sqlite-outbound-1");
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(draft?.status).toBe("executed");
+      expect(draft?.executionId).toBe("exec-sqlite-outbound-1");
+      expect(draftAudit[draftAudit.length - 1]?.toState).toBe("executed");
+
+      if (!platform.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platform.close());
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
