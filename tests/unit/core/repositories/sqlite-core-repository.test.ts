@@ -197,6 +197,42 @@ describe("makeSqliteCoreRepository", () => {
     }
   });
 
+  test("listEntities performs bounded paged reads instead of unbounded SELECT * scans", async () => {
+    const queriedSql: Array<string> = [];
+    const rows = [
+      { id: "task-a", title: "Task A" },
+      { id: "task-b", title: "Task B" },
+      { id: "task-c", title: "Task C" },
+    ];
+    const fakeDb = {
+      exec: () => {},
+      close: () => {},
+      query: (sql: string) => {
+        queriedSql.push(sql);
+        return {
+          all: (limit: number, offset: number) => rows.slice(offset, offset + limit),
+        };
+      },
+    } as unknown as Database;
+
+    const repository = await Effect.runPromise(
+      makeSqliteCoreRepository({
+        databasePath: ":memory:",
+        runMigrationsOnInit: false,
+        openDatabase: () => fakeDb,
+      }),
+    );
+
+    const listed = await Effect.runPromise(
+      repository.listEntities<{ id: string }>("task"),
+    );
+
+    expect(queriedSql.some((sql) => sql.includes("LIMIT ? OFFSET ?"))).toBe(true);
+    expect(listed.map((task) => task.id)).toEqual(["task-a", "task-b", "task-c"]);
+
+    await Effect.runPromise(repository.close());
+  });
+
   test("deleteEntity removes persisted rows and supports memory_key_index records", async () => {
     const { tempDir, databasePath } = makeTempDatabasePath();
 

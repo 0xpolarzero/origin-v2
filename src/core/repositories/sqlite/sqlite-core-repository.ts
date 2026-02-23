@@ -40,6 +40,7 @@ interface AuditRow {
 }
 
 type SqliteValue = SQLQueryBindings;
+const LIST_ENTITIES_PAGE_SIZE = 500;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -450,18 +451,38 @@ export const makeSqliteCoreRepository = (
     ): Effect.Effect<ReadonlyArray<T>, SqliteCoreRepositoryError> =>
       Effect.gen(function* () {
         const config = yield* resolveTableConfig(entityType);
-        const rows = yield* Effect.try({
-          try: () =>
-            db
-              .query(`SELECT * FROM ${config.tableName} ORDER BY id ASC`)
-              .all() as Array<Record<string, unknown>>,
-          catch: (cause) =>
-            toRepositoryError(`failed to list ${entityType} entities`, cause),
-        });
-
         const entities: Array<T> = [];
-        for (const row of rows) {
-          entities.push(yield* decodeEntity<T>(row, config));
+
+        let offset = 0;
+        while (true) {
+          const rows = yield* Effect.try({
+            try: () =>
+              db
+                .query(
+                  `
+                    SELECT ${config.columns.join(", ")}
+                    FROM ${config.tableName}
+                    ORDER BY id ASC
+                    LIMIT ? OFFSET ?
+                  `,
+                )
+                .all(
+                  LIST_ENTITIES_PAGE_SIZE,
+                  offset,
+                ) as Array<Record<string, unknown>>,
+            catch: (cause) =>
+              toRepositoryError(`failed to list ${entityType} entities`, cause),
+          });
+
+          for (const row of rows) {
+            entities.push(yield* decodeEntity<T>(row, config));
+          }
+
+          if (rows.length < LIST_ENTITIES_PAGE_SIZE) {
+            break;
+          }
+
+          offset += rows.length;
         }
 
         return entities;
