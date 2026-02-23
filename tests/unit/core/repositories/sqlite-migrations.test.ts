@@ -123,4 +123,72 @@ describe("sqlite migration runner", () => {
       db.close();
     }
   });
+
+  test("runSqliteMigrations rolls back partial migration SQL and ledger writes when a migration fails", async () => {
+    const db = new Database(":memory:");
+    const failingMigrations = [
+      {
+        id: "001_rollback_probe",
+        name: "create probe table then fail",
+        sql: `
+          CREATE TABLE rollback_probe (
+            id TEXT NOT NULL
+          );
+          INSERT INTO rollback_probe (id) VALUES ('probe-1');
+          INSERT INTO missing_table (id) VALUES ('boom');
+        `,
+        checksum: "checksum-rollback-probe",
+      },
+    ];
+
+    try {
+      await expect(
+        Effect.runPromise(runSqliteMigrations(db, failingMigrations)),
+      ).rejects.toThrow("failed to apply migration 001_rollback_probe");
+
+      const probeTable = db
+        .query(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'rollback_probe'",
+        )
+        .get();
+      const ledgerRows = listLedgerRows(db);
+
+      expect(probeTable).toBeNull();
+      expect(ledgerRows).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("runSqliteMigrations rejects when an existing migration id has a different checksum", async () => {
+    const db = new Database(":memory:");
+    const initialMigrations = [
+      {
+        id: "001_checksum_guard",
+        name: "create checksum guard table",
+        sql: `
+          CREATE TABLE checksum_guard (
+            id TEXT NOT NULL
+          );
+        `,
+        checksum: "checksum-original",
+      },
+    ];
+    const mismatchedMigrations = [
+      {
+        ...initialMigrations[0],
+        checksum: "checksum-mutated",
+      },
+    ];
+
+    try {
+      await Effect.runPromise(runSqliteMigrations(db, initialMigrations));
+
+      await expect(
+        Effect.runPromise(runSqliteMigrations(db, mismatchedMigrations)),
+      ).rejects.toThrow("checksum mismatch for migration 001_checksum_guard");
+    } finally {
+      db.close();
+    }
+  });
 });
