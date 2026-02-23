@@ -473,5 +473,72 @@ describe("api/workflows/workflow-api", () => {
         });
       }
     });
+
+    test(`${handlerCase.name} maps synchronous throws into WorkflowApiError`, async () => {
+      const errorMessage = `thrown:${handlerCase.route}`;
+      const platform = makePlatformStub(
+        handlerCase.setMethod(() => {
+          throw new Error(errorMessage);
+        }),
+      );
+
+      const api = makeWorkflowApi({ platform });
+      const result = await Effect.runPromise(
+        Effect.either(handlerCase.invoke(api)),
+      );
+
+      expect(Either.isLeft(result)).toBe(true);
+
+      if (Either.isLeft(result)) {
+        expect(result.left).toMatchObject({
+          _tag: "WorkflowApiError",
+          route: handlerCase.route,
+          message: errorMessage,
+        });
+      }
+    });
+
+    test(`${handlerCase.name} maps defects into WorkflowApiError`, async () => {
+      const errorMessage = `defect:${handlerCase.route}`;
+      const platform = makePlatformStub(
+        handlerCase.setMethod(() => Effect.die(new Error(errorMessage))),
+      );
+
+      const api = makeWorkflowApi({ platform });
+      const result = await Effect.runPromise(
+        Effect.either(handlerCase.invoke(api)),
+      );
+
+      expect(Either.isLeft(result)).toBe(true);
+
+      if (Either.isLeft(result)) {
+        expect(result.left).toMatchObject({
+          _tag: "WorkflowApiError",
+          route: handlerCase.route,
+          message: errorMessage,
+        });
+      }
+    });
+
+    test(`${handlerCase.name} preserves pre-mapped WorkflowApiError failures`, async () => {
+      const expectedError = new WorkflowApiError({
+        route: handlerCase.route,
+        message: `pre-mapped:${handlerCase.route}`,
+      });
+      const platform = makePlatformStub(
+        handlerCase.setMethod(() => Effect.fail(expectedError)),
+      );
+
+      const api = makeWorkflowApi({ platform });
+      const result = await Effect.runPromise(
+        Effect.either(handlerCase.invoke(api)),
+      );
+
+      expect(Either.isLeft(result)).toBe(true);
+
+      if (Either.isLeft(result)) {
+        expect(result.left).toBe(expectedError);
+      }
+    });
   }
 });

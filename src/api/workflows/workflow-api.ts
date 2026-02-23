@@ -27,8 +27,15 @@ export const wrapHandler =
     handler: (input: Input) => Effect.Effect<Output, unknown>,
   ): ((input: Input) => Effect.Effect<Output, WorkflowApiError>) =>
   (input) =>
-    handler(input).pipe(
+    Effect.try({
+      try: () => handler(input),
+      catch: (error) => toWorkflowApiError(route, error),
+    }).pipe(
+      Effect.flatMap((effect) => effect),
       Effect.mapError((error) => toWorkflowApiError(route, error)),
+      Effect.catchAllDefect((defect) =>
+        Effect.fail(toWorkflowApiError(route, defect)),
+      ),
     );
 
 export const makeWorkflowApi = (
