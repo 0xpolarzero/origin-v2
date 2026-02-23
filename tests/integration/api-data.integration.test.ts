@@ -7,7 +7,13 @@ describe("API and Data integration scaffold", () => {
     expect(existsSync("docs/design.spec.md")).toBe(true);
   });
 
-  test.todo("captures input and persists an Entry before AI suggestion is surfaced");
-  test.todo("requires explicit approval before any outbound sync action executes");
-  test.todo("replays pending approval state after restart and preserves local-first data");
+  test.todo(
+    "captures input and persists an Entry before AI suggestion is surfaced",
+  );
+  test.todo(
+    "requires explicit approval before any outbound sync action executes",
+  );
+  test.todo(
+    "replays pending approval state after restart and preserves local-first data",
+  );
 });
