@@ -171,7 +171,6 @@ export const convertSignal = (
         const task = yield* createTask({
           id: input.targetId,
           title: signal.payload,
-          sourceEntryId: signal.id,
           createdAt: at,
           updatedAt: at,
         }).pipe(

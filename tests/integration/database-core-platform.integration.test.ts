@@ -150,6 +150,77 @@ describe("database-backed core platform", () => {
     }
   });
 
+  test("database backend converts triaged signals into tasks without entry links", async () => {
+    const { tempDir, databasePath } = createTempPaths();
+
+    try {
+      const platform = await Effect.runPromise(
+        buildCorePlatform({
+          databasePath,
+        }),
+      );
+
+      await Effect.runPromise(
+        platform.ingestSignal({
+          signalId: "signal-db-task-convert-1",
+          source: "email",
+          payload: "Turn this into a task",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T15:00:00.000Z"),
+        }),
+      );
+      await Effect.runPromise(
+        platform.triageSignal(
+          "signal-db-task-convert-1",
+          "ready_for_conversion",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T15:01:00.000Z"),
+        ),
+      );
+
+      const converted = await Effect.runPromise(
+        platform.convertSignal({
+          signalId: "signal-db-task-convert-1",
+          targetType: "task",
+          targetId: "task-db-from-signal-1",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T15:02:00.000Z"),
+        }),
+      );
+
+      const task = await Effect.runPromise(
+        platform.getEntity<{ status: string; sourceEntryId?: string }>(
+          "task",
+          "task-db-from-signal-1",
+        ),
+      );
+      const signal = await Effect.runPromise(
+        platform.getEntity<{
+          triageState: string;
+          convertedEntityType?: string;
+          convertedEntityId?: string;
+        }>("signal", "signal-db-task-convert-1"),
+      );
+
+      expect(converted).toEqual({
+        entityType: "task",
+        entityId: "task-db-from-signal-1",
+      });
+      expect(task?.status).toBe("planned");
+      expect(task?.sourceEntryId).toBeUndefined();
+      expect(signal?.triageState).toBe("converted");
+      expect(signal?.convertedEntityType).toBe("task");
+      expect(signal?.convertedEntityId).toBe("task-db-from-signal-1");
+
+      if (!platform.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platform.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("database backend executes approved event_sync actions and persists synced state", async () => {
     const { tempDir, databasePath } = createTempPaths();
 
