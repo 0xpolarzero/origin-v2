@@ -3,6 +3,7 @@ import { Effect } from "effect";
 
 import { createEvent } from "../../../../src/core/domain/event";
 import { OutboundDraft } from "../../../../src/core/domain/outbound-draft";
+import { CoreRepository } from "../../../../src/core/repositories/core-repository";
 import { makeInMemoryCoreRepository } from "../../../../src/core/repositories/in-memory-core-repository";
 import { requestEventSync } from "../../../../src/core/services/event-service";
 import {
@@ -264,8 +265,99 @@ describe("approval-service", () => {
     expect(execute).toHaveBeenCalledTimes(1);
     expect(persistedDraft?.status).toBe("executed");
     expect(persistedDraft?.executionId).toBe("exec-7");
-    expect(auditTrail).toHaveLength(1);
+    expect(auditTrail).toHaveLength(2);
     expect(auditTrail[0]?.fromState).toBe("pending_approval");
-    expect(auditTrail[0]?.toState).toBe("executed");
+    expect(auditTrail[0]?.toState).toBe("executing");
+    expect(auditTrail[1]?.fromState).toBe("executing");
+    expect(auditTrail[1]?.toState).toBe("executed");
+  });
+
+  test("approveOutboundAction does not execute outbound draft when pre-execution persistence fails", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const draft: OutboundDraft = {
+      id: "outbound-draft-4",
+      payload: "Draft payload",
+      sourceSignalId: "signal-4",
+      status: "pending_approval",
+      createdAt: "2026-02-23T14:00:00.000Z",
+      updatedAt: "2026-02-23T14:05:00.000Z",
+    };
+    await Effect.runPromise(
+      repository.saveEntity("outbound_draft", draft.id, draft),
+    );
+
+    const execute = mock(async (_action: unknown) => ({
+      executionId: "exec-8",
+    }));
+    const outboundPort: OutboundActionPort = {
+      execute: (action) => Effect.promise(() => execute(action)),
+    };
+    const failingRepository: CoreRepository = {
+      ...repository,
+      saveEntity: (entityType, entityId, entity) => {
+        if (entityType === "outbound_draft") {
+          return Effect.fail(new Error("outbound draft persistence unavailable"));
+        }
+
+        return repository.saveEntity(entityType, entityId, entity);
+      },
+    };
+
+    await expect(
+      Effect.runPromise(
+        approveOutboundAction(failingRepository, outboundPort, {
+          actionType: "outbound_draft",
+          entityType: "outbound_draft",
+          entityId: draft.id,
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T14:10:00.000Z"),
+        }),
+      ),
+    ).rejects.toThrow("outbound draft persistence unavailable");
+
+    expect(execute).toHaveBeenCalledTimes(0);
+  });
+
+  test("approveOutboundAction rejects outbound draft execution when executionId is empty", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const draft: OutboundDraft = {
+      id: "outbound-draft-5",
+      payload: "Draft payload",
+      sourceSignalId: "signal-5",
+      status: "pending_approval",
+      createdAt: "2026-02-23T14:00:00.000Z",
+      updatedAt: "2026-02-23T14:05:00.000Z",
+    };
+    await Effect.runPromise(
+      repository.saveEntity("outbound_draft", draft.id, draft),
+    );
+
+    const execute = mock(async (_action: unknown) => ({
+      executionId: "   ",
+    }));
+    const outboundPort: OutboundActionPort = {
+      execute: (action) => Effect.promise(() => execute(action)),
+    };
+
+    await expect(
+      Effect.runPromise(
+        approveOutboundAction(repository, outboundPort, {
+          actionType: "outbound_draft",
+          entityType: "outbound_draft",
+          entityId: draft.id,
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T14:10:00.000Z"),
+        }),
+      ),
+    ).rejects.toThrow("non-empty executionId");
+
+    const persistedDraft = await Effect.runPromise(
+      repository.getEntity<OutboundDraft>("outbound_draft", draft.id),
+    );
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(persistedDraft?.status).toBe("pending_approval");
+    expect(persistedDraft?.executionId).toBeUndefined();
   });
 });
