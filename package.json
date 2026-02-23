@@ -3,6 +3,12 @@
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.7",
+  "scripts": {
+    "test": "bun test",
+    "test:integration:core": "bun test tests/integration/core-platform.integration.test.ts",
+    "test:integration:api": "bun test tests/integration/api-data.integration.test.ts",
+    "test:integration:workflow": "bun test tests/integration/workflow-automation.integration.test.ts"
+  },
   "dependencies": {
     "super-ralph": "github:evmts/super-ralph"
   },
