@@ -715,4 +715,46 @@ describe("api/workflows/routes", () => {
       "2026-02-23T09:00:00.000Z",
     );
   });
+
+  test("route handlers accept broader ISO-8601 variants for timestamp fields", async () => {
+    const calls: Array<{ route: WorkflowRouteKey; input: unknown }> = [];
+    const routes = makeWorkflowRoutes(
+      makeApiSpy((route, input) => {
+        calls.push({ route, input });
+      }),
+    );
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const captureRoute = byKey.get("capture.entry");
+    const historyRoute = byKey.get("job.listHistory");
+
+    expect(captureRoute).toBeDefined();
+    expect(historyRoute).toBeDefined();
+
+    await Effect.runPromise(
+      captureRoute!.handle({
+        entryId: "entry-route-iso-variant-1",
+        content: "Capture content",
+        actor: ACTOR,
+        at: "2026-02-23T10:00:00.1Z",
+      }),
+    );
+
+    await Effect.runPromise(
+      historyRoute!.handle({
+        jobId: "job-route-iso-variant-1",
+        beforeAt: "2026-02-23T10:00:00",
+        limit: 5,
+      }),
+    );
+
+    const captureCall = calls.find((entry) => entry.route === "capture.entry");
+    const historyCall = calls.find((entry) => entry.route === "job.listHistory");
+
+    expect(captureCall).toBeDefined();
+    expect(historyCall).toBeDefined();
+    expect((captureCall!.input as { at: Date }).at).toBeInstanceOf(Date);
+    expect((historyCall!.input as { beforeAt: Date }).beforeAt).toBeInstanceOf(
+      Date,
+    );
+  });
 });
