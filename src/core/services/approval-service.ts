@@ -12,6 +12,9 @@ export class ApprovalServiceError extends Data.TaggedError(
   message: string;
 }> {}
 
+const toErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 export interface OutboundAction {
   actionType: "event_sync" | "outbound_draft";
   entityType: string;
@@ -151,36 +154,32 @@ export const approveOutboundAction = (
         );
       }
 
-      const execution = yield* outboundActionPort.execute({
-        actionType: input.actionType,
-        entityType: input.entityType,
-        entityId: input.entityId,
-      });
-
-      const updatedDraft: OutboundDraft = {
+      const atIso = at.toISOString();
+      const stagedDraft: OutboundDraft = {
         ...draft,
-        status: "executed",
-        executionId: execution.executionId,
-        updatedAt: at.toISOString(),
+        status: "executing",
+        updatedAt: atIso,
       };
 
-      yield* repository.saveEntity(
-        "outbound_draft",
-        updatedDraft.id,
-        updatedDraft,
-      );
+      yield* repository
+        .saveEntity("outbound_draft", stagedDraft.id, stagedDraft)
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new ApprovalServiceError({
+                message: `failed to persist outbound draft before execution: ${toErrorMessage(error)}`,
+              }),
+          ),
+        );
 
-      const transition = yield* createAuditTransition({
+      const stagedTransition = yield* createAuditTransition({
         entityType: "outbound_draft",
-        entityId: updatedDraft.id,
+        entityId: stagedDraft.id,
         fromState: draft.status,
-        toState: updatedDraft.status,
+        toState: stagedDraft.status,
         actor: input.actor,
-        reason: "Outbound draft approval executed",
+        reason: "Outbound draft approval accepted and staged for execution",
         at,
-        metadata: {
-          executionId: execution.executionId,
-        },
       }).pipe(
         Effect.mapError(
           (error) =>
@@ -190,13 +189,147 @@ export const approveOutboundAction = (
         ),
       );
 
-      yield* repository.appendAuditTransition(transition);
+      yield* repository.appendAuditTransition(stagedTransition).pipe(
+        Effect.mapError(
+          (error) =>
+            new ApprovalServiceError({
+              message: `failed to append approval transition: ${toErrorMessage(error)}`,
+            }),
+        ),
+      );
 
-      return {
-        approved: true,
-        executed: true,
-        executionId: execution.executionId,
-      };
+      let rollbackFromState: OutboundDraft["status"] = stagedDraft.status;
+      const rollbackDraftToPendingApproval = (
+        reason: string,
+      ): Effect.Effect<void, ApprovalServiceError> =>
+        Effect.gen(function* () {
+          const restoredDraft: OutboundDraft = {
+            ...draft,
+            status: "pending_approval",
+            updatedAt: atIso,
+          };
+
+          yield* repository
+            .saveEntity("outbound_draft", restoredDraft.id, restoredDraft)
+            .pipe(
+              Effect.mapError(
+                (rollbackError) =>
+                  new ApprovalServiceError({
+                    message: `failed to rollback outbound draft after execution failure: ${toErrorMessage(rollbackError)}`,
+                  }),
+              ),
+            );
+
+          const rollbackTransition = yield* createAuditTransition({
+            entityType: "outbound_draft",
+            entityId: restoredDraft.id,
+            fromState: rollbackFromState,
+            toState: restoredDraft.status,
+            actor: input.actor,
+            reason,
+            at,
+          }).pipe(
+            Effect.mapError(
+              (rollbackError) =>
+                new ApprovalServiceError({
+                  message: `failed to create rollback approval transition: ${rollbackError.message}`,
+                }),
+            ),
+          );
+
+          yield* repository.appendAuditTransition(rollbackTransition).pipe(
+            Effect.mapError(
+              (rollbackError) =>
+                new ApprovalServiceError({
+                  message: `failed to append rollback approval transition: ${toErrorMessage(rollbackError)}`,
+                }),
+            ),
+          );
+        });
+
+      return yield* Effect.gen(function* () {
+        const execution = yield* outboundActionPort.execute({
+          actionType: input.actionType,
+          entityType: input.entityType,
+          entityId: input.entityId,
+        });
+
+        const executionId = execution.executionId.trim();
+        if (executionId.length === 0) {
+          return yield* Effect.fail(
+            new ApprovalServiceError({
+              message: "outbound action execution must return non-empty executionId",
+            }),
+          );
+        }
+
+        const updatedDraft: OutboundDraft = {
+          ...stagedDraft,
+          status: "executed",
+          executionId,
+          updatedAt: atIso,
+        };
+        rollbackFromState = updatedDraft.status;
+
+        yield* repository
+          .saveEntity("outbound_draft", updatedDraft.id, updatedDraft)
+          .pipe(
+            Effect.mapError(
+              (error) =>
+                new ApprovalServiceError({
+                  message: `failed to persist outbound draft execution: ${toErrorMessage(error)}`,
+                }),
+            ),
+          );
+
+        const transition = yield* createAuditTransition({
+          entityType: "outbound_draft",
+          entityId: updatedDraft.id,
+          fromState: stagedDraft.status,
+          toState: updatedDraft.status,
+          actor: input.actor,
+          reason: "Outbound draft approval executed",
+          at,
+          metadata: {
+            executionId,
+          },
+        }).pipe(
+          Effect.mapError(
+            (error) =>
+              new ApprovalServiceError({
+                message: `failed to append approval transition: ${error.message}`,
+              }),
+          ),
+        );
+
+        yield* repository.appendAuditTransition(transition).pipe(
+          Effect.mapError(
+            (error) =>
+              new ApprovalServiceError({
+                message: `failed to append approval transition: ${toErrorMessage(error)}`,
+              }),
+          ),
+        );
+
+        return {
+          approved: true,
+          executed: true,
+          executionId,
+        };
+      }).pipe(
+        Effect.catchAll((error) =>
+          rollbackDraftToPendingApproval("Outbound draft execution failed").pipe(
+            Effect.catchAll((rollbackError) =>
+              Effect.fail(
+                new ApprovalServiceError({
+                  message: `${toErrorMessage(error)}; ${rollbackError.message}`,
+                }),
+              ),
+            ),
+            Effect.flatMap(() => Effect.fail(error)),
+          ),
+        ),
+      );
     }
 
     return yield* Effect.fail(

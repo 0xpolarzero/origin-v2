@@ -7,7 +7,11 @@ import {
   validateNonEmpty,
 } from "./common";
 
-export type OutboundDraftStatus = "draft" | "pending_approval" | "executed";
+export type OutboundDraftStatus =
+  | "draft"
+  | "pending_approval"
+  | "executing"
+  | "executed";
 
 export interface OutboundDraft {
   id: string;
