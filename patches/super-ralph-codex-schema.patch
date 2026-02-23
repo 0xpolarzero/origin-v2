@@ -380,41 +380,6 @@ index 96d1c69..2db4704 100644
                                  commitPrefix={`🐛 fix`}
                                  mainBranch={mainBranch}
                                  emojiPrefixes={emojiPrefixes}
-diff --git a/src/schemas.ts b/src/schemas.ts
-index f616890..72bd642 100644
---- a/src/schemas.ts
-+++ b/src/schemas.ts
-@@ -14,9 +14,9 @@ const discoverTicketSchema = z.object({
-   description: z.string(),
-   category: z.string(),
-   priority: z.enum(["critical", "high", "medium", "low"]),
--  acceptanceCriteria: z.array(z.string()).nullable().optional(),
--  relevantFiles: z.array(z.string()).nullable().optional(),
--  referenceFiles: z.array(z.string()).nullable().optional(),
-+  acceptanceCriteria: z.array(z.string()).nullable(),
-+  relevantFiles: z.array(z.string()).nullable(),
-+  referenceFiles: z.array(z.string()).nullable(),
- });
- 
- export const ralphOutputSchemas = {
-@@ -165,11 +165,11 @@ export const ralphOutputSchemas = {
-     mergeCommit: z.string().nullable(),
-     ciPassed: z.boolean(),
-     summary: z.string(),
--    evicted: z.boolean().default(false),
--    evictionReason: z.string().nullable().optional(),
--    evictionDetails: z.string().nullable().optional(),
--    attemptedLog: z.string().nullable().optional(),
--    attemptedDiffSummary: z.string().nullable().optional(),
--    landedOnMainSinceBranch: z.string().nullable().optional(),
-+    evicted: z.boolean(),
-+    evictionReason: z.string().nullable(),
-+    evictionDetails: z.string().nullable(),
-+    attemptedLog: z.string().nullable(),
-+    attemptedDiffSummary: z.string().nullable(),
-+    landedOnMainSinceBranch: z.string().nullable(),
-   }),
- };
 diff --git a/src/cli/gate-config.ts b/src/cli/gate-config.ts
 new file mode 100644
 index 0000000..23febe5
