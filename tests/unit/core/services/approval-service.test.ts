@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 import { Effect } from "effect";
 
 import { createEvent } from "../../../../src/core/domain/event";
+import { OutboundDraft } from "../../../../src/core/domain/outbound-draft";
 import { makeInMemoryCoreRepository } from "../../../../src/core/repositories/in-memory-core-repository";
 import { requestEventSync } from "../../../../src/core/services/event-service";
 import {
@@ -30,7 +31,9 @@ describe("approval-service", () => {
       ),
     );
 
-    const execute = mock(async (_action: unknown) => ({ executionId: "exec-1" }));
+    const execute = mock(async (_action: unknown) => ({
+      executionId: "exec-1",
+    }));
 
     const outboundPort: OutboundActionPort = {
       execute: (action) => Effect.promise(() => execute(action)),
@@ -73,7 +76,9 @@ describe("approval-service", () => {
 
   test("approveOutboundAction validates event existence before executing outbound sync", async () => {
     const repository = makeInMemoryCoreRepository();
-    const execute = mock(async (_action: unknown) => ({ executionId: "exec-2" }));
+    const execute = mock(async (_action: unknown) => ({
+      executionId: "exec-2",
+    }));
     const outboundPort: OutboundActionPort = {
       execute: (action) => Effect.promise(() => execute(action)),
     };
@@ -105,7 +110,9 @@ describe("approval-service", () => {
     );
     await Effect.runPromise(repository.saveEntity("event", event.id, event));
 
-    const execute = mock(async (_action: unknown) => ({ executionId: "exec-3" }));
+    const execute = mock(async (_action: unknown) => ({
+      executionId: "exec-3",
+    }));
     const outboundPort: OutboundActionPort = {
       execute: (action) => Effect.promise(() => execute(action)),
     };
@@ -124,5 +131,141 @@ describe("approval-service", () => {
     ).rejects.toThrow("must be in pending_approval");
 
     expect(execute).toHaveBeenCalledTimes(0);
+  });
+
+  test("approveOutboundAction rejects outbound_draft actions when entityType is not outbound_draft", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const execute = mock(async (_action: unknown) => ({
+      executionId: "exec-4",
+    }));
+    const outboundPort: OutboundActionPort = {
+      execute: (action) => Effect.promise(() => execute(action)),
+    };
+
+    await expect(
+      Effect.runPromise(
+        approveOutboundAction(repository, outboundPort, {
+          actionType: "outbound_draft",
+          entityType: "event",
+          entityId: "outbound-draft-1",
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+        }),
+      ),
+    ).rejects.toThrow("must target entityType=outbound_draft");
+
+    expect(execute).toHaveBeenCalledTimes(0);
+  });
+
+  test("approveOutboundAction rejects outbound_draft approval when draft is missing", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const execute = mock(async (_action: unknown) => ({
+      executionId: "exec-5",
+    }));
+    const outboundPort: OutboundActionPort = {
+      execute: (action) => Effect.promise(() => execute(action)),
+    };
+
+    await expect(
+      Effect.runPromise(
+        approveOutboundAction(repository, outboundPort, {
+          actionType: "outbound_draft",
+          entityType: "outbound_draft",
+          entityId: "outbound-draft-missing",
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+        }),
+      ),
+    ).rejects.toThrow("outbound draft outbound-draft-missing was not found");
+
+    expect(execute).toHaveBeenCalledTimes(0);
+  });
+
+  test("approveOutboundAction rejects outbound_draft unless status=pending_approval", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const draft: OutboundDraft = {
+      id: "outbound-draft-2",
+      payload: "Draft payload",
+      sourceSignalId: "signal-2",
+      status: "draft",
+      createdAt: "2026-02-23T14:00:00.000Z",
+      updatedAt: "2026-02-23T14:00:00.000Z",
+    };
+    await Effect.runPromise(
+      repository.saveEntity("outbound_draft", draft.id, draft),
+    );
+
+    const execute = mock(async (_action: unknown) => ({
+      executionId: "exec-6",
+    }));
+    const outboundPort: OutboundActionPort = {
+      execute: (action) => Effect.promise(() => execute(action)),
+    };
+
+    await expect(
+      Effect.runPromise(
+        approveOutboundAction(repository, outboundPort, {
+          actionType: "outbound_draft",
+          entityType: "outbound_draft",
+          entityId: draft.id,
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+        }),
+      ),
+    ).rejects.toThrow("must be in pending_approval");
+
+    expect(execute).toHaveBeenCalledTimes(0);
+  });
+
+  test("approveOutboundAction executes outbound draft, persists status=executed, stores executionId, appends audit", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const draft: OutboundDraft = {
+      id: "outbound-draft-3",
+      payload: "Draft payload",
+      sourceSignalId: "signal-3",
+      status: "pending_approval",
+      createdAt: "2026-02-23T14:00:00.000Z",
+      updatedAt: "2026-02-23T14:05:00.000Z",
+    };
+    await Effect.runPromise(
+      repository.saveEntity("outbound_draft", draft.id, draft),
+    );
+
+    const execute = mock(async (_action: unknown) => ({
+      executionId: "exec-7",
+    }));
+    const outboundPort: OutboundActionPort = {
+      execute: (action) => Effect.promise(() => execute(action)),
+    };
+
+    const approved = await Effect.runPromise(
+      approveOutboundAction(repository, outboundPort, {
+        actionType: "outbound_draft",
+        entityType: "outbound_draft",
+        entityId: draft.id,
+        approved: true,
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T14:10:00.000Z"),
+      }),
+    );
+
+    const persistedDraft = await Effect.runPromise(
+      repository.getEntity<OutboundDraft>("outbound_draft", draft.id),
+    );
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "outbound_draft",
+        entityId: draft.id,
+      }),
+    );
+
+    expect(approved.executed).toBe(true);
+    expect(approved.executionId).toBe("exec-7");
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(persistedDraft?.status).toBe("executed");
+    expect(persistedDraft?.executionId).toBe("exec-7");
+    expect(auditTrail).toHaveLength(1);
+    expect(auditTrail[0]?.fromState).toBe("pending_approval");
+    expect(auditTrail[0]?.toState).toBe("executed");
   });
 });

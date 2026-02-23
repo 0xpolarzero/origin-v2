@@ -1,9 +1,10 @@
 import { Data, Effect } from "effect";
 
 import { createAuditTransition } from "../domain/audit-transition";
-import { ActorRef, createId } from "../domain/common";
+import { ActorRef } from "../domain/common";
 import { createEvent } from "../domain/event";
 import { createNote } from "../domain/note";
+import { createOutboundDraft } from "../domain/outbound-draft";
 import { createProject } from "../domain/project";
 import { createSignal, Signal } from "../domain/signal";
 import { createTask } from "../domain/task";
@@ -35,6 +36,14 @@ export interface ConvertSignalInput {
   at?: Date;
 }
 
+export interface IngestSignalInput {
+  signalId?: string;
+  source: string;
+  payload: string;
+  actor: ActorRef;
+  at?: Date;
+}
+
 const loadSignal = (
   repository: CoreRepository,
   signalId: string,
@@ -47,6 +56,50 @@ const loadSignal = (
         new SignalServiceError({ message: `signal ${signalId} was not found` }),
       );
     }
+
+    return signal;
+  });
+
+export const ingestSignal = (
+  repository: CoreRepository,
+  input: IngestSignalInput,
+): Effect.Effect<Signal, SignalServiceError> =>
+  Effect.gen(function* () {
+    const signal = yield* createSignal({
+      id: input.signalId,
+      source: input.source,
+      payload: input.payload,
+      createdAt: input.at,
+      updatedAt: input.at,
+    }).pipe(
+      Effect.mapError(
+        (error) =>
+          new SignalServiceError({
+            message: `failed to ingest signal: ${error.message}`,
+          }),
+      ),
+    );
+
+    yield* repository.saveEntity("signal", signal.id, signal);
+
+    const transition = yield* createAuditTransition({
+      entityType: "signal",
+      entityId: signal.id,
+      fromState: "none",
+      toState: signal.triageState,
+      actor: input.actor,
+      reason: "Signal ingested",
+      at: input.at,
+    }).pipe(
+      Effect.mapError(
+        (error) =>
+          new SignalServiceError({
+            message: `failed to append signal ingest transition: ${error.message}`,
+          }),
+      ),
+    );
+
+    yield* repository.appendAuditTransition(transition);
 
     return signal;
   });
@@ -186,15 +239,20 @@ export const convertSignal = (
         break;
       }
       case "outbound_draft": {
-        const outboundDraftId = input.targetId ?? createId("outbound-draft");
-        const outboundDraft = {
-          id: outboundDraftId,
+        const outboundDraft = yield* createOutboundDraft({
+          id: input.targetId,
           payload: signal.payload,
           sourceSignalId: signal.id,
-          status: "draft",
-          createdAt: atIso,
-          updatedAt: atIso,
-        };
+          createdAt: at,
+          updatedAt: at,
+        }).pipe(
+          Effect.mapError(
+            (error) =>
+              new SignalServiceError({
+                message: `failed to convert signal to outbound draft: ${error.message}`,
+              }),
+          ),
+        );
         yield* repository.saveEntity(
           "outbound_draft",
           outboundDraft.id,
