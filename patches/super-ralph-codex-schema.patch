@@ -483,7 +483,7 @@ new file mode 100644
 index 0000000..965dccd
 --- /dev/null
 +++ b/src/cli/fallback-config.ts
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,102 @@
 +import { existsSync } from "node:fs";
 +import { basename, join } from "node:path";
 +
@@ -491,6 +491,11 @@ index 0000000..965dccd
 +  buildGateCommandConfig,
 +  type ScriptRunner,
 +} from "./gate-config";
++
++function hasScript(packageScripts: Record<string, string>, scriptName: string): boolean {
++  const command = packageScripts[scriptName];
++  return typeof command === "string" && command.trim().length > 0;
++}
 +
 +export function detectScriptRunner(repoRoot: string): ScriptRunner {
 +  if (existsSync(join(repoRoot, "bun.lock")) || existsSync(join(repoRoot, "bun.lockb"))) return "bun";
@@ -512,9 +517,15 @@ index 0000000..965dccd
 +  packageScripts: Record<string, string>,
 +) {
 +  const runner = detectScriptRunner(repoRoot);
-+  const gateConfig = buildGateCommandConfig(runner, packageScripts);
-+  const buildCmds: Record<string, string> = { ...gateConfig.buildCmds };
-+  const testCmds: Record<string, string> = { ...gateConfig.testCmds };
++  const hasNodeGateScripts = hasScript(packageScripts, "test") && hasScript(packageScripts, "typecheck");
++  const buildCmds: Record<string, string> = {};
++  const testCmds: Record<string, string> = {};
++
++  if (hasNodeGateScripts) {
++    const gateConfig = buildGateCommandConfig(runner, packageScripts);
++    Object.assign(buildCmds, gateConfig.buildCmds);
++    Object.assign(testCmds, gateConfig.testCmds);
++  }
 +
 +  if (existsSync(join(repoRoot, "go.mod"))) {
 +    buildCmds.go = buildCmds.go ?? "go build ./...";
@@ -524,6 +535,12 @@ index 0000000..965dccd
 +  if (existsSync(join(repoRoot, "Cargo.toml"))) {
 +    buildCmds.rust = buildCmds.rust ?? "cargo build";
 +    testCmds.rust = testCmds.rust ?? "cargo test";
++  }
++
++  if (Object.keys(buildCmds).length === 0 || Object.keys(testCmds).length === 0) {
++    throw new Error(
++      "Unable to derive runnable gate commands. Configure package.json test/typecheck scripts or provide Go/Rust project files.",
++    );
 +  }
 +
 +  const specsPathCandidates = [

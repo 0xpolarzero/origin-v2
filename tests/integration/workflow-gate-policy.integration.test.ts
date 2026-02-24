@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 import { buildFallbackConfig } from "super-ralph/cli/fallback-config";
 import { buildGateCommandConfig } from "super-ralph/gate-config";
@@ -30,6 +31,43 @@ function assertNoNoopPatterns(commands: string[], context: string) {
 }
 
 describe("workflow gate policy integration", () => {
+  test("CLI fallback config keeps Go/Rust gates runnable when node scripts are missing", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "workflow-gates-polyglot-"));
+
+    try {
+      writeFileSync(join(repoRoot, "go.mod"), "module example.com/polyglot\n\ngo 1.22.0\n");
+      writeFileSync(
+        join(repoRoot, "Cargo.toml"),
+        '[package]\nname = "polyglot"\nversion = "0.1.0"\nedition = "2021"\n',
+      );
+
+      const fallbackConfig = buildFallbackConfig(
+        repoRoot,
+        "docs/plans/CORE-REV-004.md",
+        {},
+      );
+
+      expect(fallbackConfig.buildCmds).toEqual({
+        go: "go build ./...",
+        rust: "cargo build",
+      });
+      expect(fallbackConfig.testCmds).toEqual({
+        go: "go test ./...",
+        rust: "cargo test",
+      });
+      expect(fallbackConfig.preLandChecks).toEqual([
+        "go build ./...",
+        "cargo build",
+      ]);
+      expect(fallbackConfig.postLandChecks).toEqual([
+        "go test ./...",
+        "cargo test",
+      ]);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
   test("CLI fallback config uses deterministic gate command wiring for this repo", () => {
     const scripts = readPackageScripts();
     const fallbackConfig = buildFallbackConfig(
