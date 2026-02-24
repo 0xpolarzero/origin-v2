@@ -407,18 +407,30 @@ export const findPersistedSchemaContractViolations = (params: {
     }),
   );
 
-  const documentedTables = new Map(
-    params.documented.tables.map((tableContract) => [
-      tableContract.table,
-      tableContract,
-    ]),
-  );
+  const documentedTables = new Map<
+    string,
+    Array<{ table: string; columns: ReadonlyArray<string> }>
+  >();
+  for (const tableContract of params.documented.tables) {
+    const existingRows = documentedTables.get(tableContract.table);
+    if (existingRows) {
+      existingRows.push(tableContract);
+      violations.push({
+        subject: `table:${tableContract.table}`,
+        issue: "extra",
+        documented: joinValues(tableContract.columns),
+      });
+      continue;
+    }
+
+    documentedTables.set(tableContract.table, [tableContract]);
+  }
   const expectedTables = new Set(
     params.expected.tables.map((table) => table.table),
   );
 
   for (const expectedTable of params.expected.tables) {
-    const documentedTable = documentedTables.get(expectedTable.table);
+    const documentedTable = documentedTables.get(expectedTable.table)?.[0];
     if (!documentedTable) {
       violations.push({
         subject: `table:${expectedTable.table}`,

@@ -471,4 +471,36 @@ describe("contract-doc-policy", () => {
       },
     ]);
   });
+
+  test("findPersistedSchemaContractViolations reports duplicate documented table rows as extra", () => {
+    const documented: PersistedSchemaContract = {
+      migrationIds: ["001_core_schema"],
+      tables: [
+        { table: "entry", columns: ["id", "content", "source"] },
+        { table: "entry", columns: ["id", "content", "source"] },
+      ],
+      triggerNames: ["task_status_check_insert"],
+      indexNames: ["idx_task_status"],
+    };
+
+    const expected: PersistedSchemaContractExpected = {
+      migrationIds: ["001_core_schema"],
+      tables: [{ table: "entry", columns: ["id", "content", "source"] }],
+      triggerNames: ["task_status_check_insert"],
+      indexNames: ["idx_task_status"],
+    };
+
+    expect(
+      findPersistedSchemaContractViolations({
+        documented,
+        expected,
+      }),
+    ).toEqual([
+      {
+        subject: "table:entry",
+        issue: "extra",
+        documented: "id,content,source",
+      },
+    ]);
+  });
 });
