@@ -80,7 +80,18 @@ function runCommand(
   };
 }
 
+function isCommandAvailable(command: string): boolean {
+  const probe = spawnSync(command, ["--version"], {
+    encoding: "utf8",
+  });
+  return probe.status === 0;
+}
+
 describe("workflow gate policy integration", () => {
+  test("command availability probe marks missing commands unavailable", () => {
+    expect(isCommandAvailable("__origin_missing_binary__")).toBe(false);
+  });
+
   test("CLI fallback config keeps Go/Rust gates runnable when node scripts are missing", () => {
     const repoRoot = mkdtempSync(join(tmpdir(), "workflow-gates-polyglot-"));
 
@@ -380,6 +391,10 @@ describe("workflow gate policy integration", () => {
   });
 
   test("temp jj repo keeps progress checkpoints visible from bookmarks and accepts bookmarks(...) revsets", () => {
+    if (!isCommandAvailable("jj")) {
+      return;
+    }
+
     const repoRoot = mkdtempSync(
       join(tmpdir(), "workflow-gates-jj-traceability-"),
     );
