@@ -1489,10 +1489,10 @@ index 66f7a40..41f4472 100644
 +6. After fixing: `jj bookmark set ticket/{props.ticketId} -r @` && `jj git push --bookmark ticket/{props.ticketId}`
 +7. Re-run the build to verify
 diff --git a/src/prompts/Implement.mdx b/src/prompts/Implement.mdx
-index ea83b15..0121bdc 100644
+index ea83b15..8e2c71d 100644
 --- a/src/prompts/Implement.mdx
 +++ b/src/prompts/Implement.mdx
-@@ -58,11 +58,22 @@ Implementation steps from plan:
+@@ -58,11 +58,30 @@ Implementation steps from plan:
  
  You MUST commit and push your changes to the ticket branch before finishing. Uncommitted work is lost work.
  
@@ -1519,6 +1519,14 @@ index ea83b15..0121bdc 100644
 +3. Repeat check + describe + new for each atomic change.
 +4. `jj bookmark set ticket/{props.ticketId} -r @`
 +5. `jj git push --bookmark ticket/{props.ticketId}`
++
++## REQUIRED OUTPUT EVIDENCE
++
++Your JSON output MUST include `atomicCommitEvidence`:
++- One entry per atomic `jj describe`.
++- `commitMessage`: exact commit message used for that atomic change.
++- `checks`: commands executed before that commit as `{ command, passed }`.
++- Only include checks with `passed: true`.
  
  **If you do not commit and push to the ticket branch, your work does not count. This is non-negotiable.**
 diff --git a/src/prompts/Land.mdx b/src/prompts/Land.mdx
@@ -1585,10 +1593,10 @@ index 7ca7698..b440979 100644
  jj bookmark set ticket/{props.ticketId} -r @
  jj git push --bookmark ticket/{props.ticketId}
 diff --git a/src/prompts/ReviewFix.mdx b/src/prompts/ReviewFix.mdx
-index 1b3fae7..fd2d35e 100644
+index 1b3fae7..1b57d2a 100644
 --- a/src/prompts/ReviewFix.mdx
 +++ b/src/prompts/ReviewFix.mdx
-@@ -39,11 +39,22 @@ If a fix requires new behavior:
+@@ -39,11 +39,30 @@ If a fix requires new behavior:
  
  You MUST commit and push your changes to the ticket branch before finishing. Uncommitted work is lost work.
  
@@ -1609,11 +1617,18 @@ index 1b3fae7..fd2d35e 100644
  2. `jj new` — create a new change for the next fix. Do NOT batch all fixes into one change.
 -3. `jj bookmark set ticket/{props.ticketId} -r @`
 -4. `jj git push --bookmark ticket/{props.ticketId}`
--
--{props.emojiPrefixes ? `Emoji prefixes: ${props.emojiPrefixes}` : 'Use conventional commit prefixes'}
 +3. Repeat check + describe + new for each atomic fix.
 +4. `jj bookmark set ticket/{props.ticketId} -r @`
 +5. `jj git push --bookmark ticket/{props.ticketId}`
++
++## REQUIRED OUTPUT EVIDENCE
+ 
+-{props.emojiPrefixes ? `Emoji prefixes: ${props.emojiPrefixes}` : 'Use conventional commit prefixes'}
++Your JSON output MUST include `atomicCommitEvidence`:
++- One entry per atomic `jj describe`.
++- `commitMessage`: exact commit message used for that atomic fix.
++- `checks`: commands executed before that commit as `{ command, passed }`.
++- Only include checks with `passed: true`.
  
  **If you do not commit and push to the ticket branch, your work does not count. This is non-negotiable.**
 diff --git a/src/prompts/Test.mdx b/src/prompts/Test.mdx
@@ -1654,3 +1669,107 @@ index 7626ebb..f7d4718 100644
  
 -Do NOT run `jj bookmark set main` or `jj git push` — landing is handled separately.
 +Do NOT update `main` in this phase. Only update and push the progress bookmark so checkpoints stay auditable.
+diff --git a/src/schemas.ts b/src/schemas.ts
+index f616890..68641ab 100644
+--- a/src/schemas.ts
++++ b/src/schemas.ts
+@@ -2,6 +2,10 @@ import { z } from "zod";
+ import { clarifyingQuestionsOutputSchema, generateQuestionsOutputSchema } from "./components/ClarifyingQuestions";
+ import { interpretConfigOutputSchema } from "./components/InterpretConfig";
+ import { monitorOutputSchema } from "./components/Monitor";
++import {
++  assertCommitMessageAllowed,
++  DEFAULT_ALLOWED_COMMIT_TYPES,
++} from "./components/commit-policy";
+ 
+ /**
+  * Standard output schemas for Ralph workflow pattern.
+@@ -19,6 +23,72 @@ const discoverTicketSchema = z.object({
+   referenceFiles: z.array(z.string()).nullable().optional(),
+ });
+ 
++const strictCommitPolicy = {
++  allowedTypes: [...DEFAULT_ALLOWED_COMMIT_TYPES],
++  requireAtomicChecks: true as const,
++};
++
++const atomicCommitCheckSchema = z.object({
++  command: z.string().min(1),
++  passed: z.boolean(),
++});
++
++const atomicCommitEvidenceSchema = z
++  .object({
++    commitMessage: z.string().min(1),
++    checks: z.array(atomicCommitCheckSchema).min(1),
++  })
++  .superRefine((value, ctx) => {
++    try {
++      assertCommitMessageAllowed(value.commitMessage, strictCommitPolicy);
++    } catch (error) {
++      ctx.addIssue({
++        code: z.ZodIssueCode.custom,
++        message:
++          error instanceof Error
++            ? error.message
++            : "Commit message does not satisfy strict commit policy",
++        path: ["commitMessage"],
++      });
++    }
++
++    const hasTypecheckPass = value.checks.some(
++      (check) => check.passed && /\btypecheck\b/i.test(check.command),
++    );
++    if (!hasTypecheckPass) {
++      ctx.addIssue({
++        code: z.ZodIssueCode.custom,
++        message:
++          "Atomic check attestation must include a passing typecheck command",
++        path: ["checks"],
++      });
++    }
++
++    const hasTestPass = value.checks.some(
++      (check) =>
++        check.passed &&
++        /\btest\b/i.test(check.command) &&
++        !/\btypecheck\b/i.test(check.command),
++    );
++    if (!hasTestPass) {
++      ctx.addIssue({
++        code: z.ZodIssueCode.custom,
++        message: "Atomic check attestation must include a passing test command",
++        path: ["checks"],
++      });
++    }
++
++    const failingCheck = value.checks.find((check) => check.passed !== true);
++    if (failingCheck) {
++      ctx.addIssue({
++        code: z.ZodIssueCode.custom,
++        message:
++          "Atomic check attestation must only include passing checks before jj describe",
++        path: ["checks"],
++      });
++    }
++  });
++
+ export const ralphOutputSchemas = {
+   generate_questions: generateQuestionsOutputSchema,
+   clarifying_questions: clarifyingQuestionsOutputSchema,
+@@ -96,6 +166,7 @@ export const ralphOutputSchemas = {
+     filesCreated: z.array(z.string()).nullable(),
+     filesModified: z.array(z.string()).nullable(),
+     nextSteps: z.string().nullable(),
++    atomicCommitEvidence: z.array(atomicCommitEvidenceSchema).min(1),
+   }),
+ 
+   test_results: z.object({
+@@ -138,6 +209,7 @@ export const ralphOutputSchemas = {
+   review_fix: z.object({
+     allIssuesResolved: z.boolean(),
+     summary: z.string(),
++    atomicCommitEvidence: z.array(atomicCommitEvidenceSchema).min(1),
+   }),
+ 
+   report: z.object({

@@ -23,6 +23,7 @@ describe("commit-policy prompt contract", () => {
     assertCommitAllowlistContract(source, "Implement");
     expect(source).toContain("Before each atomic `jj describe`");
     expect(source).toContain("props.atomicCheckCommands");
+    expect(source).toContain("atomicCommitEvidence");
   });
 
   test("ReviewFix prompt enforces allowlist and check-before-atomic-commit flow", () => {
@@ -33,6 +34,7 @@ describe("commit-policy prompt contract", () => {
     assertCommitAllowlistContract(source, "ReviewFix");
     expect(source).toContain("Before each atomic `jj describe`");
     expect(source).toContain("props.atomicCheckCommands");
+    expect(source).toContain("atomicCommitEvidence");
   });
 
   test("Test prompt enforces allowlist and check-before-atomic-commit flow for fixes", () => {
