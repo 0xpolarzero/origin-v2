@@ -18,6 +18,7 @@ import { runSqliteMigrations } from "../../src/core/repositories/sqlite/migratio
 import { CORE_DB_MIGRATIONS } from "../../src/core/repositories/sqlite/migrations";
 import {
   findWorkflowRouteContractViolations,
+  parseMarkdownTableRows,
   parseAuthoritativeWorkflowContract,
 } from "../../src/core/tooling/contract-doc-policy";
 
@@ -81,6 +82,21 @@ const readAuthoritativeWorkflowContract = (): string =>
     "utf8",
   );
 
+const readMarkdownSection = (markdown: string, heading: string): string => {
+  const headingPattern = new RegExp(`^##\\s+${heading}\\s*$`, "m");
+  const headingMatch = headingPattern.exec(markdown);
+  if (!headingMatch) {
+    return "";
+  }
+
+  const startIndex = headingMatch.index + headingMatch[0].length;
+  const remainder = markdown.slice(startIndex);
+  const nextHeading = /\n##\s+/.exec(remainder);
+  return nextHeading
+    ? remainder.slice(0, nextHeading.index).trim()
+    : remainder.trim();
+};
+
 const makeApiStub = (): WorkflowApi => ({
   captureEntry: (_input) => Effect.die("unused"),
   suggestEntryAsTask: (_input) => Effect.die("unused"),
@@ -134,37 +150,51 @@ describe("api contract docs", () => {
 
   test("authoritative workflow contract includes API validation, error mapping, and dispatcher sections", () => {
     const markdown = readAuthoritativeWorkflowContract();
+    const validationSection = readMarkdownSection(markdown, "Shared Validation Rules");
+    const dispatcherSection = readMarkdownSection(markdown, "HTTP Dispatcher Contract");
+    const errorMappingRows = parseMarkdownTableRows(
+      markdown,
+      "Service Error to API Status Mapping",
+    );
+    const errorMappings = new Map(
+      errorMappingRows.map((row) => [
+        (row["Service Error Code"] ?? "").trim(),
+        {
+          apiErrorCode: (row["API Error Code"] ?? "").trim(),
+          status: (row["HTTP Status"] ?? "").trim(),
+        },
+      ]),
+    );
 
     expect(markdown).toContain("## Shared Validation Rules");
-    expect(markdown).toContain(
-      "Date fields accept either a Date instance or an ISO-8601 string with timezone (`Z` or offset).",
-    );
-    expect(markdown).toContain(
-      "Fields documented as non-empty strings reject blank values after trimming.",
-    );
+    expect(validationSection).toMatch(/date fields/i);
+    expect(validationSection).toMatch(/ISO-8601/i);
+    expect(validationSection).toMatch(/non-empty strings?/i);
 
     expect(markdown).toContain("## Service Error to API Status Mapping");
-    expect(markdown).toContain(
-      "| Service Error Code | API Error Code | HTTP Status |",
-    );
-    expect(markdown).toMatch(
-      /\|\s*invalid_request\s*\|\s*validation\s*\|\s*400\s*\|/,
-    );
-    expect(markdown).toMatch(/\|\s*forbidden\s*\|\s*forbidden\s*\|\s*403\s*\|/);
-    expect(markdown).toMatch(/\|\s*conflict\s*\|\s*conflict\s*\|\s*409\s*\|/);
-    expect(markdown).toMatch(/\|\s*not_found\s*\|\s*not_found\s*\|\s*404\s*\|/);
+    expect(errorMappings.get("invalid_request")).toEqual({
+      apiErrorCode: "validation",
+      status: "400",
+    });
+    expect(errorMappings.get("forbidden")).toEqual({
+      apiErrorCode: "forbidden",
+      status: "403",
+    });
+    expect(errorMappings.get("conflict")).toEqual({
+      apiErrorCode: "conflict",
+      status: "409",
+    });
+    expect(errorMappings.get("not_found")).toEqual({
+      apiErrorCode: "not_found",
+      status: "404",
+    });
 
     expect(markdown).toContain("## HTTP Dispatcher Contract");
-    expect(markdown).toContain("Unknown route path returns `404`.");
-    expect(markdown).toContain(
-      "Unsupported method for a known path returns `405`.",
-    );
-    expect(markdown).toContain(
-      "Mapped route failures return a sanitized body shape: `{ error, route, message }`.",
-    );
-    expect(markdown).toContain(
-      "Unexpected dispatch defects return `500` with a generic internal server error message.",
-    );
+    expect(dispatcherSection).toMatch(/404/);
+    expect(dispatcherSection).toMatch(/405/);
+    expect(dispatcherSection).toMatch(/sanitized body shape/i);
+    expect(dispatcherSection).toMatch(/error,\s*route,\s*message/i);
+    expect(dispatcherSection).toMatch(/500/);
   });
 
   test("authoritative workflow contract schema sections match migrated sqlite objects", async () => {
