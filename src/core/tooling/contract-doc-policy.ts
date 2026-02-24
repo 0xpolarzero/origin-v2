@@ -22,12 +22,7 @@ export interface PersistedSchemaContract {
   indexNames: ReadonlyArray<string>;
 }
 
-export interface PersistedSchemaContractExpected {
-  migrationIds: ReadonlyArray<string>;
-  tables: ReadonlyArray<{ table: string; columns: ReadonlyArray<string> }>;
-  triggerNames: ReadonlyArray<string>;
-  indexNames: ReadonlyArray<string>;
-}
+export type PersistedSchemaContractExpected = PersistedSchemaContract;
 
 export interface PersistedSchemaContractViolation {
   subject: string;
