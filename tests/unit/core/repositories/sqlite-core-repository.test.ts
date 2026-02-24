@@ -884,4 +884,108 @@ describe("makeSqliteCoreRepository", () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  test("listActivityFeed applies SQL filters, ordering, and limit", async () => {
+    const { tempDir, databasePath } = makeTempDatabasePath();
+
+    try {
+      const repository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+      const task = await Effect.runPromise(
+        createTask({
+          id: "task-activity-1",
+          title: "Task activity feed",
+        }),
+      );
+      await Effect.runPromise(repository.saveEntity("task", task.id, task));
+
+      const transitions = await Promise.all([
+        Effect.runPromise(
+          createAuditTransition({
+            id: "audit-activity-query-1",
+            entityType: "task",
+            entityId: "task-activity-1",
+            fromState: "none",
+            toState: "planned",
+            actor: { id: "ai-1", kind: "ai" },
+            reason: "AI planned task",
+            at: new Date("2026-02-23T13:00:00.000Z"),
+          }),
+        ),
+        Effect.runPromise(
+          createAuditTransition({
+            id: "audit-activity-query-2",
+            entityType: "task",
+            entityId: "task-activity-1",
+            fromState: "planned",
+            toState: "blocked",
+            actor: { id: "user-1", kind: "user" },
+            reason: "User blocked task",
+            at: new Date("2026-02-23T13:01:00.000Z"),
+          }),
+        ),
+        Effect.runPromise(
+          createAuditTransition({
+            id: "audit-activity-query-3",
+            entityType: "task",
+            entityId: "task-activity-1",
+            fromState: "blocked",
+            toState: "planned",
+            actor: { id: "ai-1", kind: "ai" },
+            reason: "AI unblocked task",
+            at: new Date("2026-02-23T13:02:00.000Z"),
+            metadata: { rollbackTarget: "audit-77" },
+          }),
+        ),
+      ]);
+
+      for (const transition of transitions) {
+        await Effect.runPromise(repository.appendAuditTransition(transition));
+      }
+
+      const listActivityFeed = (
+        repository as {
+          listActivityFeed?: (query: {
+            entityType?: string;
+            entityId?: string;
+            actorKind?: "user" | "system" | "ai";
+            aiOnly?: boolean;
+            limit?: number;
+            beforeAt?: Date;
+          }) => Effect.Effect<ReadonlyArray<{ id: string; actor: { kind: string } }>>;
+        }
+      ).listActivityFeed;
+
+      expect(listActivityFeed).toBeDefined();
+
+      const queried = await Effect.runPromise(
+        listActivityFeed!({
+          entityType: "task",
+          entityId: "task-activity-1",
+          aiOnly: true,
+          beforeAt: new Date("2026-02-23T13:03:00.000Z"),
+          limit: 1,
+        }),
+      );
+
+      expect(queried).toEqual([
+        {
+          id: "audit-activity-query-3",
+          entityType: "task",
+          entityId: "task-activity-1",
+          fromState: "blocked",
+          toState: "planned",
+          actor: { id: "ai-1", kind: "ai" },
+          reason: "AI unblocked task",
+          at: "2026-02-23T13:02:00.000Z",
+          metadata: { rollbackTarget: "audit-77" },
+        },
+      ]);
+
+      await Effect.runPromise(repository.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

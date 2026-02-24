@@ -4,6 +4,7 @@ import { Data, Effect, Exit, FiberId } from "effect";
 import { AuditTransition } from "../../domain/audit-transition";
 import { EntityType } from "../../domain/common";
 import {
+  ActivityFeedQuery,
   AuditTrailFilter,
   CoreRepository,
   JobRunHistoryQuery,
@@ -743,6 +744,102 @@ export const makeSqliteCoreRepository = (
         return transitions;
       });
 
+    const listActivityFeed = (
+      query: ActivityFeedQuery,
+    ): Effect.Effect<ReadonlyArray<unknown>, SqliteCoreRepositoryError> =>
+      Effect.gen(function* () {
+        const whereClauses: Array<string> = [];
+        const args: Array<SqliteValue> = [];
+        const beforeAtIso = query.beforeAt?.toISOString();
+
+        if (query.entityType) {
+          whereClauses.push("entity_type = ?");
+          args.push(query.entityType);
+        }
+
+        if (query.entityId) {
+          whereClauses.push("entity_id = ?");
+          args.push(query.entityId);
+        }
+
+        if (query.actorKind) {
+          whereClauses.push("actor_kind = ?");
+          args.push(query.actorKind);
+        }
+
+        if (query.aiOnly === true) {
+          whereClauses.push("actor_kind = ?");
+          args.push("ai");
+        }
+
+        if (beforeAtIso !== undefined) {
+          whereClauses.push("at < ?");
+          args.push(beforeAtIso);
+        }
+
+        const sqlParts = [
+          `
+            SELECT
+              id,
+              entity_type,
+              entity_id,
+              from_state,
+              to_state,
+              actor_id,
+              actor_kind,
+              reason,
+              at,
+              metadata
+            FROM audit_transitions
+          `,
+        ];
+
+        if (whereClauses.length > 0) {
+          sqlParts.push(`WHERE ${whereClauses.join(" AND ")}`);
+        }
+
+        sqlParts.push("ORDER BY at DESC, id DESC");
+
+        if (query.limit !== undefined) {
+          sqlParts.push("LIMIT ?");
+          args.push(query.limit);
+        }
+
+        const rows = yield* Effect.try({
+          try: () =>
+            db.query(sqlParts.join("\n")).all(...args) as Array<AuditRow>,
+          catch: (cause) =>
+            toRepositoryError("failed to list activity feed", cause),
+        });
+
+        const records: Array<unknown> = [];
+        for (const row of rows) {
+          const metadata = row.metadata
+            ? ((yield* parseJson(row.metadata, "metadata")) as Record<
+                string,
+                string
+              >)
+            : undefined;
+
+          records.push({
+            id: row.id,
+            entityType: row.entity_type,
+            entityId: row.entity_id,
+            fromState: row.from_state,
+            toState: row.to_state,
+            actor: {
+              id: row.actor_id,
+              kind: row.actor_kind,
+            },
+            reason: row.reason,
+            at: row.at,
+            metadata,
+          });
+        }
+
+        return records;
+      });
+
     const close = (): Effect.Effect<void, SqliteCoreRepositoryError> =>
       Effect.try({
         try: () => {
@@ -862,6 +959,7 @@ export const makeSqliteCoreRepository = (
       deleteEntity,
       appendAuditTransition,
       listAuditTrail,
+      listActivityFeed,
       withTransaction,
       close,
     } as unknown as CoreRepository & {

@@ -20,6 +20,15 @@ export interface ListJobsQuery {
   beforeUpdatedAt?: Date;
 }
 
+export interface ActivityFeedQuery {
+  entityType?: EntityType | string;
+  entityId?: string;
+  actorKind?: "user" | "system" | "ai";
+  aiOnly?: boolean;
+  limit?: number;
+  beforeAt?: Date;
+}
+
 export interface CoreRepository {
   saveEntity: <T>(
     entityType: EntityType | string,
@@ -41,6 +50,9 @@ export interface CoreRepository {
     query: JobRunHistoryQuery,
   ) => Effect.Effect<ReadonlyArray<unknown>>;
   listJobs?: (query: ListJobsQuery) => Effect.Effect<ReadonlyArray<unknown>>;
+  listActivityFeed?: (
+    query: ActivityFeedQuery,
+  ) => Effect.Effect<ReadonlyArray<unknown>>;
   appendAuditTransition: (transition: AuditTransition) => Effect.Effect<void>;
   listAuditTrail: (
     filter?: AuditTrailFilter,
