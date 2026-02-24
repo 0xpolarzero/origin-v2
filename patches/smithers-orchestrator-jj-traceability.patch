@@ -88,10 +88,14 @@ index 6e25cc2..ad09d47 100644
 -  if (createdWorktrees.has(worktreePath)) {
 -    if (existsSync(worktreePath)) return;
 +  const worktreeExists = existsSync(worktreePath);
-+  if (createdWorktrees.has(worktreePath) && !worktreeExists) {
-     // Process-global cache can become stale if the path is later deleted.
-     createdWorktrees.delete(worktreePath);
-   }
++  if (createdWorktrees.has(worktreePath)) {
++    if (worktreeExists) {
++      // The path was already prepared in this process, so re-entry is a no-op.
++      return;
++    }
++    // Process-global cache can become stale if the path is later deleted.
++    createdWorktrees.delete(worktreePath);
++  }
 -  if (existsSync(worktreePath)) {
 -    createdWorktrees.add(worktreePath);
 -    return;
@@ -114,4 +118,3 @@ index 6e25cc2..ad09d47 100644
    // Best effort: refresh remote refs for git so origin/main can be used as a
    // base when local main is absent.
    if (vcs.type === "git") {
-
