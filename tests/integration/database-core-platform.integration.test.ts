@@ -7,6 +7,7 @@ import { Effect } from "effect";
 
 import { buildCorePlatform } from "../../src/core/app/core-platform";
 import { CORE_DB_MIGRATIONS } from "../../src/core/repositories/sqlite/migrations";
+import { makeSqliteCoreRepository } from "../../src/core/repositories/sqlite/sqlite-core-repository";
 
 const createTempPaths = (): {
   tempDir: string;
@@ -812,6 +813,279 @@ describe("database-backed core platform", () => {
       expect(missingVersionRows.count).toBe(0);
       expect(mismatchedVersionRows.count).toBe(0);
       expect(checkpointVersion?.latestVersion).toBe(3);
+
+      if (!platform.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platform.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("sqlite relation-integrity trigger failures surface and leave existing links intact", async () => {
+    const { tempDir, databasePath } = createTempPaths();
+
+    try {
+      const platform = await Effect.runPromise(
+        buildCorePlatform({
+          databasePath,
+        }),
+      );
+
+      await Effect.runPromise(
+        platform.captureEntry({
+          entryId: "entry-db-trigger-1",
+          content: "Trigger integrity source entry",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T19:00:00.000Z"),
+        }),
+      );
+      await Effect.runPromise(
+        platform.acceptEntryAsTask({
+          entryId: "entry-db-trigger-1",
+          taskId: "task-db-trigger-1",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T19:01:00.000Z"),
+        }),
+      );
+
+      const db = new Database(databasePath);
+      expect(() =>
+        db.query("DELETE FROM entry WHERE id = ?").run("entry-db-trigger-1"),
+      ).toThrow("invalid delete entry.id referenced by task.source_entry_id");
+      db.close();
+
+      const entry = await Effect.runPromise(
+        platform.getEntity<{ id: string; acceptedTaskId?: string }>(
+          "entry",
+          "entry-db-trigger-1",
+        ),
+      );
+      const task = await Effect.runPromise(
+        platform.getEntity<{ id: string; sourceEntryId?: string }>(
+          "task",
+          "task-db-trigger-1",
+        ),
+      );
+
+      expect(entry?.id).toBe("entry-db-trigger-1");
+      expect(entry?.acceptedTaskId).toBe("task-db-trigger-1");
+      expect(task?.id).toBe("task-db-trigger-1");
+      expect(task?.sourceEntryId).toBe("entry-db-trigger-1");
+
+      if (!platform.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platform.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("forced recordJobRun write failure rolls back partial sqlite mutations", async () => {
+    const { tempDir, databasePath } = createTempPaths();
+
+    try {
+      const sqliteRepository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+      let forceTransitionFailure = false;
+      const repository = {
+        ...sqliteRepository,
+        appendAuditTransition: (transition: {
+          entityType: string;
+          reason: string;
+        }) => {
+          if (
+            forceTransitionFailure &&
+            transition.entityType === "job" &&
+            transition.reason.includes("Job run recorded")
+          ) {
+            return Effect.fail(new Error("forced recordJobRun transition failure"));
+          }
+
+          return sqliteRepository.appendAuditTransition(transition as never);
+        },
+      };
+      const platform = await Effect.runPromise(
+        buildCorePlatform({
+          repository: repository as never,
+        }),
+      );
+
+      await Effect.runPromise(
+        platform.createJob({
+          jobId: "job-db-rollback-1",
+          name: "Rollback coverage job",
+          actor: { id: "system-1", kind: "system" },
+          at: new Date("2026-02-23T19:10:00.000Z"),
+        }),
+      );
+      const before = await Effect.runPromise(
+        platform.inspectJobRun("job-db-rollback-1"),
+      );
+
+      forceTransitionFailure = true;
+      const failedRun = await Effect.runPromise(
+        Effect.either(
+          platform.recordJobRun({
+            jobId: "job-db-rollback-1",
+            outcome: "failed",
+            diagnostics: "forced failure",
+            actor: { id: "system-1", kind: "system" },
+            at: new Date("2026-02-23T19:11:00.000Z"),
+          }),
+        ),
+      );
+
+      expect(failedRun._tag).toBe("Left");
+      if (failedRun._tag === "Left") {
+        expect(failedRun.left.message).toContain(
+          "forced recordJobRun transition failure",
+        );
+      }
+
+      const after = await Effect.runPromise(platform.inspectJobRun("job-db-rollback-1"));
+      const history = await Effect.runPromise(
+        platform.listJobRunHistory("job-db-rollback-1"),
+      );
+      const audit = await Effect.runPromise(
+        platform.listAuditTrail({
+          entityType: "job",
+          entityId: "job-db-rollback-1",
+        }),
+      );
+
+      expect(after.runState).toBe(before.runState);
+      expect(after.retryCount).toBe(before.retryCount);
+      expect(after.diagnostics).toBe(before.diagnostics);
+      expect(history).toHaveLength(0);
+      expect(
+        audit.filter((transition) => transition.toState === "failed"),
+      ).toHaveLength(0);
+
+      if (!platform.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platform.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("forced recoverCheckpoint write failure rolls back partial sqlite restore", async () => {
+    const { tempDir, databasePath } = createTempPaths();
+
+    try {
+      const sqliteRepository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+      let forceRecoverCheckpointWriteFailure = false;
+      const repository = {
+        ...sqliteRepository,
+        saveEntity: (entityType: string, entityId: string, entity: unknown) => {
+          const status =
+            typeof entity === "object" &&
+            entity !== null &&
+            "status" in entity &&
+            typeof (entity as { status?: unknown }).status === "string"
+              ? (entity as { status: string }).status
+              : undefined;
+          if (
+            forceRecoverCheckpointWriteFailure &&
+            entityType === "checkpoint" &&
+            entityId === "checkpoint-db-rollback-1" &&
+            status === "recovered"
+          ) {
+            return Effect.fail(
+              new Error("forced recoverCheckpoint checkpoint write failure"),
+            );
+          }
+
+          return sqliteRepository.saveEntity(entityType, entityId, entity);
+        },
+      };
+      const platform = await Effect.runPromise(
+        buildCorePlatform({
+          repository: repository as never,
+        }),
+      );
+
+      await Effect.runPromise(
+        platform.saveView({
+          viewId: "view-db-rollback-1",
+          name: "Pre-recovery view",
+          query: "status:planned",
+          filters: { status: "planned" },
+        }),
+      );
+      await Effect.runPromise(
+        platform.createWorkflowCheckpoint({
+          checkpointId: "checkpoint-db-rollback-1",
+          name: "Before rollback failure",
+          snapshotEntityRefs: [
+            { entityType: "view", entityId: "view-db-rollback-1" },
+          ],
+          auditCursor: 12,
+          rollbackTarget: "audit-12",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T19:20:00.000Z"),
+        }),
+      );
+      await Effect.runPromise(
+        platform.saveView({
+          viewId: "view-db-rollback-1",
+          name: "Mutated after checkpoint",
+          query: "status:completed",
+          filters: { status: "completed" },
+        }),
+      );
+
+      forceRecoverCheckpointWriteFailure = true;
+      const recoverAttempt = await Effect.runPromise(
+        Effect.either(
+          platform.recoverCheckpoint(
+            "checkpoint-db-rollback-1",
+            { id: "user-1", kind: "user" },
+            new Date("2026-02-23T19:21:00.000Z"),
+          ),
+        ),
+      );
+
+      expect(recoverAttempt._tag).toBe("Left");
+      if (recoverAttempt._tag === "Left") {
+        expect(recoverAttempt.left.message).toContain(
+          "forced recoverCheckpoint checkpoint write failure",
+        );
+      }
+
+      const persistedView = await Effect.runPromise(
+        platform.getEntity<{ name: string; query: string; filters: { status: string } }>(
+          "view",
+          "view-db-rollback-1",
+        ),
+      );
+      const checkpoint = await Effect.runPromise(
+        platform.getEntity<{ status: string }>(
+          "checkpoint",
+          "checkpoint-db-rollback-1",
+        ),
+      );
+      const checkpointAudit = await Effect.runPromise(
+        platform.listAuditTrail({
+          entityType: "checkpoint",
+          entityId: "checkpoint-db-rollback-1",
+        }),
+      );
+
+      expect(persistedView?.name).toBe("Mutated after checkpoint");
+      expect(persistedView?.query).toBe("status:completed");
+      expect(persistedView?.filters.status).toBe("completed");
+      expect(checkpoint?.status).toBe("created");
+      expect(
+        checkpointAudit.filter((transition) => transition.toState === "recovered"),
+      ).toHaveLength(0);
 
       if (!platform.close) {
         throw new Error("database-backed platform should expose close()");

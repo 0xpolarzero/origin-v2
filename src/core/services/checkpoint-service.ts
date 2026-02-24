@@ -13,6 +13,7 @@ export class CheckpointServiceError extends Data.TaggedError(
   "CheckpointServiceError",
 )<{
   message: string;
+  code?: "not_found" | "conflict" | "invalid_request";
 }> {}
 
 export interface CreateWorkflowCheckpointInput {
@@ -45,6 +46,7 @@ const loadCheckpoint = (
       return yield* Effect.fail(
         new CheckpointServiceError({
           message: `checkpoint ${checkpointId} was not found`,
+          code: "not_found",
         }),
       );
     }
@@ -62,6 +64,7 @@ const ensureCanKeep = (
   return Effect.fail(
     new CheckpointServiceError({
       message: `checkpoint ${checkpoint.id} cannot transition ${checkpoint.status} -> kept`,
+      code: "conflict",
     }),
   );
 };
@@ -76,6 +79,7 @@ const ensureCanRecover = (
   return Effect.fail(
     new CheckpointServiceError({
       message: `checkpoint ${checkpoint.id} cannot transition ${checkpoint.status} -> recovered`,
+      code: "conflict",
     }),
   );
 };
@@ -114,6 +118,7 @@ export const createWorkflowCheckpoint = (
           (error) =>
             new CheckpointServiceError({
               message: `failed to create checkpoint: ${error.message}`,
+              code: "invalid_request",
             }),
         ),
       );
@@ -205,6 +210,7 @@ export const recoverCheckpoint = (
             return yield* Effect.fail(
               new CheckpointServiceError({
                 message: `checkpoint ${checkpoint.id} has an invalid snapshot for ${snapshot.entityType}:${snapshot.entityId}`,
+                code: "invalid_request",
               }),
             );
           }

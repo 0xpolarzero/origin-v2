@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
 import { ApprovalServiceError } from "../../../../src/core/services/approval-service";
+import { CheckpointServiceError } from "../../../../src/core/services/checkpoint-service";
 import { EventServiceError } from "../../../../src/core/services/event-service";
+import { JobServiceError } from "../../../../src/core/services/job-service";
 import {
   toWorkflowApiError,
   WorkflowApiError,
@@ -61,6 +63,79 @@ describe("api/workflows/errors", () => {
       message: "event event-404 was not found",
       code: "not_found",
       statusCode: 404,
+    });
+  });
+
+  test("toWorkflowApiError maps JobServiceError not_found + invalid_request codes", () => {
+    const notFound = toWorkflowApiError(
+      "job.retry",
+      new JobServiceError({
+        message: "job job-404 was not found",
+        code: "not_found",
+      }),
+    );
+    const invalidRequest = toWorkflowApiError(
+      "job.listHistory",
+      new JobServiceError({
+        message: "limit must be a positive integer",
+        code: "invalid_request",
+      }),
+    );
+
+    expect(notFound).toMatchObject({
+      route: "job.retry",
+      message: "job job-404 was not found",
+      code: "not_found",
+      statusCode: 404,
+    });
+    expect(invalidRequest).toMatchObject({
+      route: "job.listHistory",
+      message: "limit must be a positive integer",
+      code: "validation",
+      statusCode: 400,
+    });
+  });
+
+  test("toWorkflowApiError maps CheckpointServiceError not_found/conflict/invalid_request codes", () => {
+    const notFound = toWorkflowApiError(
+      "checkpoint.keep",
+      new CheckpointServiceError({
+        message: "checkpoint checkpoint-404 was not found",
+        code: "not_found",
+      }),
+    );
+    const conflict = toWorkflowApiError(
+      "checkpoint.keep",
+      new CheckpointServiceError({
+        message: "checkpoint checkpoint-1 cannot transition recovered -> kept",
+        code: "conflict",
+      }),
+    );
+    const invalidRequest = toWorkflowApiError(
+      "checkpoint.create",
+      new CheckpointServiceError({
+        message: "failed to create checkpoint: name is required",
+        code: "invalid_request",
+      }),
+    );
+
+    expect(notFound).toMatchObject({
+      route: "checkpoint.keep",
+      message: "checkpoint checkpoint-404 was not found",
+      code: "not_found",
+      statusCode: 404,
+    });
+    expect(conflict).toMatchObject({
+      route: "checkpoint.keep",
+      message: "checkpoint checkpoint-1 cannot transition recovered -> kept",
+      code: "conflict",
+      statusCode: 409,
+    });
+    expect(invalidRequest).toMatchObject({
+      route: "checkpoint.create",
+      message: "failed to create checkpoint: name is required",
+      code: "validation",
+      statusCode: 400,
     });
   });
 

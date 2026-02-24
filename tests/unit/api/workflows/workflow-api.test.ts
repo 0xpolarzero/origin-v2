@@ -8,7 +8,9 @@ import {
 } from "../../../../src/api/workflows/contracts";
 import { WorkflowApiError } from "../../../../src/api/workflows/errors";
 import { ApprovalServiceError } from "../../../../src/core/services/approval-service";
+import { CheckpointServiceError } from "../../../../src/core/services/checkpoint-service";
 import { EventServiceError } from "../../../../src/core/services/event-service";
+import { JobServiceError } from "../../../../src/core/services/job-service";
 import { makeWorkflowApi } from "../../../../src/api/workflows/workflow-api";
 
 const ACTOR = { id: "user-1", kind: "user" } as const;
@@ -620,6 +622,85 @@ describe("api/workflows/workflow-api", () => {
         route: "approval.approveOutboundAction",
         code: "forbidden",
         statusCode: 403,
+      });
+    }
+  });
+
+  test("retryJob preserves mapped JobServiceError metadata", async () => {
+    const platform = makePlatformStub({
+      retryJob: () =>
+        Effect.fail(
+          new JobServiceError({
+            message: "job job-api-404 was not found",
+            code: "not_found",
+          }),
+        ),
+    });
+    const api = makeWorkflowApi({ platform });
+
+    const result = await Effect.runPromise(
+      Effect.either(api.retryJob(retryJobInput)),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "job.retry",
+        code: "not_found",
+        statusCode: 404,
+        message: "job job-api-404 was not found",
+      });
+    }
+  });
+
+  test("checkpoint handlers preserve mapped CheckpointServiceError metadata", async () => {
+    const platform = makePlatformStub({
+      keepCheckpoint: () =>
+        Effect.fail(
+          new CheckpointServiceError({
+            message: "checkpoint checkpoint-404 was not found",
+            code: "not_found",
+          }),
+        ),
+      recoverCheckpoint: () =>
+        Effect.fail(
+          new CheckpointServiceError({
+            message:
+              "checkpoint checkpoint-1 cannot transition recovered -> recovered",
+            code: "conflict",
+          }),
+        ),
+    });
+    const api = makeWorkflowApi({ platform });
+
+    const keepResult = await Effect.runPromise(
+      Effect.either(api.keepCheckpoint(keepCheckpointInput)),
+    );
+    const recoverResult = await Effect.runPromise(
+      Effect.either(api.recoverCheckpoint(recoverCheckpointInput)),
+    );
+
+    expect(Either.isLeft(keepResult)).toBe(true);
+    if (Either.isLeft(keepResult)) {
+      expect(keepResult.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "checkpoint.keep",
+        code: "not_found",
+        statusCode: 404,
+        message: "checkpoint checkpoint-404 was not found",
+      });
+    }
+
+    expect(Either.isLeft(recoverResult)).toBe(true);
+    if (Either.isLeft(recoverResult)) {
+      expect(recoverResult.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "checkpoint.recover",
+        code: "conflict",
+        statusCode: 409,
+        message:
+          "checkpoint checkpoint-1 cannot transition recovered -> recovered",
       });
     }
   });

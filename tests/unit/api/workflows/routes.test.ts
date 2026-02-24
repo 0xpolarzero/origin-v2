@@ -415,6 +415,89 @@ describe("api/workflows/routes", () => {
     }
   });
 
+  test("capture.entry rejects whitespace-only content", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const captureRoute = byKey.get("capture.entry");
+
+    expect(captureRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        captureRoute!.handle({
+          entryId: "entry-route-1",
+          content: "   ",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "capture.entry",
+      });
+      expect(result.left.message).toContain("content");
+    }
+  });
+
+  test("signal.ingest rejects whitespace-only source", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const ingestRoute = byKey.get("signal.ingest");
+
+    expect(ingestRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        ingestRoute!.handle({
+          signalId: "signal-route-1",
+          source: "   ",
+          payload: "payload",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "signal.ingest",
+      });
+      expect(result.left.message).toContain("source");
+    }
+  });
+
+  test("signal.ingest rejects whitespace-only payload", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const ingestRoute = byKey.get("signal.ingest");
+
+    expect(ingestRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        ingestRoute!.handle({
+          signalId: "signal-route-1",
+          source: "email",
+          payload: "   ",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "signal.ingest",
+      });
+      expect(result.left.message).toContain("payload");
+    }
+  });
+
   test("approval.approveOutboundAction rejects whitespace-only entityId", async () => {
     const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
     const byKey = new Map(routes.map((route) => [route.key, route]));
@@ -556,6 +639,111 @@ describe("api/workflows/routes", () => {
         route: "checkpoint.create",
       });
       expect(result.left.message).toContain("rollbackTarget");
+    }
+  });
+
+  test("job.create rejects whitespace-only name", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const createRoute = byKey.get("job.create");
+
+    expect(createRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        createRoute!.handle({
+          jobId: "job-route-1",
+          name: "   ",
+          actor: { id: "system-1", kind: "system" },
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "job.create",
+      });
+      expect(result.left.message).toContain("name");
+    }
+  });
+
+  test("job.retry rejects whitespace-only jobId", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const retryRoute = byKey.get("job.retry");
+
+    expect(retryRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        retryRoute!.handle({
+          jobId: "   ",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "job.retry",
+      });
+      expect(result.left.message).toContain("jobId");
+    }
+  });
+
+  test("checkpoint.keep rejects whitespace-only checkpointId", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const keepRoute = byKey.get("checkpoint.keep");
+
+    expect(keepRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        keepRoute!.handle({
+          checkpointId: "   ",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "checkpoint.keep",
+      });
+      expect(result.left.message).toContain("checkpointId");
+    }
+  });
+
+  test("checkpoint.recover rejects whitespace-only checkpointId", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const recoverRoute = byKey.get("checkpoint.recover");
+
+    expect(recoverRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        recoverRoute!.handle({
+          checkpointId: "   ",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "checkpoint.recover",
+      });
+      expect(result.left.message).toContain("checkpointId");
     }
   });
 
