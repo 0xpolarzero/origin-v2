@@ -17,10 +17,10 @@ index 2368a78..093cbea 100644
      "src/",
 diff --git a/src/cli/fallback-config.ts b/src/cli/fallback-config.ts
 new file mode 100644
-index 0000000..670da0a
+index 0000000..ca07a3b
 --- /dev/null
 +++ b/src/cli/fallback-config.ts
-@@ -0,0 +1,128 @@
+@@ -0,0 +1,133 @@
 +import { existsSync } from "node:fs";
 +import { basename, isAbsolute, join, relative } from "node:path";
 +
@@ -28,6 +28,7 @@ index 0000000..670da0a
 +  buildGateCommandConfig,
 +  type ScriptRunner,
 +} from "./gate-config";
++import { DEFAULT_ALLOWED_COMMIT_TYPES } from "../components/commit-policy";
 +
 +function hasScript(packageScripts: Record<string, string>, scriptName: string): boolean {
 +  const command = packageScripts[scriptName];
@@ -133,6 +134,10 @@ index 0000000..670da0a
 +    ].filter(Boolean),
 +    buildCmds,
 +    testCmds,
++    commitPolicy: {
++      allowedTypes: [...DEFAULT_ALLOWED_COMMIT_TYPES],
++      requireAtomicChecks: true,
++    },
 +    agentSafetyPolicy: {
 +      riskyModeEnabled: false,
 +      approvalRequiredPhases: [],
@@ -248,7 +253,7 @@ index 0000000..23febe5
 +  };
 +};
 diff --git a/src/cli/index.ts b/src/cli/index.ts
-index 633e857..30caddd 100644
+index 633e857..b05bc06 100644
 --- a/src/cli/index.ts
 +++ b/src/cli/index.ts
 @@ -18,9 +18,10 @@
@@ -401,7 +406,7 @@ index 633e857..30caddd 100644
  function renderWorkflowFile(params: {
    promptText: string;
    promptSpecPath: string;
-@@ -294,30 +212,44 @@ function renderWorkflowFile(params: {
+@@ -294,30 +212,45 @@ function renderWorkflowFile(params: {
    const isSuperRalphRepo = existsSync(join(repoRoot, 'src/components/SuperRalph.tsx')) &&
                             existsSync(join(repoRoot, 'src/components/ClarifyingQuestions.tsx'));
  
@@ -436,6 +441,7 @@ index 633e857..30caddd 100644
 +  InterpretConfig,
 +  Monitor,
 +  normalizeAgentSafetyPolicy,
++  normalizeCommitPolicy,
 +  type AgentSafetyPolicy,
 +} from "${importPrefix}/components";
  import { ralphOutputSchemas } from "${importPrefix}";
@@ -461,7 +467,7 @@ index 633e857..30caddd 100644
  const PACKAGE_SCRIPTS = ${JSON.stringify(packageScripts, null, 2)};
  const FALLBACK_CONFIG = ${JSON.stringify(fallbackConfig, null, 2)};
  const CLARIFICATION_SESSION = ${JSON.stringify(clarificationSession)};
-@@ -327,84 +259,177 @@ const { smithers, outputs, Workflow } = createSmithers(
+@@ -327,84 +260,199 @@ const { smithers, outputs, Workflow } = createSmithers(
    { dbPath: DB_PATH }
  );
  
@@ -484,6 +490,26 @@ index 633e857..30caddd 100644
 +      envApprovalRequiredPhases.length > 0
 +        ? envApprovalRequiredPhases
 +        : normalizedInput.approvalRequiredPhases,
++  });
++}
++
++function resolveCommitPolicy(fallback: unknown, candidate: unknown) {
++  const normalizedFallback = normalizeCommitPolicy(fallback);
++  if (!candidate || typeof candidate !== "object") {
++    return normalizedFallback;
++  }
++
++  const candidateRecord = candidate as {
++    allowedTypes?: unknown;
++    requireAtomicChecks?: unknown;
++  };
++
++  return normalizeCommitPolicy({
++    allowedTypes: candidateRecord.allowedTypes ?? normalizedFallback.allowedTypes,
++    requireAtomicChecks:
++      typeof candidateRecord.requireAtomicChecks === "boolean"
++        ? candidateRecord.requireAtomicChecks
++        : normalizedFallback.requireAtomicChecks,
 +  });
 +}
 +
@@ -597,6 +623,7 @@ index 633e857..30caddd 100644
 +  const interpreted = (ctx.outputMaybe("interpret-config", outputs.interpret_config) as any) ?? {};
 +  const buildCmds = mergeCommandMap(FALLBACK_CONFIG.buildCmds, interpreted.buildCmds);
 +  const testCmds = mergeCommandMap(FALLBACK_CONFIG.testCmds, interpreted.testCmds);
++  const commitPolicy = resolveCommitPolicy(FALLBACK_CONFIG.commitPolicy, interpreted.commitPolicy);
 +
 +  const preLandChecks = Array.isArray(interpreted.preLandChecks) && interpreted.preLandChecks.length > 0
 +    ? interpreted.preLandChecks
@@ -611,6 +638,7 @@ index 633e857..30caddd 100644
 +    ...interpreted,
 +    buildCmds,
 +    testCmds,
++    commitPolicy,
 +    preLandChecks,
 +    postLandChecks,
 +  };
@@ -696,10 +724,10 @@ index 633e857..30caddd 100644
  }
  
 diff --git a/src/components/InterpretConfig.tsx b/src/components/InterpretConfig.tsx
-index 77be1f5..c25a2a8 100644
+index 77be1f5..f7f8c61 100644
 --- a/src/components/InterpretConfig.tsx
 +++ b/src/components/InterpretConfig.tsx
-@@ -14,14 +14,17 @@ export const interpretConfigOutputSchema = z.object({
+@@ -14,14 +14,21 @@ export const interpretConfigOutputSchema = z.object({
    focuses: z.array(focusSchema).min(1).max(12),
    specsPath: z.string().min(1),
    referenceFiles: z.array(z.string()),
@@ -713,6 +741,10 @@ index 77be1f5..c25a2a8 100644
 +  testCmds: z.object({}).catchall(z.string()),
 +  preLandChecks: z.array(z.string()).min(1),
 +  postLandChecks: z.array(z.string()).min(1),
++  commitPolicy: z.object({
++    allowedTypes: z.array(z.string().min(1)).min(1),
++    requireAtomicChecks: z.boolean(),
++  }),
    codeStyle: z.string().min(1),
    reviewChecklist: z.array(z.string()).min(1),
    maxConcurrency: z.number().int().min(1).max(64),
@@ -722,21 +754,35 @@ index 77be1f5..c25a2a8 100644
  });
  
  export type InterpretConfigOutput = z.infer<typeof interpretConfigOutputSchema>;
-@@ -112,6 +115,9 @@ export function InterpretConfig({
+@@ -98,6 +105,10 @@ export function InterpretConfig({
+         testCmds: { language_or_tool: "command" },
+         preLandChecks: ["command"],
+         postLandChecks: ["command"],
++        commitPolicy: {
++          allowedTypes: ["feat", "fix", "docs", "chore"],
++          requireAtomicChecks: true,
++        },
+         codeStyle: "string",
+         reviewChecklist: ["string"],
+         maxConcurrency: 8,
+@@ -112,6 +123,12 @@ export function InterpretConfig({
      "- Keep focuses concise (2-6).",
      "- Prefer paths relative to repo root.",
      "- Include the user prompt file as a reference when relevant.",
 +    "- Gate fields are mandatory: buildCmds, testCmds, preLandChecks, postLandChecks.",
 +    "- preLandChecks and postLandChecks must be non-empty arrays.",
 +    "- If package scripts include typecheck/test, include both commands in the gate config.",
++    "- commitPolicy is mandatory.",
++    "- Allowed commit types are restricted to feat|fix|docs|chore.",
++    "- requireAtomicChecks must stay true to enforce typecheck + relevant tests before each atomic commit.",
      "- Never return null; omit fields instead.",
      clarificationSession
        ? "- CRITICAL: Interpret and apply the user's clarification answers to tailor the config."
 diff --git a/src/components/SuperRalph.tsx b/src/components/SuperRalph.tsx
-index 96d1c69..b90a16f 100644
+index 96d1c69..74d1eb7 100644
 --- a/src/components/SuperRalph.tsx
 +++ b/src/components/SuperRalph.tsx
-@@ -16,6 +16,12 @@ import CodeReviewPrompt from "../prompts/CodeReview.mdx";
+@@ -16,6 +16,13 @@ import CodeReviewPrompt from "../prompts/CodeReview.mdx";
  import ReviewFixPrompt from "../prompts/ReviewFix.mdx";
  import ReportPrompt from "../prompts/Report.mdx";
  import CategoryReviewPrompt from "../prompts/CategoryReview.mdx";
@@ -746,10 +792,11 @@ index 96d1c69..b90a16f 100644
 +  requiresApprovalForPhase,
 +  type AgentSafetyPolicy,
 +} from "./agent-safety-policy";
++import { normalizeCommitPolicy } from "./commit-policy";
  import {
    buildSpeculativeMergeQueuePrompt,
    createSpeculativeMergeQueueAgent,
-@@ -55,6 +61,7 @@ export type SuperRalphProps = {
+@@ -55,11 +62,18 @@ export type SuperRalphProps = {
  
    // Configuration
    progressFile?: string;
@@ -757,7 +804,18 @@ index 96d1c69..b90a16f 100644
    findingsFile?: string;
    commitConfig?: {
      prefix?: string;
-@@ -79,6 +86,7 @@ export type SuperRalphProps = {
+     mainBranch?: string;
+     emojiPrefixes?: string;
++    allowedTypes?: string[];
++    requireAtomicChecks?: boolean;
++  };
++  commitPolicy?: {
++    allowedTypes?: string[];
++    requireAtomicChecks?: boolean;
+   };
+   testSuites?: Array<{
+     name: string;
+@@ -79,6 +93,7 @@ export type SuperRalphProps = {
    /** Merge queue id used to isolate coordinator state */
    mergeQueueId?: string;
    skipPhases?: Set<string>;
@@ -765,15 +823,18 @@ index 96d1c69..b90a16f 100644
  
    // Advanced: Override any step with custom component
    updateProgress?: ReactElement;
-@@ -149,6 +157,7 @@ export function SuperRalph({
+@@ -149,8 +164,10 @@ export function SuperRalph({
    taskRetries = 3,
    agents,
    progressFile = "PROGRESS.md",
 +  progressBookmark = "progress/update-progress",
    findingsFile = "docs/test-suite-findings.md",
    commitConfig = {},
++  commitPolicy: rawCommitPolicy,
    testSuites = [],
-@@ -160,6 +169,7 @@ export function SuperRalph({
+   focusTestSuites = {},
+   focusDirs = {},
+@@ -160,6 +177,7 @@ export function SuperRalph({
    maxSpeculativeDepth = 3,
    mergeQueueId = "land-queue",
    skipPhases = new Set(),
@@ -781,7 +842,20 @@ index 96d1c69..b90a16f 100644
  
    // Advanced overrides
    updateProgress: customUpdateProgress,
-@@ -193,6 +203,7 @@ export function SuperRalph({
+@@ -184,6 +202,12 @@ export function SuperRalph({
+   const progressSummary = selectProgressSummary(ctx);
+ 
+   const { prefix = "📝", mainBranch = "main", emojiPrefixes = "✨ feat, 🐛 fix, ♻️ refactor, 📝 docs, 🧪 test" } = commitConfig;
++  const commitPolicy = normalizeCommitPolicy(
++    rawCommitPolicy ?? {
++      allowedTypes: commitConfig.allowedTypes,
++      requireAtomicChecks: commitConfig.requireAtomicChecks,
++    },
++  );
+ 
+   const planningAgent = normalizeAgent(agents.planning);
+   const implementationAgent = normalizeAgent(agents.implementation);
+@@ -193,6 +217,7 @@ export function SuperRalph({
    const mergeQueueAgent = normalizeAgent(
      agents.mergeQueue ?? createSpeculativeMergeQueueAgent(),
    );
@@ -789,7 +863,7 @@ index 96d1c69..b90a16f 100644
  
    const ciCommands = postLandChecks.length > 0 ? postLandChecks : Object.values(testCmds);
  
-@@ -229,11 +240,16 @@ export function SuperRalph({
+@@ -229,11 +254,16 @@ export function SuperRalph({
      <Ralph until={false} maxIterations={Infinity} onMaxReached="return-last">
        <Parallel maxConcurrency={maxConcurrency}>
          {!skipPhases.has("PROGRESS") && (customUpdateProgress || (
@@ -807,7 +881,7 @@ index 96d1c69..b90a16f 100644
                  commitMessage={`${prefix} docs: update progress`}
                  completedTickets={completedTicketIds}
                />
-@@ -308,6 +324,13 @@ export function SuperRalph({
+@@ -308,6 +338,13 @@ export function SuperRalph({
            const ticketImplementationAgent = roundRobinAgent(implementationAgent, ticketIndex);
            const ticketTestingAgent = roundRobinAgent(testingAgent, ticketIndex);
            const ticketReportingAgent = roundRobinAgent(reportingAgent, ticketIndex);
@@ -821,7 +895,7 @@ index 96d1c69..b90a16f 100644
  
            const mergeQueueRequest: MergeQueueRequest = {
              runId: ctx.runId,
-@@ -390,7 +413,16 @@ export function SuperRalph({
+@@ -390,7 +427,16 @@ export function SuperRalph({
                        return (
                          <>
                            {customImplement || (
@@ -839,16 +913,20 @@ index 96d1c69..b90a16f 100644
                                <ImplementPrompt
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
-@@ -405,7 +437,7 @@ export function SuperRalph({
+@@ -405,9 +451,11 @@ export function SuperRalph({
                                  testWritingGuidance={["Write unit tests AND integration tests"]}
                                  implementationGuidance={["Follow architecture patterns from specs"]}
                                  formatterCommands={Object.entries(buildCmds).map(([lang, cmd]) => `Format ${lang}`)}
 -                                verifyCommands={Object.values(buildCmds)}
 +                                verifyCommands={ticketGateSelection.verifyCommands}
++                                atomicCheckCommands={ticketGateSelection.verifyCommands}
                                  architectureRules={[`Read ${specsPath} for patterns`]}
                                  commitPrefix={prefix}
++                                allowedCommitTypes={commitPolicy.allowedTypes}
                                  mainBranch={mainBranch}
-@@ -420,11 +452,11 @@ export function SuperRalph({
+                                 emojiPrefixes={emojiPrefixes}
+                               />
+@@ -420,11 +468,11 @@ export function SuperRalph({
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
                                  ticketCategory={ticket.category}
@@ -865,7 +943,7 @@ index 96d1c69..b90a16f 100644
                                  fixCommitPrefix={`🐛 fix`}
                                  mainBranch={mainBranch}
                                />
-@@ -480,7 +512,16 @@ export function SuperRalph({
+@@ -480,7 +528,16 @@ export function SuperRalph({
                            </Parallel>
  
                            {customReviewFix || (!noReviewIssues && (
@@ -883,16 +961,19 @@ index 96d1c69..b90a16f 100644
                                <ReviewFixPrompt
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
-@@ -491,7 +532,7 @@ export function SuperRalph({
+@@ -491,8 +548,10 @@ export function SuperRalph({
                                  codeSeverity={worstCodeSeverity}
                                  codeFeedback={mergedCodeFeedback}
                                  codeIssues={mergedCodeIssues.length > 0 ? mergedCodeIssues : null}
 -                                validationCommands={Object.values(testCmds)}
 +                                validationCommands={ticketGateSelection.validationCommands}
++                                atomicCheckCommands={ticketGateSelection.validationCommands}
                                  commitPrefix={`🐛 fix`}
++                                allowedCommitTypes={commitPolicy.allowedTypes}
                                  mainBranch={mainBranch}
                                  emojiPrefixes={emojiPrefixes}
-@@ -527,7 +568,16 @@ export function SuperRalph({
+                               />
+@@ -527,7 +586,16 @@ export function SuperRalph({
                {/* Phase 2: Landing (stateful speculative merge queue coordinator) */}
                <MergeQueue id={mergeQueueId} maxConcurrency={Math.max(1, maxSpeculativeDepth)}>
                  {customLand || (
@@ -987,8 +1068,97 @@ index 0000000..063bbc4
 +
 +  return policy.approvalRequiredPhases.includes(normalizedPhase);
 +}
+diff --git a/src/components/commit-policy.ts b/src/components/commit-policy.ts
+new file mode 100644
+index 0000000..950db56
+--- /dev/null
++++ b/src/components/commit-policy.ts
+@@ -0,0 +1,83 @@
++export const DEFAULT_ALLOWED_COMMIT_TYPES = [
++  "feat",
++  "fix",
++  "docs",
++  "chore",
++] as const;
++
++export type CommitPolicy = {
++  allowedTypes: string[];
++  requireAtomicChecks: boolean;
++};
++
++export function parseCommitType(commitMessage: string): string | null {
++  if (typeof commitMessage !== "string") return null;
++  const normalized = commitMessage.trim();
++  if (normalized.length === 0) return null;
++
++  const match = normalized.match(
++    /^([a-z]+)(?:\([a-z0-9._/-]+\))?(?:!)?:\s+\S/i,
++  );
++  if (!match) return null;
++  return match[1].toLowerCase();
++}
++
++export function normalizeCommitPolicy(input: unknown): CommitPolicy {
++  const fallbackAllowedTypes = [...DEFAULT_ALLOWED_COMMIT_TYPES];
++  if (!input || typeof input !== "object") {
++    return {
++      allowedTypes: fallbackAllowedTypes,
++      requireAtomicChecks: true,
++    };
++  }
++
++  const candidate = input as {
++    allowedTypes?: unknown;
++    requireAtomicChecks?: unknown;
++  };
++
++  const dedupedAllowedTypes: string[] = [];
++  const seen = new Set<string>();
++  if (Array.isArray(candidate.allowedTypes)) {
++    for (const rawType of candidate.allowedTypes) {
++      if (typeof rawType !== "string") continue;
++      const normalizedType = rawType.trim().toLowerCase();
++      if (!/^[a-z]+$/.test(normalizedType)) continue;
++      if (seen.has(normalizedType)) continue;
++      seen.add(normalizedType);
++      dedupedAllowedTypes.push(normalizedType);
++    }
++  }
++
++  return {
++    allowedTypes:
++      dedupedAllowedTypes.length > 0
++        ? dedupedAllowedTypes
++        : fallbackAllowedTypes,
++    requireAtomicChecks:
++      typeof candidate.requireAtomicChecks === "boolean"
++        ? candidate.requireAtomicChecks
++        : true,
++  };
++}
++
++export function assertCommitMessageAllowed(
++  commitMessage: string,
++  policy: CommitPolicy,
++): void {
++  const commitType = parseCommitType(commitMessage);
++  if (!commitType) {
++    throw new Error(
++      "Commit message must use conventional commit format: type(scope): description",
++    );
++  }
++
++  const allowedTypes = normalizeCommitPolicy(policy).allowedTypes;
++  if (!allowedTypes.includes(commitType)) {
++    throw new Error(
++      `Commit type "${commitType}" is not allowed. Allowed commit types: ${allowedTypes.join(
++        ", ",
++      )}`,
++    );
++  }
++}
 diff --git a/src/components/index.ts b/src/components/index.ts
-index f39fc15..1de282d 100644
+index f39fc15..9261dcb 100644
 --- a/src/components/index.ts
 +++ b/src/components/index.ts
 @@ -1,5 +1,10 @@
@@ -1002,12 +1172,24 @@ index f39fc15..1de282d 100644
  
  export { ClarifyingQuestions, clarifyingQuestionsOutputSchema, generateQuestionsOutputSchema } from "./ClarifyingQuestions";
  export type { ClarifyingQuestionsOutput, ClarifyingQuestionsProps } from "./ClarifyingQuestions";
+@@ -9,3 +14,11 @@ export type { InterpretConfigOutput, InterpretConfigProps } from "./InterpretCon
+ 
+ export { Monitor, monitorOutputSchema } from "./Monitor";
+ export type { MonitorOutput, MonitorProps } from "./Monitor";
++
++export {
++  type CommitPolicy,
++  assertCommitMessageAllowed,
++  DEFAULT_ALLOWED_COMMIT_TYPES,
++  normalizeCommitPolicy,
++  parseCommitType,
++} from "./commit-policy";
 diff --git a/src/components/ticket-gates.ts b/src/components/ticket-gates.ts
 new file mode 100644
-index 0000000..ceac40d
+index 0000000..279aa9e
 --- /dev/null
 +++ b/src/components/ticket-gates.ts
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,171 @@
 +export type ResolveTicketGateSelectionParams = {
 +  ticketId?: string;
 +  ticketCategory: string;
@@ -1079,6 +1261,26 @@ index 0000000..ceac40d
 +  return unique;
 +}
 +
++function assertAtomicCheckDiscipline(commands: string[]): void {
++  const hasTypecheckCommand = commands.some((command) =>
++    /\btypecheck\b/i.test(command),
++  );
++  if (!hasTypecheckCommand) {
++    throw new Error(
++      "Atomic check discipline violation: verify commands must include a runnable typecheck command",
++    );
++  }
++
++  const hasRunnableTestCommand = commands.some(
++    (command) => /\btest\b/i.test(command) && !/\btypecheck\b/i.test(command),
++  );
++  if (!hasRunnableTestCommand) {
++    throw new Error(
++      "Atomic check discipline violation: verify commands must include a runnable test command",
++    );
++  }
++}
++
 +function defaultTestCommand(testCmds: Record<string, string>): string {
 +  const preferred = toRunnableCommand(testCmds.test);
 +  if (preferred) return preferred;
@@ -1130,6 +1332,7 @@ index 0000000..ceac40d
 +  if (verifyCommands.length === 0) {
 +    throw new Error("Resolved non-runnable gate command: no verify commands");
 +  }
++  assertAtomicCheckDiscipline(verifyCommands);
 +
 +  return verifyCommands;
 +};
@@ -1237,6 +1440,55 @@ index 4a8450a..bab6f27 100644
        );
        const retestNote =
          entry.invalidatedCount > 0
+diff --git a/src/prompts/BuildVerify.mdx b/src/prompts/BuildVerify.mdx
+index 66f7a40..41f4472 100644
+--- a/src/prompts/BuildVerify.mdx
++++ b/src/prompts/BuildVerify.mdx
+@@ -23,6 +23,8 @@ This is the equivalent of a full CI build check.
+ Fix compilation errors immediately:
+ 1. Read the error output carefully
+ 2. Fix the root cause (not just the symptom)
+-3. Commit fixes atomically: `jj describe -m "{props.fixCommitPrefix || '🐛 fix'}(scope): fix compilation error in X"` then `jj new`
+-4. After fixing: `jj bookmark set ticket/{props.ticketId} -r @` && `jj git push --bookmark ticket/{props.ticketId}`
+-5. Re-run the build to verify
++3. Use only allowed commit types: feat|fix|docs|chore.
++4. Before each atomic `jj describe`, run typecheck + relevant tests for the fix.
++5. Commit fixes atomically: `jj describe -m "<allowed-type>(scope): fix compilation error in X"` then `jj new`
++6. After fixing: `jj bookmark set ticket/{props.ticketId} -r @` && `jj git push --bookmark ticket/{props.ticketId}`
++7. Re-run the build to verify
+diff --git a/src/prompts/Implement.mdx b/src/prompts/Implement.mdx
+index ea83b15..0121bdc 100644
+--- a/src/prompts/Implement.mdx
++++ b/src/prompts/Implement.mdx
+@@ -58,11 +58,22 @@ Implementation steps from plan:
+ 
+ You MUST commit and push your changes to the ticket branch before finishing. Uncommitted work is lost work.
+ 
+-1. `jj describe -m "{props.commitPrefix || 'EMOJI'} type(scope): description"` — describe your changes with a meaningful message.
+-2. `jj new` — create a new change for the next logical step. Repeat describe+new for each atomic change.
+-3. `jj bookmark set ticket/{props.ticketId} -r @`
+-4. `jj git push --bookmark ticket/{props.ticketId}`
+-
+-{props.emojiPrefixes ? `Emoji prefixes: ${props.emojiPrefixes}` : 'Use conventional commit prefixes'}
++Use only allowed commit types: feat|fix|docs|chore.
++{props.allowedCommitTypes && props.allowedCommitTypes.length > 0
++  ? `Configured allowed commit types: ${props.allowedCommitTypes.join('|')}`
++  : ''}
++
++Before each atomic `jj describe`, run these required checks:
++{props.atomicCheckCommands && props.atomicCheckCommands.length > 0
++  ? props.atomicCheckCommands.map(c => `- \`${c}\``).join('\n')
++  : props.verifyCommands && props.verifyCommands.length > 0
++    ? props.verifyCommands.map(c => `- \`${c}\``).join('\n')
++    : '- Run typecheck and relevant tests'}
++
++1. `jj describe -m "<allowed-type>(scope): concise description"` — describe exactly one atomic slice.
++2. `jj new` — create a new change for the next atomic slice.
++3. Repeat check + describe + new for each atomic change.
++4. `jj bookmark set ticket/{props.ticketId} -r @`
++5. `jj git push --bookmark ticket/{props.ticketId}`
+ 
+ **If you do not commit and push to the ticket branch, your work does not count. This is non-negotiable.**
 diff --git a/src/prompts/Land.mdx b/src/prompts/Land.mdx
 index e665f25..0401efa 100644
 --- a/src/prompts/Land.mdx
@@ -1270,18 +1522,98 @@ index e665f25..0401efa 100644
  ```
  
  ### Step 6: Push main
+diff --git a/src/prompts/Plan.mdx b/src/prompts/Plan.mdx
+index b589e38..f20670e 100644
+--- a/src/prompts/Plan.mdx
++++ b/src/prompts/Plan.mdx
+@@ -45,7 +45,9 @@ The plan file MUST follow TDD ordering:
+ 
+ After writing the plan file:
+ ```
+-jj describe -m "{props.commitPrefix || '📝'} docs({props.ticketCategory}): create plan for {props.ticketId}"
++Use only allowed commit types: feat|fix|docs|chore.
++This phase should use docs commits unless code changes are required.
++jj describe -m "docs({props.ticketCategory}): create plan for {props.ticketId}"
+ jj new
+ jj bookmark set ticket/{props.ticketId} -r @
+ jj git push --bookmark ticket/{props.ticketId}
+diff --git a/src/prompts/Research.mdx b/src/prompts/Research.mdx
+index 7ca7698..b440979 100644
+--- a/src/prompts/Research.mdx
++++ b/src/prompts/Research.mdx
+@@ -27,7 +27,9 @@ Your job is to gather all reference materials needed to implement this ticket.
+ 
+ After writing the context file:
+ ```
+-jj describe -m "📝 docs({props.ticketCategory}): gather research for {props.ticketId}"
++Use only allowed commit types: feat|fix|docs|chore.
++This phase should use docs commits unless code changes are required.
++jj describe -m "docs({props.ticketCategory}): gather research for {props.ticketId}"
+ jj new
+ jj bookmark set ticket/{props.ticketId} -r @
+ jj git push --bookmark ticket/{props.ticketId}
+diff --git a/src/prompts/ReviewFix.mdx b/src/prompts/ReviewFix.mdx
+index 1b3fae7..fd2d35e 100644
+--- a/src/prompts/ReviewFix.mdx
++++ b/src/prompts/ReviewFix.mdx
+@@ -39,11 +39,22 @@ If a fix requires new behavior:
+ 
+ You MUST commit and push your changes to the ticket branch before finishing. Uncommitted work is lost work.
+ 
+-1. `jj describe -m "{props.commitPrefix || 'EMOJI'} type(scope): description"` — describe each fix separately.
++Use only allowed commit types: feat|fix|docs|chore.
++{props.allowedCommitTypes && props.allowedCommitTypes.length > 0
++  ? `Configured allowed commit types: ${props.allowedCommitTypes.join('|')}`
++  : ''}
++
++Before each atomic `jj describe`, run these required checks:
++{props.atomicCheckCommands && props.atomicCheckCommands.length > 0
++  ? props.atomicCheckCommands.map(c => `- \`${c}\``).join('\n')
++  : props.validationCommands && props.validationCommands.length > 0
++    ? props.validationCommands.map(c => `- \`${c}\``).join('\n')
++    : '- Run typecheck and relevant tests'}
++
++1. `jj describe -m "<allowed-type>(scope): concise fix description"` — describe each fix separately.
+ 2. `jj new` — create a new change for the next fix. Do NOT batch all fixes into one change.
+-3. `jj bookmark set ticket/{props.ticketId} -r @`
+-4. `jj git push --bookmark ticket/{props.ticketId}`
+-
+-{props.emojiPrefixes ? `Emoji prefixes: ${props.emojiPrefixes}` : 'Use conventional commit prefixes'}
++3. Repeat check + describe + new for each atomic fix.
++4. `jj bookmark set ticket/{props.ticketId} -r @`
++5. `jj git push --bookmark ticket/{props.ticketId}`
+ 
+ **If you do not commit and push to the ticket branch, your work does not count. This is non-negotiable.**
+diff --git a/src/prompts/Test.mdx b/src/prompts/Test.mdx
+index 811cc79..1187453 100644
+--- a/src/prompts/Test.mdx
++++ b/src/prompts/Test.mdx
+@@ -15,7 +15,9 @@ Run ALL of the following test categories and report results:
+ - If tests were written AFTER implementation (not TDD), flag as an issue
+ 
+ If any tests fail and you need to fix code to make them pass, commit each fix atomically:
+-- `jj describe -m "{props.fixCommitPrefix || '🐛 fix'}(SCOPE): what was fixed"`
++- Use only allowed commit types: feat|fix|docs|chore.
++- Before each atomic `jj describe`, run typecheck + relevant tests for the fix.
++- `jj describe -m "<allowed-type>(scope): what was fixed"`
+ - `jj new`
+ - After fixing: `jj bookmark set ticket/{props.ticketId} -r @` && `jj git push --bookmark ticket/{props.ticketId}`
+ 
 diff --git a/src/prompts/UpdateProgress.mdx b/src/prompts/UpdateProgress.mdx
-index 7626ebb..9f99523 100644
+index 7626ebb..f7d4718 100644
 --- a/src/prompts/UpdateProgress.mdx
 +++ b/src/prompts/UpdateProgress.mdx
-@@ -22,9 +22,13 @@ Do NOT run build commands, test commands, or compilation. Those are expensive an
+@@ -22,9 +22,15 @@ Do NOT run build commands, test commands, or compilation. Those are expensive an
  
  ## Commit
  
 -After updating, commit your changes in this worktree:
 +After updating, create a bookmark-visible checkpoint in this worktree:
  ```
- jj describe -m "{props.commitMessage || '📝 docs: update progress report'}"
+-jj describe -m "{props.commitMessage || '📝 docs: update progress report'}"
++Use only allowed commit types: feat|fix|docs|chore.
++This phase should use docs commits because it updates project progress artifacts.
++jj describe -m "{props.commitMessage || 'docs: update progress report'}"
 +jj bookmark set {props.progressBookmark || 'progress/update-progress'} -r @
 +jj new
 +jj git push --bookmark {props.progressBookmark || 'progress/update-progress'}

@@ -13,6 +13,10 @@ export type FallbackConfig = {
   referenceFiles: string[];
   buildCmds: CommandMap;
   testCmds: CommandMap;
+  commitPolicy: {
+    allowedTypes: string[];
+    requireAtomicChecks: boolean;
+  };
   preLandChecks: string[];
   postLandChecks: string[];
   codeStyle: string;

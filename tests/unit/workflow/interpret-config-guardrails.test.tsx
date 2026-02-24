@@ -16,6 +16,10 @@ function buildValidInterpretConfigOutput() {
     testCmds: { test: "bun run test" },
     preLandChecks: ["bun run typecheck"],
     postLandChecks: ["bun run test"],
+    commitPolicy: {
+      allowedTypes: ["feat", "fix", "docs", "chore"],
+      requireAtomicChecks: true,
+    },
     codeStyle: "Follow repo conventions",
     reviewChecklist: ["Spec compliance"],
     maxConcurrency: 4,
@@ -95,6 +99,30 @@ describe("InterpretConfig guardrails", () => {
     );
     expect(prompt).toContain(
       "If package scripts include typecheck/test, include both commands in the gate config.",
+    );
+  });
+
+  test("schema and prompt hard requirements include commit policy and atomic check discipline", () => {
+    const output = buildValidInterpretConfigOutput();
+    const parsed = interpretConfigOutputSchema.parse(output);
+    const prompt = readInterpretPrompt();
+
+    expect(parsed.commitPolicy).toEqual({
+      allowedTypes: ["feat", "fix", "docs", "chore"],
+      requireAtomicChecks: true,
+    });
+    expect(() =>
+      interpretConfigOutputSchema.parse({
+        ...output,
+        commitPolicy: undefined,
+      } as unknown),
+    ).toThrow();
+    expect(prompt).toContain("commitPolicy is mandatory");
+    expect(prompt).toContain(
+      "Allowed commit types are restricted to feat|fix|docs|chore.",
+    );
+    expect(prompt).toContain(
+      "requireAtomicChecks must stay true to enforce typecheck + relevant tests before each atomic commit.",
     );
   });
 });
