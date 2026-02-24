@@ -4,7 +4,10 @@ import { resolve } from "node:path";
 
 import { buildGateCommandConfig } from "super-ralph/gate-config";
 
-const workflowPath = resolve(process.cwd(), ".super-ralph/generated/workflow.tsx");
+const workflowPath = resolve(
+  process.cwd(),
+  ".super-ralph/generated/workflow.tsx",
+);
 
 type WorkflowConfig = {
   buildCmds: Record<string, string>;
@@ -17,7 +20,10 @@ function readWorkflowSource(): string {
   return readFileSync(workflowPath, "utf8");
 }
 
-export function extractConstJson<T = unknown>(source: string, constName: string): T {
+export function extractConstJson<T = unknown>(
+  source: string,
+  constName: string,
+): T {
   const marker = `const ${constName} =`;
   const markerIndex = source.indexOf(marker);
   if (markerIndex < 0) {
@@ -38,8 +44,15 @@ export function extractConstJson<T = unknown>(source: string, constName: string)
   throw new Error(`Could not parse const value as JSON: ${constName}`);
 }
 
-export function assertNoPlaceholderCommands(commands: string[], context: string): void {
-  const blockedPatterns = [/No .* configured yet/i, /\|\|\s*echo\b/i, /^echo\b/i];
+export function assertNoPlaceholderCommands(
+  commands: string[],
+  context: string,
+): void {
+  const blockedPatterns = [
+    /No .* configured yet/i,
+    /\|\|\s*echo\b/i,
+    /^echo\b/i,
+  ];
 
   for (const command of commands) {
     for (const pattern of blockedPatterns) {
@@ -67,7 +80,9 @@ describe("generated workflow gates", () => {
     expect(packageScripts.typecheck?.trim().length).toBeGreaterThan(0);
 
     const expectedGateConfig = buildGateCommandConfig("bun", packageScripts);
-    expect(fallbackConfig.buildCmds).toMatchObject(expectedGateConfig.buildCmds);
+    expect(fallbackConfig.buildCmds).toMatchObject(
+      expectedGateConfig.buildCmds,
+    );
     expect(fallbackConfig.testCmds).toMatchObject(expectedGateConfig.testCmds);
 
     const buildCommands = Object.values(fallbackConfig.buildCmds);
@@ -100,7 +115,9 @@ describe("generated workflow gates", () => {
     expect(source).toContain(
       "const testCmds = mergeCommandMap(FALLBACK_CONFIG.testCmds, interpreted.testCmds);",
     );
-    expect(source).toContain("const runtimeConfig = resolveRuntimeConfig(ctx);");
+    expect(source).toContain(
+      "const runtimeConfig = resolveRuntimeConfig(ctx);",
+    );
     expect(source).toContain("{...runtimeConfig}");
     expect(source).toContain("config={runtimeConfig}");
     expect(source).not.toContain(
@@ -108,6 +125,41 @@ describe("generated workflow gates", () => {
     );
     expect(source).not.toContain(
       'config={(ctx.outputMaybe("interpret-config", outputs.interpret_config) as any) || FALLBACK_CONFIG}',
+    );
+  });
+
+  test("workflow artifact bans hardcoded permissive agent flags and wires safety policy", () => {
+    const source = readWorkflowSource();
+
+    expect(source).not.toContain("dangerouslySkipPermissions: true");
+    expect(source).not.toContain("yolo: true");
+    expect(source).toContain(
+      "const agentSafetyPolicy = resolveAgentSafetyPolicy(runtimeConfig.agentSafetyPolicy);",
+    );
+    expect(source).toContain("agentSafetyPolicy={agentSafetyPolicy}");
+  });
+
+  test("workflow artifact uses policy-aware agent constructors with explicit safe defaults", () => {
+    const source = readWorkflowSource();
+
+    expect(source).toContain(
+      "function resolveAgentSafetyPolicy(input: unknown): AgentSafetyPolicy",
+    );
+    expect(source).toContain(
+      "function createClaude(systemPrompt: string, policy: AgentSafetyPolicy)",
+    );
+    expect(source).toContain(
+      "function createCodex(systemPrompt: string, policy: AgentSafetyPolicy)",
+    );
+    expect(source).toContain(
+      'function choose(primary: "claude" | "codex", systemPrompt: string, policy: AgentSafetyPolicy)',
+    );
+    expect(source).toContain("yolo: false");
+    expect(source).toContain(
+      "dangerouslySkipPermissions: policy.riskyModeEnabled",
+    );
+    expect(source).toContain(
+      "const agentSafetyPolicy = resolveAgentSafetyPolicy(runtimeConfig.agentSafetyPolicy);",
     );
   });
 });

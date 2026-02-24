@@ -16,6 +16,14 @@ function readPackageScripts() {
   return packageJson.scripts ?? {};
 }
 
+function readGeneratedWorkflowSource() {
+  const workflowPath = resolve(
+    process.cwd(),
+    ".super-ralph/generated/workflow.tsx",
+  );
+  return readFileSync(workflowPath, "utf8");
+}
+
 function assertNoNoopPatterns(commands: string[], context: string) {
   const noOpPatterns = [/No .* configured yet/i, /\|\|\s*echo\b/i];
 
@@ -35,7 +43,10 @@ describe("workflow gate policy integration", () => {
     const repoRoot = mkdtempSync(join(tmpdir(), "workflow-gates-polyglot-"));
 
     try {
-      writeFileSync(join(repoRoot, "go.mod"), "module example.com/polyglot\n\ngo 1.22.0\n");
+      writeFileSync(
+        join(repoRoot, "go.mod"),
+        "module example.com/polyglot\n\ngo 1.22.0\n",
+      );
       writeFileSync(
         join(repoRoot, "Cargo.toml"),
         '[package]\nname = "polyglot"\nversion = "0.1.0"\nedition = "2021"\n',
@@ -89,6 +100,10 @@ describe("workflow gate policy integration", () => {
     expect(fallbackConfig.postLandChecks).toEqual(
       Object.values(fallbackConfig.testCmds),
     );
+    expect(fallbackConfig.agentSafetyPolicy).toEqual({
+      riskyModeEnabled: false,
+      approvalRequiredPhases: [],
+    });
   });
 
   test("maps this repo's scripts to runnable gate commands", () => {
@@ -226,5 +241,27 @@ describe("workflow gate policy integration", () => {
       expect(typeof script).toBe("string");
       expect(script?.trim().length).toBeGreaterThan(0);
     }
+  });
+
+  test("generated workflow keeps agent execution safe by default and wires policy through runtime", () => {
+    const source = readGeneratedWorkflowSource();
+
+    expect(source).toContain(
+      "function resolveAgentSafetyPolicy(input: unknown): AgentSafetyPolicy",
+    );
+    expect(source).toContain('process.env.SUPER_RALPH_RISKY_MODE === "1"');
+    expect(source).toContain(
+      "process.env.SUPER_RALPH_APPROVAL_REQUIRED_PHASES",
+    );
+    expect(source).toContain("yolo: false");
+    expect(source).toContain(
+      "dangerouslySkipPermissions: policy.riskyModeEnabled",
+    );
+    expect(source).toContain(
+      "const agentSafetyPolicy = resolveAgentSafetyPolicy(runtimeConfig.agentSafetyPolicy);",
+    );
+    expect(source).toContain("agentSafetyPolicy={agentSafetyPolicy}");
+    expect(source).not.toContain("dangerouslySkipPermissions: true");
+    expect(source).not.toContain("yolo: true");
   });
 });
