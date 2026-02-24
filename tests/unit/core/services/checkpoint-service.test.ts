@@ -6,6 +6,7 @@ import { CoreRepository } from "../../../../src/core/repositories/core-repositor
 import { makeInMemoryCoreRepository } from "../../../../src/core/repositories/in-memory-core-repository";
 import {
   createWorkflowCheckpoint,
+  inspectWorkflowCheckpoint,
   keepCheckpoint,
   recoverCheckpoint,
 } from "../../../../src/core/services/checkpoint-service";
@@ -467,5 +468,38 @@ describe("checkpoint-service", () => {
     ).rejects.toThrow(
       "checkpoint checkpoint-recovered-twice cannot transition recovered -> recovered",
     );
+  });
+
+  test("inspectWorkflowCheckpoint returns checkpoint details", async () => {
+    const repository = makeInMemoryCoreRepository();
+    await Effect.runPromise(
+      createWorkflowCheckpoint(repository, {
+        checkpointId: "checkpoint-inspect-1",
+        name: "Inspect me",
+        snapshotEntityRefs: [],
+        auditCursor: 12,
+        rollbackTarget: "audit-12",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T16:00:00.000Z"),
+      }),
+    );
+
+    const checkpoint = await Effect.runPromise(
+      inspectWorkflowCheckpoint(repository, "checkpoint-inspect-1"),
+    );
+
+    expect(checkpoint.id).toBe("checkpoint-inspect-1");
+    expect(checkpoint.status).toBe("created");
+    expect(checkpoint.rollbackTarget).toBe("audit-12");
+  });
+
+  test("inspectWorkflowCheckpoint fails when checkpoint is missing", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    await expect(
+      Effect.runPromise(
+        inspectWorkflowCheckpoint(repository, "checkpoint-inspect-missing"),
+      ),
+    ).rejects.toThrow("checkpoint checkpoint-inspect-missing was not found");
   });
 });

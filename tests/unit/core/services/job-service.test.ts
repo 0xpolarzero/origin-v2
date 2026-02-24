@@ -5,6 +5,7 @@ import { createJob } from "../../../../src/core/domain/job";
 import { makeInMemoryCoreRepository } from "../../../../src/core/repositories/in-memory-core-repository";
 import {
   inspectJobRun,
+  listJobs,
   listJobRunHistory,
   recordJobRun,
   retryJobRun,
@@ -156,6 +157,49 @@ describe("job-service", () => {
     expect(auditTrail[auditTrail.length - 1]?.toState).toBe("retrying");
   });
 
+  test("retryJobRun stores optional fixSummary in retry transition metadata", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const job = await Effect.runPromise(
+      createJob({
+        id: "job-retry-fix-summary-1",
+        name: "Retry with fix summary",
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("job", job.id, job));
+
+    await Effect.runPromise(
+      recordJobRun(repository, {
+        jobId: "job-retry-fix-summary-1",
+        outcome: "failed",
+        diagnostics: "Provider timeout",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T14:20:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      retryJobRun(
+        repository,
+        "job-retry-fix-summary-1",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T14:21:00.000Z"),
+        "Increase timeout to 15s and rerun",
+      ),
+    );
+
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "job",
+        entityId: "job-retry-fix-summary-1",
+      }),
+    );
+
+    expect(auditTrail[auditTrail.length - 1]?.metadata).toEqual({
+      previousFailure: "Provider timeout",
+      fixSummary: "Increase timeout to 15s and rerun",
+    });
+  });
+
   test("inspectJobRun returns current status snapshot for a job", async () => {
     const repository = makeInMemoryCoreRepository();
     const job = await Effect.runPromise(
@@ -305,5 +349,82 @@ describe("job-service", () => {
       },
     ]);
     expect(listEntitiesCalls).toBe(0);
+  });
+
+  test("listJobs returns newest-updated-first and supports runState/limit/beforeUpdatedAt filters", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const jobIdle = await Effect.runPromise(
+      createJob({
+        id: "job-list-idle-1",
+        name: "Idle job",
+        createdAt: new Date("2026-02-23T15:58:00.000Z"),
+        updatedAt: new Date("2026-02-23T15:58:00.000Z"),
+      }),
+    );
+    const jobFailed = await Effect.runPromise(
+      createJob({
+        id: "job-list-failed-1",
+        name: "Failed job",
+        createdAt: new Date("2026-02-23T15:59:00.000Z"),
+        updatedAt: new Date("2026-02-23T15:59:00.000Z"),
+      }),
+    );
+    const jobSucceeded = await Effect.runPromise(
+      createJob({
+        id: "job-list-succeeded-1",
+        name: "Succeeded job",
+        createdAt: new Date("2026-02-23T16:00:00.000Z"),
+        updatedAt: new Date("2026-02-23T16:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("job", jobIdle.id, jobIdle));
+    await Effect.runPromise(
+      repository.saveEntity("job", jobFailed.id, jobFailed),
+    );
+    await Effect.runPromise(
+      repository.saveEntity("job", jobSucceeded.id, jobSucceeded),
+    );
+
+    await Effect.runPromise(
+      recordJobRun(repository, {
+        jobId: "job-list-failed-1",
+        outcome: "failed",
+        diagnostics: "failed once",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T16:01:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      recordJobRun(repository, {
+        jobId: "job-list-succeeded-1",
+        outcome: "succeeded",
+        diagnostics: "passed",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T16:02:00.000Z"),
+      }),
+    );
+
+    const allJobs = await Effect.runPromise(listJobs(repository));
+    const failedOnly = await Effect.runPromise(
+      listJobs(repository, { runState: "failed" }),
+    );
+    const beforeUpdatedAt = await Effect.runPromise(
+      listJobs(repository, {
+        beforeUpdatedAt: new Date("2026-02-23T16:01:30.000Z"),
+      }),
+    );
+    const limited = await Effect.runPromise(listJobs(repository, { limit: 1 }));
+
+    expect(allJobs.map((job) => job.id)).toEqual([
+      "job-list-succeeded-1",
+      "job-list-failed-1",
+      "job-list-idle-1",
+    ]);
+    expect(failedOnly.map((job) => job.id)).toEqual(["job-list-failed-1"]);
+    expect(beforeUpdatedAt.map((job) => job.id)).toEqual([
+      "job-list-failed-1",
+      "job-list-idle-1",
+    ]);
+    expect(limited.map((job) => job.id)).toEqual(["job-list-succeeded-1"]);
   });
 });

@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 
 import { createAuditTransition } from "../domain/audit-transition";
+import { Checkpoint } from "../domain/checkpoint";
 import { ActorRef, ENTITY_TYPES } from "../domain/common";
 import { createJob, CreateJobInput, Job } from "../domain/job";
 import { CoreRepository } from "../repositories/core-repository";
@@ -13,8 +14,14 @@ import {
   OutboundActionPort,
 } from "../services/approval-service";
 import {
+  ActivityFeedItem,
+  listActivityFeed,
+  ListActivityFeedInput,
+} from "../services/activity-service";
+import {
   createWorkflowCheckpoint,
   CreateWorkflowCheckpointInput,
+  inspectWorkflowCheckpoint as inspectWorkflowCheckpointInService,
   keepCheckpoint,
   recoverCheckpoint,
 } from "../services/checkpoint-service";
@@ -33,8 +40,10 @@ import {
 import { requestEventSync } from "../services/event-service";
 import {
   inspectJobRun,
+  JobListItem,
   JobRunHistoryRecord,
   JobRunInspection,
+  listJobs,
   listJobRunHistory,
   recordJobRun,
   RecordJobRunInput,
@@ -133,11 +142,23 @@ export interface CorePlatform {
     jobId: string,
     options?: { limit?: number; beforeAt?: Date },
   ) => Effect.Effect<ReadonlyArray<JobRunHistoryRecord>, Error>;
+  listJobs: (options?: {
+    runState?: Job["runState"];
+    limit?: number;
+    beforeUpdatedAt?: Date;
+  }) => Effect.Effect<ReadonlyArray<JobListItem>, Error>;
   retryJob: (
     jobId: string,
     actor: ActorRef,
     at?: Date,
+    fixSummary?: string,
   ) => ReturnType<typeof retryJobRun>;
+  inspectWorkflowCheckpoint: (
+    checkpointId: string,
+  ) => Effect.Effect<Checkpoint, Error>;
+  listActivityFeed: (
+    options?: ListActivityFeedInput,
+  ) => Effect.Effect<ReadonlyArray<ActivityFeedItem>, Error>;
   createWorkflowCheckpoint: (
     input: CreateWorkflowCheckpointInput,
   ) => ReturnType<typeof createWorkflowCheckpoint>;
@@ -370,8 +391,22 @@ export const buildCorePlatform = (
           limit: options?.limit,
           beforeAt: options?.beforeAt,
         }).pipe(Effect.mapError((error) => new Error(error.message))),
-      retryJob: (jobId, actor, at) =>
-        withMutationBoundary(retryJobRun(repository, jobId, actor, at)),
+      listJobs: (options) =>
+        listJobs(repository, options).pipe(
+          Effect.mapError((error) => new Error(error.message)),
+        ),
+      retryJob: (jobId, actor, at, fixSummary) =>
+        withMutationBoundary(
+          retryJobRun(repository, jobId, actor, at, fixSummary),
+        ),
+      inspectWorkflowCheckpoint: (checkpointId) =>
+        inspectWorkflowCheckpointInService(repository, checkpointId).pipe(
+          Effect.mapError((error) => new Error(error.message)),
+        ),
+      listActivityFeed: (options) =>
+        listActivityFeed(repository, options).pipe(
+          Effect.mapError((error) => new Error(error.message)),
+        ),
       createWorkflowCheckpoint: (input) =>
         withMutationBoundary(createWorkflowCheckpoint(repository, input)),
       keepCheckpoint: (checkpointId, actor, at) =>

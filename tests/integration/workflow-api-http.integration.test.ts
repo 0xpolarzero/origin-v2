@@ -33,7 +33,11 @@ const expectOk = async (
 
 const expectSanitizedError = (
   response: { status: number; body: unknown },
-  expected: { status: number; route: WorkflowRouteKey; messageIncludes?: string },
+  expected: {
+    status: number;
+    route: WorkflowRouteKey;
+    messageIncludes?: string;
+  },
 ): void => {
   expect(response.status).toBe(expected.status);
   expect(response.body).toEqual(
@@ -183,6 +187,74 @@ describe("workflow-api http integration", () => {
       route: "signal.ingest",
       messageIncludes: "payload",
     });
+  });
+
+  test("checkpoint.create(ai) -> activity.list(aiOnly) -> checkpoint.inspect -> keep/recover executes through HTTP routes", async () => {
+    const platform = await Effect.runPromise(buildCorePlatform());
+    const dispatcher = makeWorkflowHttpDispatcher(
+      makeWorkflowRoutes(makeWorkflowApi({ platform })),
+    );
+
+    await expectOk(dispatcher, "checkpoint.create", {
+      checkpointId: "checkpoint-http-ai-flow-1",
+      name: "Before AI rewrite",
+      snapshotEntityRefs: [],
+      auditCursor: 7,
+      rollbackTarget: "audit-7",
+      actor: { id: "ai-1", kind: "ai" },
+      at: "2026-02-23T10:40:00.000Z",
+    });
+
+    const activityBody = (await expectOk(dispatcher, "activity.list", {
+      entityType: "checkpoint",
+      entityId: "checkpoint-http-ai-flow-1",
+      aiOnly: true,
+      beforeAt: "2026-02-23T12:00:00.000Z",
+      limit: 10,
+    })) as ReadonlyArray<{
+      entityId: string;
+      actor: { kind: string };
+      toState: string;
+    }>;
+
+    const inspected = (await expectOk(dispatcher, "checkpoint.inspect", {
+      checkpointId: "checkpoint-http-ai-flow-1",
+    })) as {
+      id: string;
+      status: string;
+    };
+
+    await expectOk(dispatcher, "checkpoint.keep", {
+      checkpointId: "checkpoint-http-ai-flow-1",
+      actor: ACTOR,
+      at: "2026-02-23T10:41:00.000Z",
+    });
+    await expectOk(dispatcher, "checkpoint.recover", {
+      checkpointId: "checkpoint-http-ai-flow-1",
+      actor: ACTOR,
+      at: "2026-02-23T10:42:00.000Z",
+    });
+
+    const persisted = await Effect.runPromise(
+      platform.getEntity<{ status: string }>(
+        "checkpoint",
+        "checkpoint-http-ai-flow-1",
+      ),
+    );
+
+    expect(inspected).toMatchObject({
+      id: "checkpoint-http-ai-flow-1",
+      status: "created",
+    });
+    expect(activityBody.some((item) => item.actor.kind === "ai")).toBe(true);
+    expect(
+      activityBody.some(
+        (item) =>
+          item.entityId === "checkpoint-http-ai-flow-1" &&
+          item.toState === "created",
+      ),
+    ).toBe(true);
+    expect(persisted?.status).toBe("recovered");
   });
 
   test("job.retry and checkpoint routes return sanitized 404s for missing resources", async () => {

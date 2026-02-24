@@ -117,6 +117,11 @@ const recordJobRunInput = {
 const inspectJobRunInput = {
   jobId: "job-api-1",
 };
+const listJobsInput = {
+  runState: "failed" as const,
+  limit: 20,
+  beforeUpdatedAt: new Date("2026-02-23T11:29:00.000Z"),
+};
 const listJobRunHistoryInput = {
   jobId: "job-api-1",
   limit: 20,
@@ -126,6 +131,7 @@ const retryJobInput = {
   jobId: "job-api-1",
   actor: ACTOR,
   at: new Date("2026-02-23T10:16:00.000Z"),
+  fixSummary: "Increase timeout and retry",
 };
 const createCheckpointInput = {
   checkpointId: "checkpoint-api-1",
@@ -141,10 +147,21 @@ const keepCheckpointInput = {
   actor: ACTOR,
   at: new Date("2026-02-23T10:18:00.000Z"),
 };
+const inspectCheckpointInput = {
+  checkpointId: "checkpoint-api-1",
+};
 const recoverCheckpointInput = {
   checkpointId: "checkpoint-api-1",
   actor: ACTOR,
   at: new Date("2026-02-23T10:19:00.000Z"),
+};
+const listActivityInput = {
+  entityType: "job",
+  entityId: "job-api-1",
+  actorKind: "ai" as const,
+  aiOnly: true,
+  limit: 20,
+  beforeAt: new Date("2026-02-23T11:31:00.000Z"),
 };
 
 interface HandlerCase {
@@ -357,6 +374,15 @@ const HANDLER_CASES: ReadonlyArray<HandlerCase> = [
     }),
   },
   {
+    name: "listJobs",
+    route: "job.list",
+    invoke: (api) => api.listJobs(listJobsInput),
+    expectedArgs: [listJobsInput],
+    setMethod: (impl) => ({
+      listJobs: (options: unknown) => impl(options),
+    }),
+  },
+  {
     name: "listJobRunHistory",
     route: "job.listHistory",
     invoke: (api) => api.listJobRunHistory(listJobRunHistoryInput),
@@ -378,10 +404,19 @@ const HANDLER_CASES: ReadonlyArray<HandlerCase> = [
     name: "retryJob",
     route: "job.retry",
     invoke: (api) => api.retryJob(retryJobInput),
-    expectedArgs: [retryJobInput.jobId, retryJobInput.actor, retryJobInput.at],
+    expectedArgs: [
+      retryJobInput.jobId,
+      retryJobInput.actor,
+      retryJobInput.at,
+      retryJobInput.fixSummary,
+    ],
     setMethod: (impl) => ({
-      retryJob: (jobId: string, actor: unknown, at: Date) =>
-        impl(jobId, actor, at),
+      retryJob: (
+        jobId: string,
+        actor: unknown,
+        at: Date,
+        fixSummary?: string,
+      ) => impl(jobId, actor, at, fixSummary),
     }),
   },
   {
@@ -408,6 +443,15 @@ const HANDLER_CASES: ReadonlyArray<HandlerCase> = [
     }),
   },
   {
+    name: "inspectWorkflowCheckpoint",
+    route: "checkpoint.inspect",
+    invoke: (api) => api.inspectWorkflowCheckpoint(inspectCheckpointInput),
+    expectedArgs: [inspectCheckpointInput.checkpointId],
+    setMethod: (impl) => ({
+      inspectWorkflowCheckpoint: (checkpointId: string) => impl(checkpointId),
+    }),
+  },
+  {
     name: "recoverCheckpoint",
     route: "checkpoint.recover",
     invoke: (api) => api.recoverCheckpoint(recoverCheckpointInput),
@@ -419,6 +463,15 @@ const HANDLER_CASES: ReadonlyArray<HandlerCase> = [
     setMethod: (impl) => ({
       recoverCheckpoint: (checkpointId: string, actor: unknown, at: Date) =>
         impl(checkpointId, actor, at),
+    }),
+  },
+  {
+    name: "listActivity",
+    route: "activity.list",
+    invoke: (api) => api.listActivity(listActivityInput),
+    expectedArgs: [listActivityInput],
+    setMethod: (impl) => ({
+      listActivityFeed: (options: unknown) => impl(options),
     }),
   },
 ];
@@ -444,8 +497,11 @@ describe("api/workflows/workflow-api", () => {
       "editEntrySuggestion",
       "ingestSignal",
       "inspectJobRun",
+      "inspectWorkflowCheckpoint",
       "keepCheckpoint",
+      "listActivity",
       "listJobRunHistory",
+      "listJobs",
       "recordJobRun",
       "recoverCheckpoint",
       "rejectEntrySuggestion",

@@ -10,7 +10,12 @@ import { makeWorkflowRoutes } from "../../../../src/api/workflows/routes";
 const ACTOR = { id: "user-1", kind: "user" } as const;
 
 type StubCall = {
-  route: "capture.entry" | "job.listHistory";
+  route:
+    | "capture.entry"
+    | "job.list"
+    | "job.listHistory"
+    | "checkpoint.inspect"
+    | "activity.list";
   input: unknown;
 };
 
@@ -47,6 +52,11 @@ const makeApiStub = (): { api: WorkflowApi; calls: Array<StubCall> } => {
     createJob: (_input) => Effect.die("unused"),
     recordJobRun: (_input) => Effect.die("unused"),
     inspectJobRun: (_input) => Effect.die("unused"),
+    listJobs: (input) =>
+      Effect.sync(() => {
+        calls.push({ route: "job.list", input });
+        return [];
+      }),
     listJobRunHistory: (input) =>
       Effect.sync(() => {
         calls.push({ route: "job.listHistory", input });
@@ -54,8 +64,28 @@ const makeApiStub = (): { api: WorkflowApi; calls: Array<StubCall> } => {
       }),
     retryJob: (_input) => Effect.die("unused"),
     createWorkflowCheckpoint: (_input) => Effect.die("unused"),
+    inspectWorkflowCheckpoint: (input) =>
+      Effect.sync(() => {
+        calls.push({ route: "checkpoint.inspect", input });
+        return {
+          id: input.checkpointId,
+          name: "Checkpoint from stub",
+          snapshotEntityRefs: [],
+          snapshotEntities: [],
+          auditCursor: 0,
+          rollbackTarget: "audit-0",
+          status: "created",
+          createdAt: "2026-02-23T10:00:00.000Z",
+          updatedAt: "2026-02-23T10:00:00.000Z",
+        };
+      }),
     keepCheckpoint: (_input) => Effect.die("unused"),
     recoverCheckpoint: (_input) => Effect.die("unused"),
+    listActivity: (input) =>
+      Effect.sync(() => {
+        calls.push({ route: "activity.list", input });
+        return [];
+      }),
   };
   return { api, calls };
 };
@@ -303,6 +333,120 @@ describe("api/workflows/http-dispatch", () => {
     expect(
       (historyCall!.input as { beforeAt: unknown }).beforeAt,
     ).toBeInstanceOf(Date);
+  });
+
+  test("dispatches job.list route with date coercion", async () => {
+    const stub = makeApiStub();
+    const dispatcher = makeWorkflowHttpDispatcher(makeWorkflowRoutes(stub.api));
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: "/api/workflows/job/list",
+        body: {
+          runState: "failed",
+          beforeUpdatedAt: "2026-02-23T10:00:00.000Z",
+          limit: 2,
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual([]);
+
+    const listCall = stub.calls.find((call) => call.route === "job.list");
+    expect(listCall).toBeDefined();
+    expect(
+      (listCall!.input as { beforeUpdatedAt: unknown }).beforeUpdatedAt,
+    ).toBeInstanceOf(Date);
+  });
+
+  test("dispatches checkpoint.inspect and activity.list routes with the API stub", async () => {
+    const stub = makeApiStub();
+    const dispatcher = makeWorkflowHttpDispatcher(makeWorkflowRoutes(stub.api));
+
+    const inspectResponse = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: "/api/workflows/checkpoint/inspect",
+        body: {
+          checkpointId: "checkpoint-http-1",
+        },
+      }),
+    );
+    const activityResponse = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: "/api/workflows/activity/list",
+        body: {
+          aiOnly: true,
+          beforeAt: "2026-02-23T10:00:00.000Z",
+          limit: 5,
+        },
+      }),
+    );
+
+    expect(inspectResponse.status).toBe(200);
+    expect(inspectResponse.body).toMatchObject({
+      id: "checkpoint-http-1",
+      status: "created",
+    });
+    expect(activityResponse.status).toBe(200);
+    expect(activityResponse.body).toEqual([]);
+
+    const inspectCall = stub.calls.find(
+      (call) => call.route === "checkpoint.inspect",
+    );
+    expect(inspectCall).toBeDefined();
+    expect(inspectCall?.input).toEqual({ checkpointId: "checkpoint-http-1" });
+
+    const activityCall = stub.calls.find(
+      (call) => call.route === "activity.list",
+    );
+    expect(activityCall).toBeDefined();
+    expect(
+      (activityCall?.input as { beforeAt: unknown }).beforeAt,
+    ).toBeInstanceOf(Date);
+  });
+
+  test("returns sanitized failure body for job.list route errors", async () => {
+    const routes: ReadonlyArray<WorkflowRouteDefinition> = [
+      {
+        key: "job.list",
+        method: "POST",
+        path: "/api/workflows/job/list",
+        handle: () =>
+          Effect.fail(
+            new WorkflowApiError({
+              route: "job.list",
+              message: "cannot load jobs",
+              code: "not_found",
+              statusCode: 404,
+              cause: { internal: "sensitive" },
+            }),
+          ),
+      },
+    ];
+    const dispatcher = makeWorkflowHttpDispatcher(routes);
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: "/api/workflows/job/list",
+        body: {},
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        error: "workflow request failed",
+        route: "job.list",
+        message: "cannot load jobs",
+      }),
+    );
+    expect(response.body).not.toHaveProperty("_tag");
+    expect(response.body).not.toHaveProperty("cause");
   });
 
   test("returns sanitized 500 body when a route defects", async () => {

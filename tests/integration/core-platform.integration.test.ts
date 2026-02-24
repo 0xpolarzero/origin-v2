@@ -163,4 +163,64 @@ describe("Core Platform integration", () => {
 
     expect(transactionCalls.length).toBe(1);
   });
+
+  test("exposes job/activity/checkpoint read surfaces and forwards retry fixSummary", async () => {
+    const platform = await Effect.runPromise(buildCorePlatform());
+
+    await Effect.runPromise(
+      platform.createJob({
+        jobId: "job-platform-read-1",
+        name: "Platform read test",
+      }),
+    );
+    await Effect.runPromise(
+      platform.recordJobRun({
+        jobId: "job-platform-read-1",
+        outcome: "failed",
+        diagnostics: "Provider timeout",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T19:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      platform.retryJob(
+        "job-platform-read-1",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T19:01:00.000Z"),
+        "Increase timeout to 15 seconds",
+      ),
+    );
+
+    await Effect.runPromise(
+      platform.createWorkflowCheckpoint({
+        checkpointId: "checkpoint-platform-read-1",
+        name: "Checkpoint for inspect",
+        snapshotEntityRefs: [],
+        auditCursor: 20,
+        rollbackTarget: "audit-20",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T19:02:00.000Z"),
+      }),
+    );
+
+    const jobs = await Effect.runPromise(
+      platform.listJobs({ runState: "retrying" }),
+    );
+    const inspectedCheckpoint = await Effect.runPromise(
+      platform.inspectWorkflowCheckpoint("checkpoint-platform-read-1"),
+    );
+    const jobActivity = await Effect.runPromise(
+      platform.listActivityFeed({
+        entityType: "job",
+        entityId: "job-platform-read-1",
+      }),
+    );
+    const retryEntry = jobActivity.find((item) => item.toState === "retrying");
+
+    expect(jobs.map((job) => job.id)).toEqual(["job-platform-read-1"]);
+    expect(inspectedCheckpoint.id).toBe("checkpoint-platform-read-1");
+    expect(retryEntry?.metadata).toMatchObject({
+      fixSummary: "Increase timeout to 15 seconds",
+    });
+  });
 });

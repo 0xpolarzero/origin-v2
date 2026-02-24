@@ -2,6 +2,7 @@ import { Effect } from "effect";
 
 import { CorePlatform } from "../../core/app/core-platform";
 import { ActorRef } from "../../core/domain/common";
+import { Job } from "../../core/domain/job";
 import { ApproveOutboundActionInput } from "../../core/services/approval-service";
 import { CreateWorkflowCheckpointInput } from "../../core/services/checkpoint-service";
 import {
@@ -36,11 +37,14 @@ export type WorkflowRouteKey =
   | "job.create"
   | "job.recordRun"
   | "job.inspectRun"
+  | "job.list"
   | "job.listHistory"
   | "job.retry"
   | "checkpoint.create"
+  | "checkpoint.inspect"
   | "checkpoint.keep"
-  | "checkpoint.recover";
+  | "checkpoint.recover"
+  | "activity.list";
 
 export interface TriageSignalRequest {
   signalId: string;
@@ -89,10 +93,30 @@ export interface RetryJobRequest {
   jobId: string;
   actor: ActorRef;
   at?: Date;
+  fixSummary?: string;
+}
+
+export interface ListJobsRequest {
+  runState?: Job["runState"];
+  limit?: number;
+  beforeUpdatedAt?: Date;
 }
 
 export interface ListJobRunHistoryRequest {
   jobId: string;
+  limit?: number;
+  beforeAt?: Date;
+}
+
+export interface InspectWorkflowCheckpointRequest {
+  checkpointId: string;
+}
+
+export interface ListActivityRequest {
+  entityType?: string;
+  entityId?: string;
+  actorKind?: ActorRef["kind"];
+  aiOnly?: boolean;
   limit?: number;
   beforeAt?: Date;
 }
@@ -164,6 +188,7 @@ export interface WorkflowApi {
   inspectJobRun: (
     input: InspectJobRunRequest,
   ) => ApiOutput<CorePlatform["inspectJobRun"]>;
+  listJobs: (input: ListJobsRequest) => ApiOutput<CorePlatform["listJobs"]>;
   listJobRunHistory: (
     input: ListJobRunHistoryRequest,
   ) => ApiOutput<CorePlatform["listJobRunHistory"]>;
@@ -171,12 +196,18 @@ export interface WorkflowApi {
   createWorkflowCheckpoint: (
     input: CreateWorkflowCheckpointInput,
   ) => ApiOutput<CorePlatform["createWorkflowCheckpoint"]>;
+  inspectWorkflowCheckpoint: (
+    input: InspectWorkflowCheckpointRequest,
+  ) => ApiOutput<CorePlatform["inspectWorkflowCheckpoint"]>;
   keepCheckpoint: (
     input: KeepCheckpointRequest,
   ) => ApiOutput<CorePlatform["keepCheckpoint"]>;
   recoverCheckpoint: (
     input: RecoverCheckpointRequest,
   ) => ApiOutput<CorePlatform["recoverCheckpoint"]>;
+  listActivity: (
+    input: ListActivityRequest,
+  ) => ApiOutput<CorePlatform["listActivityFeed"]>;
 }
 
 export interface WorkflowRouteDefinition {
