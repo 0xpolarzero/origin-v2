@@ -15,6 +15,20 @@ function readPackageScripts() {
   return packageJson.scripts ?? {};
 }
 
+function assertNoNoopPatterns(commands: string[], context: string) {
+  const noOpPatterns = [/No .* configured yet/i, /\|\|\s*echo\b/i];
+
+  for (const command of commands) {
+    for (const pattern of noOpPatterns) {
+      expect(command).not.toMatch(pattern);
+    }
+    expect(command.startsWith("bun run ")).toBe(true);
+  }
+
+  expect(commands.length).toBeGreaterThan(0);
+  expect(context.length).toBeGreaterThan(0);
+}
+
 describe("workflow gate policy integration", () => {
   test("CLI fallback config uses deterministic gate command wiring for this repo", () => {
     const scripts = readPackageScripts();
@@ -131,5 +145,48 @@ describe("workflow gate policy integration", () => {
 
     expect(workflowScript).toBeDefined();
     expect(workflowScript).toContain("workflow-surfaces.integration.test.ts");
+  });
+
+  test("resolved gate commands never include placeholder/no-op patterns", () => {
+    const scripts = readPackageScripts();
+    const config = buildGateCommandConfig("bun", scripts);
+    const categories = ["core", "api", "workflow", "db", "unknown"];
+
+    for (const category of categories) {
+      const selection = resolveTicketGateSelection({
+        ticketCategory: category,
+        buildCmds: config.buildCmds,
+        testCmds: config.testCmds,
+        preLandChecks: config.preLandChecks,
+      });
+
+      assertNoNoopPatterns(selection.verifyCommands, `${category}:verify`);
+      assertNoNoopPatterns(
+        selection.validationCommands,
+        `${category}:validation`,
+      );
+      assertNoNoopPatterns(
+        selection.testSuites.map((suite) => suite.command),
+        `${category}:suite`,
+      );
+    }
+  });
+
+  test("package scripts required by workflow gates remain defined and non-empty", () => {
+    const scripts = readPackageScripts();
+    const requiredScriptNames = [
+      "test",
+      "typecheck",
+      "test:core",
+      "test:integration:api",
+      "test:integration:workflow",
+      "test:integration:db",
+    ];
+
+    for (const scriptName of requiredScriptNames) {
+      const script = scripts[scriptName];
+      expect(typeof script).toBe("string");
+      expect(script?.trim().length).toBeGreaterThan(0);
+    }
   });
 });

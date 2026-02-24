@@ -56,6 +56,15 @@ describe("ticket-gates", () => {
     );
   });
 
+  test("resolveCategoryTestCommand throws when no runnable test command exists", () => {
+    expect(() =>
+      resolveCategoryTestCommand("core", { core: "   ", test: "  " }),
+    ).toThrow(/No runnable test command configured/i);
+    expect(() => resolveCategoryTestCommand("unknown", {})).toThrow(
+      /No runnable test command configured/i,
+    );
+  });
+
   test("resolveVerifyCommands reuses preLandChecks and always includes relevant test", () => {
     const verifyCommands = resolveVerifyCommands({
       ticketCategory: "core",
@@ -69,5 +78,51 @@ describe("ticket-gates", () => {
       "bun run lint",
       "bun run test:core",
     ]);
+  });
+
+  test("resolveVerifyCommands rejects placeholder and soft-fail command patterns", () => {
+    expect(() =>
+      resolveVerifyCommands({
+        ticketCategory: "core",
+        buildCmds,
+        testCmds,
+        preLandChecks: ['echo "No build/typecheck command configured yet"'],
+      }),
+    ).toThrow(/non-runnable gate command/i);
+
+    expect(() =>
+      resolveVerifyCommands({
+        ticketCategory: "core",
+        buildCmds: {
+          typecheck: 'bun run typecheck || echo "No tsconfig yet"',
+        },
+        testCmds,
+        preLandChecks: [],
+      }),
+    ).toThrow(/non-runnable gate command/i);
+  });
+
+  test("resolveTicketGateSelection rejects missing and non-runnable validation commands", () => {
+    expect(() =>
+      resolveTicketGateSelection({
+        ticketCategory: "core",
+        buildCmds: {},
+        testCmds: {},
+        preLandChecks: [],
+      }),
+    ).toThrow(/No runnable test command configured/i);
+
+    expect(() =>
+      resolveTicketGateSelection({
+        ticketCategory: "workflow",
+        buildCmds: {
+          typecheck: 'bun run typecheck || echo "No tsconfig yet"',
+        },
+        testCmds: {
+          workflow: "bun run test:integration:workflow",
+        },
+        preLandChecks: [],
+      }),
+    ).toThrow(/non-runnable gate command/i);
   });
 });
