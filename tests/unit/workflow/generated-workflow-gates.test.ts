@@ -60,7 +60,27 @@ export function assertNoPlaceholderCommands(
   expect(context.trim().length).toBeGreaterThan(0);
 }
 
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, "");
+}
+
+function matchesIgnoringWhitespace(source: string, snippet: string): boolean {
+  return normalizeWhitespace(source).includes(normalizeWhitespace(snippet));
+}
+
 describe("generated workflow gates", () => {
+  test("matches snippet content independent of whitespace formatting", () => {
+    expect(
+      matchesIgnoringWhitespace(
+        `const buildCmds = mergeCommandMap(
+          FALLBACK_CONFIG.buildCmds,
+          interpreted.buildCmds
+        );`,
+        "const buildCmds = mergeCommandMap(FALLBACK_CONFIG.buildCmds, interpreted.buildCmds);",
+      ),
+    ).toBe(true);
+  });
+
   test("workflow artifact contains script-derived gate command maps with no placeholders", () => {
     const source = readGeneratedWorkflowSource();
     const packageScripts = extractConstJson<Record<string, string>>(
@@ -103,19 +123,28 @@ describe("generated workflow gates", () => {
   test("workflow artifact wires runtime command-map merge into SuperRalph and Monitor", () => {
     const source = readGeneratedWorkflowSource();
 
-    expect(source).toContain("function mergeCommandMap(");
-    expect(source).toContain("function resolveRuntimeConfig(ctx: any)");
-    expect(source).toContain(
-      "const buildCmds = mergeCommandMap(FALLBACK_CONFIG.buildCmds, interpreted.buildCmds);",
-    );
-    expect(source).toContain(
-      "const testCmds = mergeCommandMap(FALLBACK_CONFIG.testCmds, interpreted.testCmds);",
-    );
-    expect(source).toContain(
-      "const runtimeConfig = resolveRuntimeConfig(ctx);",
-    );
-    expect(source).toContain("{...runtimeConfig}");
-    expect(source).toContain("config={runtimeConfig}");
+    expect(source).toMatch(/function\s+mergeCommandMap\s*\(/);
+    expect(source).toMatch(/function\s+resolveRuntimeConfig\s*\(\s*ctx:\s*any\s*\)/);
+    expect(
+      matchesIgnoringWhitespace(
+        source,
+        "const buildCmds = mergeCommandMap(FALLBACK_CONFIG.buildCmds, interpreted.buildCmds);",
+      ),
+    ).toBe(true);
+    expect(
+      matchesIgnoringWhitespace(
+        source,
+        "const testCmds = mergeCommandMap(FALLBACK_CONFIG.testCmds, interpreted.testCmds);",
+      ),
+    ).toBe(true);
+    expect(
+      matchesIgnoringWhitespace(
+        source,
+        "const runtimeConfig = resolveRuntimeConfig(ctx);",
+      ),
+    ).toBe(true);
+    expect(source).toMatch(/\{\s*\.\.\.\s*runtimeConfig\s*\}/);
+    expect(source).toMatch(/config=\{\s*runtimeConfig\s*\}/);
     expect(source).not.toContain(
       '{...((ctx.outputMaybe("interpret-config", outputs.interpret_config) as any) || FALLBACK_CONFIG)}',
     );
@@ -151,10 +180,13 @@ describe("generated workflow gates", () => {
 
     expect(source).not.toContain("dangerouslySkipPermissions: true");
     expect(source).not.toContain("yolo: true");
-    expect(source).toContain(
-      "const agentSafetyPolicy = resolveAgentSafetyPolicy(runtimeConfig.agentSafetyPolicy);",
-    );
-    expect(source).toContain("agentSafetyPolicy={agentSafetyPolicy}");
+    expect(
+      matchesIgnoringWhitespace(
+        source,
+        "const agentSafetyPolicy = resolveAgentSafetyPolicy(runtimeConfig.agentSafetyPolicy);",
+      ),
+    ).toBe(true);
+    expect(source).toMatch(/agentSafetyPolicy=\{\s*agentSafetyPolicy\s*\}/);
   });
 
   test("workflow artifact resolves policy behavior with env precedence and fail-closed normalization", () => {
