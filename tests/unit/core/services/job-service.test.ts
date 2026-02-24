@@ -200,6 +200,47 @@ describe("job-service", () => {
     });
   });
 
+  test("recordJobRun and retryJobRun execute within repository transaction boundaries", async () => {
+    const baseRepository = makeInMemoryCoreRepository();
+    const transactionCalls: Array<string> = [];
+    const repository = {
+      ...baseRepository,
+      withTransaction: <A, E>(effect: Effect.Effect<A, E>) =>
+        Effect.sync(() => {
+          transactionCalls.push("withTransaction");
+        }).pipe(Effect.zipRight(effect)),
+    };
+
+    const job = await Effect.runPromise(
+      createJob({
+        id: "job-service-transaction-1",
+        name: "Job transaction boundary",
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("job", job.id, job));
+
+    await Effect.runPromise(
+      recordJobRun(repository, {
+        jobId: "job-service-transaction-1",
+        outcome: "failed",
+        diagnostics: "timeout",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T14:30:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      retryJobRun(
+        repository,
+        "job-service-transaction-1",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T14:31:00.000Z"),
+      ),
+    );
+
+    expect(transactionCalls).toEqual(["withTransaction", "withTransaction"]);
+  });
+
   test("inspectJobRun returns current status snapshot for a job", async () => {
     const repository = makeInMemoryCoreRepository();
     const job = await Effect.runPromise(
