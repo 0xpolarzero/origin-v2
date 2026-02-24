@@ -4,6 +4,7 @@ import type { WorkflowRouteKey } from "../../../src/api/workflows/contracts";
 import {
   findPersistedSchemaContractViolations,
   findWorkflowRouteContractViolations,
+  parseAuthoritativeWorkflowContract,
   parsePersistedSchemaContract,
   parseMarkdownTableRows,
   parseWorkflowRouteContractRows,
@@ -195,6 +196,165 @@ describe("contract-doc-policy", () => {
       triggerNames: ["task_status_check_insert", "task_status_check_update"],
       indexNames: ["idx_task_status", "idx_task_project_id"],
     });
+  });
+
+  test("parseAuthoritativeWorkflowContract extracts workflow routes and persisted schema from one markdown source", () => {
+    const markdown = `
+## Route Matrix
+
+| Route Key | Method | Path |
+| --- | --- | --- |
+| capture.entry | POST | /api/workflows/capture/entry |
+| signal.ingest | POST | /api/workflows/signal/ingest |
+
+## Shared Validation Rules
+
+- Required string fields reject blank values after trimming.
+
+## Migration Ledger
+
+| Migration ID |
+| --- |
+| 001_core_schema |
+| 002_core_constraints_indexes |
+
+## Table Column Matrix
+
+| Table | Columns |
+| --- | --- |
+| entry | id, content, source |
+| signal | id, source, payload |
+
+## Trigger Contract
+
+| Trigger Name |
+| --- |
+| entry_status_check_insert |
+| signal_triage_state_check_insert |
+
+## Index Contract
+
+| Index Name |
+| --- |
+| idx_task_status |
+| idx_signal_converted_entity |
+`;
+
+    expect(parseAuthoritativeWorkflowContract(markdown)).toEqual({
+      routes: [
+        {
+          key: "capture.entry",
+          method: "POST",
+          path: "/api/workflows/capture/entry",
+        },
+        {
+          key: "signal.ingest",
+          method: "POST",
+          path: "/api/workflows/signal/ingest",
+        },
+      ],
+      persistedSchema: {
+        migrationIds: ["001_core_schema", "002_core_constraints_indexes"],
+        tables: [
+          { table: "entry", columns: ["id", "content", "source"] },
+          { table: "signal", columns: ["id", "source", "payload"] },
+        ],
+        triggerNames: [
+          "entry_status_check_insert",
+          "signal_triage_state_check_insert",
+        ],
+        indexNames: ["idx_task_status", "idx_signal_converted_entity"],
+      },
+    });
+  });
+
+  test("parseAuthoritativeWorkflowContract throws when required sections are missing", () => {
+    const missingRouteMatrix = `
+## Migration Ledger
+
+| Migration ID |
+| --- |
+| 001_core_schema |
+
+## Table Column Matrix
+
+| Table | Columns |
+| --- | --- |
+| entry | id, content, source |
+
+## Trigger Contract
+
+| Trigger Name |
+| --- |
+| entry_status_check_insert |
+
+## Index Contract
+
+| Index Name |
+| --- |
+| idx_task_status |
+`;
+    expect(() =>
+      parseAuthoritativeWorkflowContract(missingRouteMatrix),
+    ).toThrow("missing required contract section: Route Matrix");
+
+    const missingMigrationLedger = `
+## Route Matrix
+
+| Route Key | Method | Path |
+| --- | --- | --- |
+| capture.entry | POST | /api/workflows/capture/entry |
+
+## Table Column Matrix
+
+| Table | Columns |
+| --- | --- |
+| entry | id, content, source |
+
+## Trigger Contract
+
+| Trigger Name |
+| --- |
+| entry_status_check_insert |
+
+## Index Contract
+
+| Index Name |
+| --- |
+| idx_task_status |
+`;
+    expect(() =>
+      parseAuthoritativeWorkflowContract(missingMigrationLedger),
+    ).toThrow("missing required contract section: Migration Ledger");
+
+    const missingTableColumnMatrix = `
+## Route Matrix
+
+| Route Key | Method | Path |
+| --- | --- | --- |
+| capture.entry | POST | /api/workflows/capture/entry |
+
+## Migration Ledger
+
+| Migration ID |
+| --- |
+| 001_core_schema |
+
+## Trigger Contract
+
+| Trigger Name |
+| --- |
+| entry_status_check_insert |
+
+## Index Contract
+
+| Index Name |
+| --- |
+| idx_task_status |
+`;
+    expect(() =>
+      parseAuthoritativeWorkflowContract(missingTableColumnMatrix),
+    ).toThrow("missing required contract section: Table Column Matrix");
   });
 
   test("findPersistedSchemaContractViolations reports missing, extra, and mismatch differences", () => {

@@ -56,6 +56,45 @@ const expectSanitizedError = (
 };
 
 describe("workflow-api http integration", () => {
+  test("dispatcher returns 404 for unknown route path and 405 for unsupported method", async () => {
+    const platform = await Effect.runPromise(buildCorePlatform());
+    const dispatcher = makeWorkflowHttpDispatcher(
+      makeWorkflowRoutes(makeWorkflowApi({ platform })),
+    );
+
+    const unknownPath = "/api/workflows/unknown/route";
+    const notFound = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: unknownPath,
+        body: { ignored: true },
+      }),
+    );
+    const methodNotAllowed = await Effect.runPromise(
+      dispatcher({
+        method: "GET",
+        path: WORKFLOW_ROUTE_PATHS["capture.entry"],
+        body: {},
+      }),
+    );
+
+    expect(notFound).toEqual({
+      status: 404,
+      body: {
+        error: "workflow route not found",
+        path: unknownPath,
+      },
+    });
+    expect(methodNotAllowed).toEqual({
+      status: 405,
+      body: {
+        error: "method not allowed",
+        method: "GET",
+        path: WORKFLOW_ROUTE_PATHS["capture.entry"],
+      },
+    });
+  });
+
   test("capture/triage/retry/recovery workflows execute through JSON HTTP dispatcher", async () => {
     const platform = await Effect.runPromise(buildCorePlatform());
     const dispatcher = makeWorkflowHttpDispatcher(
