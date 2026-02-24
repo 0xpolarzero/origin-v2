@@ -237,6 +237,46 @@ describe("api/workflows/http-dispatch", () => {
     );
   });
 
+  test("returns 404 when a route returns a not_found WorkflowApiError", async () => {
+    const routes: ReadonlyArray<WorkflowRouteDefinition> = [
+      {
+        key: "approval.approveOutboundAction",
+        method: "POST",
+        path: "/api/workflows/approval/approve-outbound-action",
+        handle: () =>
+          Effect.fail(
+            new WorkflowApiError({
+              route: "approval.approveOutboundAction",
+              message: "event event-404 was not found",
+              code: "not_found",
+              statusCode: 404,
+              cause: { internal: "do-not-leak" },
+            }),
+          ),
+      },
+    ];
+    const dispatcher = makeWorkflowHttpDispatcher(routes);
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: "/api/workflows/approval/approve-outbound-action",
+        body: {},
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        error: "workflow request failed",
+        route: "approval.approveOutboundAction",
+        message: "event event-404 was not found",
+      }),
+    );
+    expect(response.body).not.toHaveProperty("_tag");
+    expect(response.body).not.toHaveProperty("cause");
+  });
+
   test("dispatches job.listHistory route with the API stub", async () => {
     const stub = makeApiStub();
     const dispatcher = makeWorkflowHttpDispatcher(makeWorkflowRoutes(stub.api));

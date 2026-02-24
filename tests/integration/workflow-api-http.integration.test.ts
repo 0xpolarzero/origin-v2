@@ -121,7 +121,7 @@ describe("workflow-api http integration", () => {
     expect(checkpoint?.status).toBe("recovered");
   });
 
-  test("approval endpoints return 400, 403, and 409 with sanitized error payloads", async () => {
+  test("approval endpoints return 400, 403, 404, and 409 with sanitized error payloads", async () => {
     const repository = makeInMemoryCoreRepository();
     const event = await Effect.runPromise(
       createEvent({
@@ -148,6 +148,30 @@ describe("workflow-api http integration", () => {
     const dispatcher = makeWorkflowHttpDispatcher(
       makeWorkflowRoutes(makeWorkflowApi({ platform })),
     );
+
+    const notFound = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["approval.approveOutboundAction"],
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: "event-http-missing-404",
+          approved: true,
+          actor: ACTOR,
+          at: "2026-02-23T09:29:00.000Z",
+        },
+      }),
+    );
+    expect(notFound.status).toBe(404);
+    expect(notFound.body).toEqual(
+      expect.objectContaining({
+        error: "workflow request failed",
+        route: "approval.approveOutboundAction",
+      }),
+    );
+    expect(notFound.body).not.toHaveProperty("_tag");
+    expect(notFound.body).not.toHaveProperty("cause");
 
     await expectOk(dispatcher, "approval.requestEventSync", {
       eventId: event.id,
