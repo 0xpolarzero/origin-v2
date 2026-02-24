@@ -197,6 +197,30 @@ describe("api contract docs", () => {
     expect(dispatcherSection).toMatch(/500/);
   });
 
+  test("authoritative workflow contract defines request/response payload schemas per route", () => {
+    const markdown = readAuthoritativeWorkflowContract();
+    const payloadRows = parseMarkdownTableRows(
+      markdown,
+      "Route Payload Schema Matrix",
+    );
+    const rowByKey = new Map(
+      payloadRows.map((row) => [(row["Route Key"] ?? "").trim(), row]),
+    );
+
+    expect(payloadRows).toHaveLength(Object.keys(WORKFLOW_ROUTE_PATHS).length);
+
+    for (const routeKey of Object.keys(WORKFLOW_ROUTE_PATHS).sort()) {
+      const row = rowByKey.get(routeKey);
+      expect(row).toBeDefined();
+      expect(((row?.["Request Required Fields"] ?? "") as string).trim()).not.toBe(
+        "",
+      );
+      expect(((row?.["Success Response Fields"] ?? "") as string).trim()).not.toBe(
+        "",
+      );
+    }
+  });
+
   test("authoritative workflow contract schema sections match migrated sqlite objects", async () => {
     const documented = parseAuthoritativeWorkflowContract(
       readAuthoritativeWorkflowContract(),
@@ -217,6 +241,37 @@ describe("api contract docs", () => {
       expect(documented.indexNames).toEqual(indexNames);
     } finally {
       db.close();
+    }
+  });
+
+  test("authoritative workflow contract includes persisted schema type/nullability/relation details", () => {
+    const markdown = readAuthoritativeWorkflowContract();
+    const documentedSchema = parseAuthoritativeWorkflowContract(markdown).persistedSchema;
+
+    const tableDetails = parseMarkdownTableRows(
+      markdown,
+      "Persisted Table Detail Matrix",
+    );
+    const triggerBehaviorRows = parseMarkdownTableRows(
+      markdown,
+      "Trigger Behavior Matrix",
+    );
+
+    expect(tableDetails).toHaveLength(documentedSchema.tables.length);
+    for (const row of tableDetails) {
+      expect((row["Table"] ?? "").trim()).not.toBe("");
+      expect((row["Column Contracts"] ?? "").trim()).not.toBe("");
+      expect((row["Column Contracts"] ?? "").toLowerCase()).toMatch(
+        /(required|optional)/,
+      );
+      expect((row["Column Contracts"] ?? "").toLowerCase()).toContain(":");
+      expect((row["Relation + Trigger Notes"] ?? "").trim()).not.toBe("");
+    }
+
+    expect(triggerBehaviorRows.length).toBeGreaterThan(0);
+    for (const row of triggerBehaviorRows) {
+      expect((row["Trigger Scope"] ?? "").trim()).not.toBe("");
+      expect((row["Enforced Contract"] ?? "").trim()).not.toBe("");
     }
   });
 
