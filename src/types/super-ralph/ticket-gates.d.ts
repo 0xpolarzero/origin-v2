@@ -15,9 +15,11 @@ export type TicketGateSelection = {
 export function resolveCategoryTestCommand(
   ticketCategory: string,
   testCmds: CommandMap,
+  ticketId?: string,
 ): string;
 
 export function resolveVerifyCommands(input: {
+  ticketId?: string;
   ticketCategory: string;
   buildCmds: CommandMap;
   testCmds: CommandMap;
@@ -25,6 +27,7 @@ export function resolveVerifyCommands(input: {
 }): string[];
 
 export function resolveTicketGateSelection(input: {
+  ticketId?: string;
   ticketCategory: string;
   buildCmds: CommandMap;
   testCmds: CommandMap;
