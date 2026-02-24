@@ -265,6 +265,7 @@ describe("job-service", () => {
         _tag: "JobServiceError",
         code: "conflict",
       });
+      expect(duplicateRetry.left.message).toContain("retrying");
     }
     expect(persistedJob?.runState).toBe("retrying");
     expect(persistedJob?.retryCount).toBe(1);
@@ -311,6 +312,7 @@ describe("job-service", () => {
         _tag: "JobServiceError",
         code: "conflict",
       });
+      expect(retryFromIdle.left.message).toContain("idle");
       expect(retryFromIdle.left.message).toContain("must be in failed state");
     }
     expect(persistedJob?.runState).toBe("idle");

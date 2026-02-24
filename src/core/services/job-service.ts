@@ -222,7 +222,7 @@ const ensureRetryable = (job: Job): Effect.Effect<void, JobServiceError> =>
     ? Effect.void
     : Effect.fail(
         new JobServiceError({
-          message: `job ${job.id} must be in failed state before retry`,
+          message: `job ${job.id} is ${job.runState}; must be in failed state before retry`,
           code: "conflict",
         }),
       );
