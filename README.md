@@ -14,6 +14,7 @@ Minimal repo for implementing Origin with Super Ralph.
 
 - `docs/contracts/workflow-api-routes.md` - canonical workflow route contract (key/method/path + API behavior)
 - `docs/contracts/persisted-schema.md` - canonical persisted schema contract (migrations/tables/triggers/indexes)
+- `docs/contracts/api-006-tdd-audit.md` - review-fix audit trail with explicit RED/GREEN TDD evidence for API-006
 
 ## Run Super Ralph
 

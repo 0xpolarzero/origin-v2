@@ -245,4 +245,19 @@ describe("api contract docs", () => {
     expect(readme).toContain("docs/contracts/workflow-api-routes.md");
     expect(readme).toContain("docs/contracts/persisted-schema.md");
   });
+
+  test("README links API-006 TDD audit evidence and the audit doc records red/green proof", () => {
+    const readme = readFileSync(resolve(repositoryRoot, "README.md"), "utf8");
+
+    expect(readme).toContain("docs/contracts/api-006-tdd-audit.md");
+
+    const auditLog = readFileSync(
+      resolve(repositoryRoot, "docs/contracts/api-006-tdd-audit.md"),
+      "utf8",
+    );
+    expect(auditLog).toContain("## Review Finding");
+    expect(auditLog).toContain("## TDD Evidence");
+    expect(auditLog).toContain("RED:");
+    expect(auditLog).toContain("GREEN:");
+  });
 });
