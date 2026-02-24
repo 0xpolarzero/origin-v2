@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { buildGateCommandConfig } from "super-ralph/gate-config";
 import {
@@ -122,6 +124,28 @@ describe("generated workflow gates", () => {
     );
   });
 
+  test("PACKAGE_SCRIPTS required keys mirror root package.json scripts", () => {
+    const source = readGeneratedWorkflowSource();
+    const generatedPackageScripts = extractConstJson<Record<string, string>>(
+      source,
+      "PACKAGE_SCRIPTS",
+    );
+    const rootPackage = JSON.parse(
+      readFileSync(resolve(process.cwd(), "package.json"), "utf8"),
+    ) as { scripts?: Record<string, string> };
+    const rootScripts = rootPackage.scripts ?? {};
+    const requiredKeys = [
+      "test",
+      "typecheck",
+      "test:integration:api",
+      "test:integration:db",
+    ] as const;
+
+    for (const key of requiredKeys) {
+      expect(generatedPackageScripts[key]).toBe(rootScripts[key]);
+    }
+  });
+
   test("workflow artifact bans hardcoded permissive agent flags and wires safety policy", () => {
     const source = readGeneratedWorkflowSource();
 
@@ -175,8 +199,7 @@ describe("generated workflow gates", () => {
     withEnv(
       {
         SUPER_RALPH_RISKY_MODE: "1",
-        SUPER_RALPH_APPROVAL_REQUIRED_PHASES:
-          " land,unknown,IMPLEMENT,land ",
+        SUPER_RALPH_APPROVAL_REQUIRED_PHASES: " land,unknown,IMPLEMENT,land ",
       },
       () => {
         expect(

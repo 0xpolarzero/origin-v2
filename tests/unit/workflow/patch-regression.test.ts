@@ -38,7 +38,9 @@ describe("super-ralph patch regression", () => {
 
     expect(sections.has("package.json")).toBe(true);
     expect(sections.has("src/cli/index.ts")).toBe(true);
+    expect(sections.has("src/cli/gate-config.ts")).toBe(true);
     expect(sections.has("src/components/SuperRalph.tsx")).toBe(true);
+    expect(sections.has("src/components/ticket-gates.ts")).toBe(true);
     expect(sections.has("src/components/index.ts")).toBe(true);
     expect(sections.has("src/components/InterpretConfig.tsx")).toBe(true);
     expect(sections.has("src/prompts/Land.mdx")).toBe(true);
@@ -90,11 +92,14 @@ describe("super-ralph patch regression", () => {
     const sections = parsePatchSections(patch);
     const superRalphSection =
       sections.get("src/components/SuperRalph.tsx") ?? "";
+    const ticketGatesSection =
+      sections.get("src/components/ticket-gates.ts") ?? "";
     const interpretSection =
       sections.get("src/components/InterpretConfig.tsx") ?? "";
     const indexSection = sections.get("src/components/index.ts") ?? "";
 
     expect(superRalphSection).toContain("resolveTicketGateSelection");
+    expect(superRalphSection).toContain("ticketId: ticket.id");
     expect(superRalphSection).toContain(
       "verifyCommands={ticketGateSelection.verifyCommands}",
     );
@@ -111,6 +116,11 @@ describe("super-ralph patch regression", () => {
     );
     expect(superRalphSection).toContain(
       'needsApproval={requiresApprovalForPhase(\n+                      "land",',
+    );
+    expect(ticketGatesSection).toContain("function normalizeCategory(");
+    expect(ticketGatesSection).toContain("ticketId?: string");
+    expect(ticketGatesSection).toContain(
+      'if (normalizedId.startsWith("API-")) return "api"',
     );
     expect(indexSection).toContain("normalizeAgentSafetyPolicy");
     expect(indexSection).toContain("requiresApprovalForPhase");

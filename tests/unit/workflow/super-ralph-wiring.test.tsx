@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import React from "react";
 
 import { SuperRalph } from "super-ralph/components";
@@ -12,11 +14,29 @@ type RenderOptions = {
     command: string;
     description: string;
   }>;
+  ticket?: TicketFixture;
   agentSafetyPolicy?: AgentSafetyPolicy;
   progressBookmark?: string;
 };
 
+type TicketFixture = {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  priority: string;
+};
+
+const DEFAULT_TICKET: TicketFixture = {
+  id: "CORE-REV-004",
+  title: "Ticket",
+  description: "Ticket description",
+  category: "core",
+  priority: "high",
+};
+
 function createCtx(
+  ticket: TicketFixture = DEFAULT_TICKET,
   specReviewSeverity: RenderOptions["specReviewSeverity"] = "none",
 ) {
   return {
@@ -27,15 +47,7 @@ function createCtx(
         opts.nodeId === "codebase-review:core"
       ) {
         return {
-          suggestedTickets: [
-            {
-              id: "CORE-REV-004",
-              title: "Ticket",
-              description: "Ticket description",
-              category: "core",
-              priority: "high",
-            },
-          ],
+          suggestedTickets: [ticket],
           overallSeverity: "none",
           specCompliance: { feedback: "" },
         };
@@ -43,7 +55,7 @@ function createCtx(
 
       if (
         schema === "spec_review" &&
-        opts.nodeId === "CORE-REV-004:spec-review"
+        opts.nodeId === `${ticket.id}:spec-review`
       ) {
         return {
           severity: specReviewSeverity,
@@ -123,7 +135,7 @@ function findTaskProps(tree: unknown, taskId: string): Record<string, unknown> {
 
 function renderSuperRalph(options: RenderOptions = {}) {
   return SuperRalph({
-    ctx: createCtx(options.specReviewSeverity),
+    ctx: createCtx(options.ticket, options.specReviewSeverity),
     focuses: [{ id: "core", name: "Core Platform" }],
     outputs: ralphOutputSchemas,
     projectId: "origin-v2",
@@ -259,17 +271,64 @@ describe("SuperRalph ticket-gate wiring", () => {
 
   test("binds update-progress worktree to deterministic bookmark branch", () => {
     const tree = renderSuperRalph();
-    const updateProgressWorktreeProps = findTaskProps(tree, "wt-update-progress");
+    const updateProgressWorktreeProps = findTaskProps(
+      tree,
+      "wt-update-progress",
+    );
 
     expect(updateProgressWorktreeProps.branch).toBe("progress/update-progress");
   });
 
   test("passes progress bookmark into UpdateProgressPrompt", () => {
-    const tree = renderSuperRalph({ progressBookmark: "progress/custom-track" });
-    const updateProgressPromptProps = findTaskPromptProps(tree, "update-progress");
+    const tree = renderSuperRalph({
+      progressBookmark: "progress/custom-track",
+    });
+    const updateProgressPromptProps = findTaskPromptProps(
+      tree,
+      "update-progress",
+    );
 
     expect(updateProgressPromptProps.progressBookmark).toBe(
       "progress/custom-track",
     );
+  });
+
+  test("routes API testing tickets to API integration gates", () => {
+    const tree = renderSuperRalph({
+      ticket: {
+        id: "API-005",
+        title: "API ticket",
+        description: "Ensure API gates are enforceable",
+        category: "testing",
+        priority: "medium",
+      },
+      specReviewSeverity: "major",
+    });
+
+    expect(
+      findTaskPromptProps(tree, "API-005:implement").verifyCommands,
+    ).toEqual(["bun run typecheck", "bun run test:integration:api"]);
+    expect(findTaskPromptProps(tree, "API-005:test").testSuites).toEqual([
+      {
+        name: "api tests",
+        command: "bun run test:integration:api",
+        description: "Run api tests",
+      },
+    ]);
+    expect(
+      findTaskPromptProps(tree, "API-005:review-fix").validationCommands,
+    ).toEqual(["bun run typecheck", "bun run test:integration:api"]);
+  });
+
+  test("passes ticketId into ticket gate resolution in SuperRalph", () => {
+    const source = readFileSync(
+      resolve(
+        process.cwd(),
+        "node_modules/super-ralph/src/components/SuperRalph.tsx",
+      ),
+      "utf8",
+    );
+
+    expect(source).toContain("ticketId: ticket.id");
   });
 });

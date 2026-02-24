@@ -16,6 +16,7 @@ const testCmds = {
   core: "bun run test:core",
   api: "bun run test:integration:api",
   workflow: "bun run test:integration:workflow",
+  db: "bun run test:integration:db",
 };
 
 describe("ticket-gates", () => {
@@ -56,6 +57,12 @@ describe("ticket-gates", () => {
     );
   });
 
+  test("resolveCategoryTestCommand maps API testing tickets to integration API tests", () => {
+    expect(resolveCategoryTestCommand("testing", testCmds, "API-005")).toBe(
+      "bun run test:integration:api",
+    );
+  });
+
   test("resolveCategoryTestCommand throws when no runnable test command exists", () => {
     expect(() =>
       resolveCategoryTestCommand("core", { core: "   ", test: "  " }),
@@ -80,6 +87,21 @@ describe("ticket-gates", () => {
     ]);
   });
 
+  test("resolveVerifyCommands for API testing tickets keeps typecheck + api suite and dedupes", () => {
+    const verifyCommands = resolveVerifyCommands({
+      ticketId: "API-005",
+      ticketCategory: "testing",
+      buildCmds,
+      testCmds,
+      preLandChecks: ["bun run typecheck", "bun run typecheck"],
+    });
+
+    expect(verifyCommands).toEqual([
+      "bun run typecheck",
+      "bun run test:integration:api",
+    ]);
+  });
+
   test("resolveVerifyCommands rejects placeholder and soft-fail command patterns", () => {
     expect(() =>
       resolveVerifyCommands({
@@ -100,6 +122,20 @@ describe("ticket-gates", () => {
         preLandChecks: [],
       }),
     ).toThrow(/non-runnable gate command/i);
+
+    expect(() =>
+      resolveVerifyCommands({
+        ticketId: "API-005",
+        ticketCategory: "testing",
+        buildCmds,
+        testCmds: {
+          ...testCmds,
+          api: 'echo "No api tests configured yet"',
+          test: 'echo "No tests configured yet"',
+        },
+        preLandChecks: ["bun run typecheck"],
+      }),
+    ).toThrow(/No runnable test command configured/i);
   });
 
   test("resolveTicketGateSelection rejects missing and non-runnable validation commands", () => {
