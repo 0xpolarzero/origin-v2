@@ -17,6 +17,9 @@ const makeClientStub = (): {
   calls: Array<{ method: string; input: unknown }>;
 } => {
   const calls: Array<{ method: string; input: unknown }> = [];
+  let runState: "failed" | "retrying" = "failed";
+  let retryCount = 0;
+  let diagnostics = "timeout";
 
   const client: WorkflowSurfaceClient = {
     listJobs: (input = {}) =>
@@ -26,9 +29,9 @@ const makeClientStub = (): {
           {
             id: "job-1",
             name: "Daily sync",
-            runState: "failed",
-            retryCount: 0,
-            diagnostics: "timeout",
+            runState,
+            retryCount,
+            diagnostics,
             createdAt: "2026-02-23T10:00:00.000Z",
             updatedAt: "2026-02-23T10:00:00.000Z",
           },
@@ -39,9 +42,9 @@ const makeClientStub = (): {
         calls.push({ method: "inspectJobRun", input });
         return {
           jobId: "job-1",
-          runState: "failed",
-          retryCount: 0,
-          diagnostics: "timeout",
+          runState,
+          retryCount,
+          diagnostics,
           lastFailureReason: "timeout",
         };
       }),
@@ -64,12 +67,15 @@ const makeClientStub = (): {
     retryJob: (input) =>
       Effect.sync(() => {
         calls.push({ method: "retryJob", input });
+        runState = "retrying";
+        retryCount = 1;
+        diagnostics = "retry requested";
         return {
           id: "job-1",
           name: "Daily sync",
-          runState: "retrying" as const,
-          retryCount: 1,
-          diagnostics: "retry requested",
+          runState,
+          retryCount,
+          diagnostics,
           createdAt: "2026-02-23T10:00:00.000Z",
           updatedAt: "2026-02-23T10:01:00.000Z",
         };
@@ -202,7 +208,19 @@ describe("jobs-surface", () => {
       fixSummary: "Increase timeout and retry",
     });
     expect(retried.jobs[0]?.id).toBe("job-1");
+    expect(retried.jobs[0]?.runState).toBe("retrying");
     expect(retried.selectedJobId).toBe("job-1");
+    expect(retried.inspection?.runState).toBe("retrying");
+    expect(retried.inspection?.retryCount).toBe(1);
     expect(retried.history).toHaveLength(1);
+    expect(calls.map((call) => call.method)).toEqual([
+      "listJobs",
+      "inspectJobRun",
+      "listJobRunHistory",
+      "retryJob",
+      "listJobs",
+      "inspectJobRun",
+      "listJobRunHistory",
+    ]);
   });
 });

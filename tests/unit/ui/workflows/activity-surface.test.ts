@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Either, Effect } from "effect";
 
 import { ActorRef } from "../../../../src/core/domain/common";
 import {
@@ -9,7 +9,10 @@ import {
   recoverCheckpointFromActivity,
 } from "../../../../src/ui/workflows/activity-surface";
 import { WorkflowSurfaceFiltersStore } from "../../../../src/ui/workflows/workflow-surface-filters";
-import { WorkflowSurfaceClient } from "../../../../src/ui/workflows/workflow-surface-client";
+import {
+  WorkflowSurfaceClient,
+  WorkflowSurfaceClientError,
+} from "../../../../src/ui/workflows/workflow-surface-client";
 
 const ACTOR: ActorRef = { id: "user-1", kind: "user" };
 
@@ -231,5 +234,41 @@ describe("activity-surface", () => {
       "inspectWorkflowCheckpoint",
       "listActivity",
     ]);
+  });
+
+  test("loadActivitySurface maps WorkflowSurfaceClientError to ActivitySurfaceError", async () => {
+    const client: WorkflowSurfaceClient = {
+      listJobs: () => Effect.die("unused"),
+      inspectJobRun: () => Effect.die("unused"),
+      listJobRunHistory: () => Effect.die("unused"),
+      retryJob: () => Effect.die("unused"),
+      listActivity: () =>
+        Effect.fail(
+          new WorkflowSurfaceClientError({
+            route: "activity.list",
+            status: 404,
+            message: "activity feed not found",
+          }),
+        ),
+      inspectWorkflowCheckpoint: () => Effect.die("unused"),
+      keepCheckpoint: () => Effect.die("unused"),
+      recoverCheckpoint: () => Effect.die("unused"),
+    };
+    const { store } = makeFiltersStoreStub();
+
+    const result = await Effect.runPromise(
+      Effect.either(loadActivitySurface(client, store, {})),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "ActivitySurfaceError",
+        message: "activity feed not found",
+      });
+      expect((result.left.cause as { _tag: string })._tag).toBe(
+        "WorkflowSurfaceClientError",
+      );
+    }
   });
 });
