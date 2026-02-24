@@ -235,11 +235,6 @@ const importLegacySnapshotIntoEmptyRepository = (
   snapshotPath: string,
 ): Effect.Effect<void, Error> =>
   Effect.gen(function* () {
-    const shouldImport = yield* isRepositoryEmpty(repository);
-    if (!shouldImport) {
-      return;
-    }
-
     const snapshotRepository = yield* makeFileCoreRepository(snapshotPath).pipe(
       Effect.mapError((error) => new Error(error.message)),
     );
@@ -248,26 +243,42 @@ const importLegacySnapshotIntoEmptyRepository = (
       yield* snapshotRepository.loadSnapshot(snapshotPath);
     }
 
+    const entitiesByType = new Map<string, ReadonlyArray<unknown>>();
     for (const entityType of ENTITY_TYPES) {
       const entities = yield* snapshotRepository.listEntities(entityType);
-      for (const entity of entities) {
-        if (!isRecord(entity)) {
-          continue;
-        }
-
-        const entityId = entity.id;
-        if (typeof entityId !== "string" || entityId.trim().length === 0) {
-          continue;
-        }
-
-        yield* repository.saveEntity(entityType, entityId, entity);
-      }
+      entitiesByType.set(entityType, entities);
     }
 
     const auditTrail = yield* snapshotRepository.listAuditTrail();
-    for (const transition of auditTrail) {
-      yield* repository.appendAuditTransition(transition);
-    }
+
+    yield* repository.withTransaction(
+      Effect.gen(function* () {
+        const shouldImport = yield* isRepositoryEmpty(repository);
+        if (!shouldImport) {
+          return;
+        }
+
+        for (const entityType of ENTITY_TYPES) {
+          const entities = entitiesByType.get(entityType) ?? [];
+          for (const entity of entities) {
+            if (!isRecord(entity)) {
+              continue;
+            }
+
+            const entityId = entity.id;
+            if (typeof entityId !== "string" || entityId.trim().length === 0) {
+              continue;
+            }
+
+            yield* repository.saveEntity(entityType, entityId, entity);
+          }
+        }
+
+        for (const transition of auditTrail) {
+          yield* repository.appendAuditTransition(transition);
+        }
+      }),
+    );
   });
 
 export const buildCorePlatform = (
