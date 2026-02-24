@@ -3,6 +3,9 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
+      "smithers-orchestrator": [
+        "src/types/smithers-orchestrator/index.d.ts"
+      ],
       "super-ralph": ["src/types/super-ralph/index.d.ts"],
       "super-ralph/components": ["src/types/super-ralph/components.d.ts"],
       "super-ralph/schemas": ["src/types/super-ralph/schemas.d.ts"],

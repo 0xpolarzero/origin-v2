@@ -61,7 +61,7 @@ async function runWorkflowWithWorktree(params: {
   rootDir: string;
   worktreePath: string;
   branch: string;
-}): Promise<{ status: string }> {
+}): Promise<{ status: string; error?: unknown }> {
   const outputSchema = z.object({
     ok: z.boolean(),
   });
@@ -88,7 +88,7 @@ async function runWorkflowWithWorktree(params: {
             id: "noop-task",
             output: outputs.noop_task,
           },
-          { ok: true },
+          { ok: true } as any,
         ),
       ),
     ),
