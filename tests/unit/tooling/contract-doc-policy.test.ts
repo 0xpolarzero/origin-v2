@@ -272,4 +272,43 @@ describe("contract-doc-policy", () => {
       },
     ]);
   });
+
+  test("findPersistedSchemaContractViolations reports duplicated documented values as extra rows", () => {
+    const documented: PersistedSchemaContract = {
+      migrationIds: ["001_core_schema", "001_core_schema"],
+      tables: [{ table: "entry", columns: ["id", "content", "source"] }],
+      triggerNames: ["task_status_check_insert", "task_status_check_insert"],
+      indexNames: ["idx_task_status", "idx_task_status"],
+    };
+
+    const expected: PersistedSchemaContractExpected = {
+      migrationIds: ["001_core_schema"],
+      tables: [{ table: "entry", columns: ["id", "content", "source"] }],
+      triggerNames: ["task_status_check_insert"],
+      indexNames: ["idx_task_status"],
+    };
+
+    expect(
+      findPersistedSchemaContractViolations({
+        documented,
+        expected,
+      }),
+    ).toEqual([
+      {
+        subject: "migration:001_core_schema",
+        issue: "extra",
+        documented: "001_core_schema",
+      },
+      {
+        subject: "trigger:task_status_check_insert",
+        issue: "extra",
+        documented: "task_status_check_insert",
+      },
+      {
+        subject: "index:idx_task_status",
+        issue: "extra",
+        documented: "idx_task_status",
+      },
+    ]);
+  });
 });

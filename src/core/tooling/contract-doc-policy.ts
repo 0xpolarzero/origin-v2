@@ -263,33 +263,55 @@ const parseCommaSeparatedList = (value: string): ReadonlyArray<string> =>
 
 const joinValues = (values: ReadonlyArray<string>): string => values.join(",");
 
+const countValues = (values: ReadonlyArray<string>): Map<string, number> => {
+  const counts = new Map<string, number>();
+
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  return counts;
+};
+
 const listDiffViolations = (params: {
   documented: ReadonlyArray<string>;
   expected: ReadonlyArray<string>;
   subjectPrefix: string;
 }): PersistedSchemaContractViolation[] => {
   const violations: PersistedSchemaContractViolation[] = [];
-  const documentedSet = new Set(params.documented);
-  const expectedSet = new Set(params.expected);
+  const documentedCounts = countValues(params.documented);
+  const expectedCounts = countValues(params.expected);
+  const matchedDocumentedCounts = new Map<string, number>();
+  const matchedExpectedCounts = new Map<string, number>();
 
   for (const expectedValue of params.expected) {
-    if (!documentedSet.has(expectedValue)) {
-      violations.push({
-        subject: `${params.subjectPrefix}:${expectedValue}`,
-        issue: "missing",
-        expected: expectedValue,
-      });
+    const documentedCount = documentedCounts.get(expectedValue) ?? 0;
+    const matchedCount = matchedDocumentedCounts.get(expectedValue) ?? 0;
+    if (matchedCount < documentedCount) {
+      matchedDocumentedCounts.set(expectedValue, matchedCount + 1);
+      continue;
     }
+
+    violations.push({
+      subject: `${params.subjectPrefix}:${expectedValue}`,
+      issue: "missing",
+      expected: expectedValue,
+    });
   }
 
   for (const documentedValue of params.documented) {
-    if (!expectedSet.has(documentedValue)) {
-      violations.push({
-        subject: `${params.subjectPrefix}:${documentedValue}`,
-        issue: "extra",
-        documented: documentedValue,
-      });
+    const expectedCount = expectedCounts.get(documentedValue) ?? 0;
+    const matchedCount = matchedExpectedCounts.get(documentedValue) ?? 0;
+    if (matchedCount < expectedCount) {
+      matchedExpectedCounts.set(documentedValue, matchedCount + 1);
+      continue;
     }
+
+    violations.push({
+      subject: `${params.subjectPrefix}:${documentedValue}`,
+      issue: "extra",
+      documented: documentedValue,
+    });
   }
 
   return violations;
