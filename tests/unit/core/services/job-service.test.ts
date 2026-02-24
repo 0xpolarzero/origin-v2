@@ -396,6 +396,41 @@ describe("job-service", () => {
     ).rejects.toThrow("job job-missing was not found");
   });
 
+  test("listJobRunHistory rejects invalid limit values", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const job = await Effect.runPromise(
+      createJob({
+        id: "job-history-invalid-limit-1",
+        name: "History invalid limit",
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("job", job.id, job));
+
+    const invalidLimits = [0, -1, 1.5];
+
+    for (const limit of invalidLimits) {
+      const listed = await Effect.runPromise(
+        Effect.either(
+          listJobRunHistory(repository, {
+            jobId: "job-history-invalid-limit-1",
+            limit,
+          }),
+        ),
+      );
+
+      expect(Either.isLeft(listed)).toBe(true);
+      if (Either.isLeft(listed)) {
+        expect(listed.left).toMatchObject({
+          _tag: "JobServiceError",
+          code: "invalid_request",
+        });
+        expect(listed.left.message).toContain(
+          "limit must be a positive integer",
+        );
+      }
+    }
+  });
+
   test("listJobRunHistory returns newest-first and honors limit/beforeAt filters", async () => {
     const repository = makeInMemoryCoreRepository();
     const job = await Effect.runPromise(
@@ -510,6 +545,32 @@ describe("job-service", () => {
       },
     ]);
     expect(listEntitiesCalls).toBe(0);
+  });
+
+  test("listJobs rejects invalid limit values", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const invalidLimits = [0, -1, 1.5];
+
+    for (const limit of invalidLimits) {
+      const listed = await Effect.runPromise(
+        Effect.either(
+          listJobs(repository, {
+            limit,
+          }),
+        ),
+      );
+
+      expect(Either.isLeft(listed)).toBe(true);
+      if (Either.isLeft(listed)) {
+        expect(listed.left).toMatchObject({
+          _tag: "JobServiceError",
+          code: "invalid_request",
+        });
+        expect(listed.left.message).toContain(
+          "limit must be a positive integer",
+        );
+      }
+    }
   });
 
   test("listJobs uses repository-level filtered query when available", async () => {
