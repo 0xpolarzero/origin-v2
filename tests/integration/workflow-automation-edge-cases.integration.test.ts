@@ -401,14 +401,23 @@ describe("workflow automation edge cases", () => {
       actor: ACTOR,
       at: "2026-02-24T15:01:00.000Z",
     });
+
+    const auditBeforeCheckpoint = await Effect.runPromise(
+      repository.listAuditTrail(),
+    );
+    const rollbackTransition = auditBeforeCheckpoint.at(-1);
+    if (!rollbackTransition) {
+      throw new Error("expected at least one audit transition before checkpoint");
+    }
+
     await expectOk(dispatch, "checkpoint.create", {
       checkpointId: "checkpoint-edge-recovery-1",
       name: "Before adjacent failures",
       snapshotEntityRefs: [
         { entityType: "entry", entityId: "entry-edge-recovery-1" },
       ],
-      auditCursor: 2,
-      rollbackTarget: "audit-2",
+      auditCursor: auditBeforeCheckpoint.length,
+      rollbackTarget: rollbackTransition.id,
       actor: ACTOR,
       at: "2026-02-24T15:02:00.000Z",
     });
