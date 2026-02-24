@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
 import React from "react";
 
 import { SuperRalph } from "super-ralph/components";
 import { ralphOutputSchemas } from "super-ralph";
 import type { AgentSafetyPolicy } from "super-ralph/components";
+
+const require = createRequire(import.meta.url);
 
 type RenderOptions = {
   specReviewSeverity?: "none" | "minor" | "major" | "critical";
@@ -171,6 +174,11 @@ function renderSuperRalph(options: RenderOptions = {}) {
   });
 }
 
+function resolveSuperRalphSourcePath(): string {
+  const componentsEntryPath = require.resolve("super-ralph/components");
+  return resolve(dirname(componentsEntryPath), "SuperRalph.tsx");
+}
+
 describe("SuperRalph ticket-gate wiring", () => {
   test("passes ticket-scoped verify commands to ImplementPrompt", () => {
     const tree = renderSuperRalph();
@@ -320,14 +328,16 @@ describe("SuperRalph ticket-gate wiring", () => {
     ).toEqual(["bun run typecheck", "bun run test:integration:api"]);
   });
 
+  test("resolves SuperRalph source path through module resolution", () => {
+    const sourcePath = resolveSuperRalphSourcePath();
+    const componentsEntryPath = require.resolve("super-ralph/components");
+
+    expect(dirname(sourcePath)).toBe(dirname(componentsEntryPath));
+    expect(sourcePath.endsWith("SuperRalph.tsx")).toBe(true);
+  });
+
   test("passes ticketId into ticket gate resolution in SuperRalph", () => {
-    const source = readFileSync(
-      resolve(
-        process.cwd(),
-        "node_modules/super-ralph/src/components/SuperRalph.tsx",
-      ),
-      "utf8",
-    );
+    const source = readFileSync(resolveSuperRalphSourcePath(), "utf8");
 
     expect(source).toContain("ticketId: ticket.id");
   });
