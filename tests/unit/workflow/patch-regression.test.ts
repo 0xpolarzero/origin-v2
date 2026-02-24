@@ -23,6 +23,14 @@ function parsePatchSections(patch: string): Map<string, string> {
   return sections;
 }
 
+function extractAddedLines(section: string): string {
+  return section
+    .split("\n")
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .map((line) => line.slice(1))
+    .join("\n");
+}
+
 describe("super-ralph patch regression", () => {
   test("patch keeps required gate helper and wiring sections", () => {
     const patch = readFileSync(patchPath, "utf8");
@@ -39,6 +47,7 @@ describe("super-ralph patch regression", () => {
     const patch = readFileSync(patchPath, "utf8");
     const sections = parsePatchSections(patch);
     const cliSection = sections.get("src/cli/index.ts") ?? "";
+    const cliAddedLines = extractAddedLines(cliSection);
 
     expect(cliSection).not.toContain("old mode 100644");
     expect(cliSection).not.toContain("new mode 100755");
@@ -67,11 +76,9 @@ describe("super-ralph patch regression", () => {
     expect(cliSection).toContain(
       "const agentSafetyPolicy = resolveAgentSafetyPolicy(runtimeConfig.agentSafetyPolicy);",
     );
-    expect(cliSection).toContain("+            {...runtimeConfig}");
-    expect(cliSection).toContain("+            config={runtimeConfig}");
-    expect(cliSection).toContain(
-      "+            agentSafetyPolicy={agentSafetyPolicy}",
-    );
+    expect(cliAddedLines).toMatch(/\{\s*\.\.\.runtimeConfig\s*\}/);
+    expect(cliAddedLines).toMatch(/config=\{runtimeConfig\}/);
+    expect(cliAddedLines).toMatch(/agentSafetyPolicy=\{agentSafetyPolicy\}/);
   });
 
   test("component wiring hunks preserve ticket gates and approval gating markers", () => {
@@ -82,6 +89,7 @@ describe("super-ralph patch regression", () => {
     const interpretSection =
       sections.get("src/components/InterpretConfig.tsx") ?? "";
     const indexSection = sections.get("src/components/index.ts") ?? "";
+    const superRalphAddedLines = extractAddedLines(superRalphSection);
 
     expect(superRalphSection).toContain("resolveTicketGateSelection");
     expect(superRalphSection).toContain(
@@ -92,14 +100,14 @@ describe("super-ralph patch regression", () => {
     expect(superRalphSection).toContain(
       "validationCommands={ticketGateSelection.validationCommands}",
     );
-    expect(superRalphSection).toContain(
-      'needsApproval={requiresApprovalForPhase(\n+                                "implement",',
+    expect(superRalphAddedLines).toMatch(
+      /needsApproval=\{requiresApprovalForPhase\(\s*"implement",\s*agentSafetyPolicy,\s*\)\}/s,
     );
-    expect(superRalphSection).toContain(
-      'needsApproval={requiresApprovalForPhase(\n+                                "review-fix",',
+    expect(superRalphAddedLines).toMatch(
+      /needsApproval=\{requiresApprovalForPhase\(\s*"review-fix",\s*agentSafetyPolicy,\s*\)\}/s,
     );
-    expect(superRalphSection).toContain(
-      'needsApproval={requiresApprovalForPhase(\n+                      "land",',
+    expect(superRalphAddedLines).toMatch(
+      /needsApproval=\{requiresApprovalForPhase\(\s*"land",\s*agentSafetyPolicy,\s*\)\}/s,
     );
     expect(indexSection).toContain("normalizeAgentSafetyPolicy");
     expect(indexSection).toContain("requiresApprovalForPhase");

@@ -103,11 +103,11 @@ describe("generated workflow gates", () => {
 
     expect(source).toContain("function mergeCommandMap(");
     expect(source).toContain("function resolveRuntimeConfig(ctx: any)");
-    expect(source).toContain(
-      "const buildCmds = mergeCommandMap(FALLBACK_CONFIG.buildCmds, interpreted.buildCmds);",
+    expect(source).toMatch(
+      /const\s+buildCmds\s*=\s*mergeCommandMap\(\s*FALLBACK_CONFIG\.buildCmds,\s*interpreted\.buildCmds\s*\);/,
     );
-    expect(source).toContain(
-      "const testCmds = mergeCommandMap(FALLBACK_CONFIG.testCmds, interpreted.testCmds);",
+    expect(source).toMatch(
+      /const\s+testCmds\s*=\s*mergeCommandMap\(\s*FALLBACK_CONFIG\.testCmds,\s*interpreted\.testCmds\s*\);/,
     );
     expect(source).toContain(
       "const runtimeConfig = resolveRuntimeConfig(ctx);",
