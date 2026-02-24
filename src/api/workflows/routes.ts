@@ -388,6 +388,13 @@ const parseEntityReferencesField = (
       return invalid(route, `${field}[${index}].entityId must be a string`);
     }
 
+    if (entityIdValue.trim().length === 0) {
+      return invalid(
+        route,
+        `${field}[${index}].entityId must be a non-empty string`,
+      );
+    }
+
     parsed.push({
       entityType,
       entityId: entityIdValue,

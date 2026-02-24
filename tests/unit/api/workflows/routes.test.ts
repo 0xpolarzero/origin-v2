@@ -642,6 +642,37 @@ describe("api/workflows/routes", () => {
     }
   });
 
+  test("checkpoint.create rejects blank snapshotEntityRefs entityId", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const checkpointCreateRoute = byKey.get("checkpoint.create");
+
+    expect(checkpointCreateRoute).toBeDefined();
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        checkpointCreateRoute!.handle({
+          checkpointId: "checkpoint-route-1",
+          name: "Before conversion",
+          snapshotEntityRefs: [{ entityType: "task", entityId: "   " }],
+          auditCursor: 1,
+          rollbackTarget: "audit-1",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "checkpoint.create",
+      });
+      expect(result.left.message).toContain("snapshotEntityRefs[0].entityId");
+    }
+  });
+
   test("job.create rejects whitespace-only name", async () => {
     const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
     const byKey = new Map(routes.map((route) => [route.key, route]));
