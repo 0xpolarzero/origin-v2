@@ -50,16 +50,34 @@ const toErrorMessage = (
   return `workflow route ${route} failed with status ${response.status}`;
 };
 
+const toDefectMessage = (route: WorkflowRouteKey, defect: unknown): string => {
+  if (defect instanceof Error) {
+    return defect.message;
+  }
+
+  return `workflow route ${route} dispatcher defect: ${String(defect)}`;
+};
+
 const callRoute = <Output>(
   dispatch: (request: WorkflowHttpRequest) => Effect.Effect<WorkflowHttpResponse, never>,
   route: WorkflowRouteKey,
   body: unknown,
 ): Effect.Effect<Output, WorkflowSurfaceClientError> =>
-  dispatch({
-    method: "POST",
-    path: WORKFLOW_ROUTE_PATHS[route],
-    body,
+  Effect.try({
+    try: () =>
+      dispatch({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS[route],
+        body,
+      }),
+    catch: (error) =>
+      new WorkflowSurfaceClientError({
+        route,
+        status: 500,
+        message: toDefectMessage(route, error),
+      }),
   }).pipe(
+    Effect.flatMap((responseEffect) => responseEffect),
     Effect.flatMap((response) => {
       if (response.status >= 200 && response.status <= 299) {
         return Effect.succeed(response.body as Output);
@@ -73,6 +91,15 @@ const callRoute = <Output>(
         }),
       );
     }),
+    Effect.catchAllDefect((defect) =>
+      Effect.fail(
+        new WorkflowSurfaceClientError({
+          route,
+          status: 500,
+          message: toDefectMessage(route, defect),
+        }),
+      ),
+    ),
   );
 
 export interface WorkflowSurfaceClient {

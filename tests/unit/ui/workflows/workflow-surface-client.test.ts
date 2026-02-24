@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Either, Effect } from "effect";
 
 import { WORKFLOW_ROUTE_PATHS } from "../../../../src/api/workflows/routes";
 import { WorkflowHttpRequest } from "../../../../src/api/workflows/http-dispatch";
@@ -64,7 +64,7 @@ describe("workflow-surface-client", () => {
     });
   });
 
-  test("returns successful response bodies and fails on non-2xx responses", async () => {
+  test("returns successful response bodies and preserves route/status on non-2xx responses", async () => {
     const client = makeWorkflowSurfaceClient((request) =>
       Effect.succeed(
         request.path === WORKFLOW_ROUTE_PATHS["job.list"]
@@ -103,10 +103,39 @@ describe("workflow-surface-client", () => {
       },
     ]);
 
-    await expect(
-      Effect.runPromise(
+    const failure = await Effect.runPromise(
+      Effect.either(
         client.inspectWorkflowCheckpoint({ checkpointId: "checkpoint-1" }),
       ),
-    ).rejects.toThrow("checkpoint checkpoint-1 was not found");
+    );
+    expect(Either.isLeft(failure)).toBe(true);
+    if (Either.isLeft(failure)) {
+      expect(failure.left).toMatchObject({
+        _tag: "WorkflowSurfaceClientError",
+        route: "checkpoint.inspect",
+        status: 404,
+        message: "checkpoint checkpoint-1 was not found",
+      });
+    }
+  });
+
+  test("normalizes dispatcher defects into WorkflowSurfaceClientError", async () => {
+    const client = makeWorkflowSurfaceClient(() =>
+      Effect.die(new Error("dispatcher exploded")),
+    );
+
+    const failure = await Effect.runPromise(
+      Effect.either(client.listActivity({ aiOnly: true })),
+    );
+
+    expect(Either.isLeft(failure)).toBe(true);
+    if (Either.isLeft(failure)) {
+      expect(failure.left).toMatchObject({
+        _tag: "WorkflowSurfaceClientError",
+        route: "activity.list",
+        status: 500,
+      });
+      expect(failure.left.message).toContain("dispatcher exploded");
+    }
   });
 });
