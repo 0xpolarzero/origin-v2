@@ -458,7 +458,7 @@ describe("workflow gate policy integration", () => {
 
       const describe = runCommand(
         "jj",
-        ["describe", "-m", "📝 docs: update progress report"],
+        ["describe", "-m", "docs: update progress report"],
         repoRoot,
       );
       expect(describe.status).toBe(0);

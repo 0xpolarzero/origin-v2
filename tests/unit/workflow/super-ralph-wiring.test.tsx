@@ -345,6 +345,15 @@ describe("SuperRalph ticket-gate wiring", () => {
     );
   });
 
+  test("uses a conventional docs commit message for update-progress checkpoints", () => {
+    const tree = renderSuperRalph();
+    const updateProgressPromptProps = findTaskPromptProps(tree, "update-progress");
+
+    expect(updateProgressPromptProps.commitMessage).toBe(
+      "docs: update progress report",
+    );
+  });
+
   test("routes API testing tickets to API integration gates", () => {
     const tree = renderSuperRalph({
       ticket: {
@@ -384,5 +393,11 @@ describe("SuperRalph ticket-gate wiring", () => {
     const source = readFileSync(resolveSuperRalphSourcePath(), "utf8");
 
     expect(source).toContain("ticketId: ticket.id");
+  });
+
+  test("invokes runtime commit-policy assertion before emitting commit messages", () => {
+    const source = readFileSync(resolveSuperRalphSourcePath(), "utf8");
+
+    expect(source).toContain("assertCommitMessageAllowed(");
   });
 });

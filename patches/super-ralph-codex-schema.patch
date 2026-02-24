@@ -1,3 +1,14 @@
+diff --git a/.bun-tag b/.bun-tag
+new file mode 100644
+index 0000000..1bf12e5
+--- /dev/null
++++ b/.bun-tag
+@@ -0,0 +1 @@
++evmts-super-ralph-ef8726d
+\ No newline at end of file
+diff --git a/.bun-tag-b4b20dce721c4dc0 b/.bun-tag-b4b20dce721c4dc0
+new file mode 100644
+index 0000000..e69de29
 diff --git a/package.json b/package.json
 index 2368a78..093cbea 100644
 --- a/package.json
@@ -779,10 +790,10 @@ index 77be1f5..f7f8c61 100644
      clarificationSession
        ? "- CRITICAL: Interpret and apply the user's clarification answers to tailor the config."
 diff --git a/src/components/SuperRalph.tsx b/src/components/SuperRalph.tsx
-index 96d1c69..74d1eb7 100644
+index 96d1c69..eaf0832 100644
 --- a/src/components/SuperRalph.tsx
 +++ b/src/components/SuperRalph.tsx
-@@ -16,6 +16,13 @@ import CodeReviewPrompt from "../prompts/CodeReview.mdx";
+@@ -16,6 +16,16 @@ import CodeReviewPrompt from "../prompts/CodeReview.mdx";
  import ReviewFixPrompt from "../prompts/ReviewFix.mdx";
  import ReportPrompt from "../prompts/Report.mdx";
  import CategoryReviewPrompt from "../prompts/CategoryReview.mdx";
@@ -792,11 +803,14 @@ index 96d1c69..74d1eb7 100644
 +  requiresApprovalForPhase,
 +  type AgentSafetyPolicy,
 +} from "./agent-safety-policy";
-+import { normalizeCommitPolicy } from "./commit-policy";
++import {
++  assertCommitMessageAllowed,
++  normalizeCommitPolicy,
++} from "./commit-policy";
  import {
    buildSpeculativeMergeQueuePrompt,
    createSpeculativeMergeQueueAgent,
-@@ -55,11 +62,18 @@ export type SuperRalphProps = {
+@@ -55,11 +65,18 @@ export type SuperRalphProps = {
  
    // Configuration
    progressFile?: string;
@@ -815,7 +829,7 @@ index 96d1c69..74d1eb7 100644
    };
    testSuites?: Array<{
      name: string;
-@@ -79,6 +93,7 @@ export type SuperRalphProps = {
+@@ -79,6 +96,7 @@ export type SuperRalphProps = {
    /** Merge queue id used to isolate coordinator state */
    mergeQueueId?: string;
    skipPhases?: Set<string>;
@@ -823,7 +837,7 @@ index 96d1c69..74d1eb7 100644
  
    // Advanced: Override any step with custom component
    updateProgress?: ReactElement;
-@@ -149,8 +164,10 @@ export function SuperRalph({
+@@ -149,8 +167,10 @@ export function SuperRalph({
    taskRetries = 3,
    agents,
    progressFile = "PROGRESS.md",
@@ -834,7 +848,7 @@ index 96d1c69..74d1eb7 100644
    testSuites = [],
    focusTestSuites = {},
    focusDirs = {},
-@@ -160,6 +177,7 @@ export function SuperRalph({
+@@ -160,6 +180,7 @@ export function SuperRalph({
    maxSpeculativeDepth = 3,
    mergeQueueId = "land-queue",
    skipPhases = new Set(),
@@ -842,7 +856,7 @@ index 96d1c69..74d1eb7 100644
  
    // Advanced overrides
    updateProgress: customUpdateProgress,
-@@ -184,6 +202,12 @@ export function SuperRalph({
+@@ -184,6 +205,14 @@ export function SuperRalph({
    const progressSummary = selectProgressSummary(ctx);
  
    const { prefix = "📝", mainBranch = "main", emojiPrefixes = "✨ feat, 🐛 fix, ♻️ refactor, 📝 docs, 🧪 test" } = commitConfig;
@@ -852,10 +866,12 @@ index 96d1c69..74d1eb7 100644
 +      requireAtomicChecks: commitConfig.requireAtomicChecks,
 +    },
 +  );
++  const progressCommitMessage = "docs: update progress report";
++  assertCommitMessageAllowed(progressCommitMessage, commitPolicy);
  
    const planningAgent = normalizeAgent(agents.planning);
    const implementationAgent = normalizeAgent(agents.implementation);
-@@ -193,6 +217,7 @@ export function SuperRalph({
+@@ -193,6 +222,7 @@ export function SuperRalph({
    const mergeQueueAgent = normalizeAgent(
      agents.mergeQueue ?? createSpeculativeMergeQueueAgent(),
    );
@@ -863,7 +879,7 @@ index 96d1c69..74d1eb7 100644
  
    const ciCommands = postLandChecks.length > 0 ? postLandChecks : Object.values(testCmds);
  
-@@ -229,11 +254,16 @@ export function SuperRalph({
+@@ -229,12 +259,17 @@ export function SuperRalph({
      <Ralph until={false} maxIterations={Infinity} onMaxReached="return-last">
        <Parallel maxConcurrency={maxConcurrency}>
          {!skipPhases.has("PROGRESS") && (customUpdateProgress || (
@@ -877,11 +893,13 @@ index 96d1c69..74d1eb7 100644
                <UpdateProgressPrompt
                  projectName={projectName}
                  progressFile={progressFile}
+-                commitMessage={`${prefix} docs: update progress`}
 +                progressBookmark={progressBookmark}
-                 commitMessage={`${prefix} docs: update progress`}
++                commitMessage={progressCommitMessage}
                  completedTickets={completedTicketIds}
                />
-@@ -308,6 +338,13 @@ export function SuperRalph({
+             </Task>
+@@ -308,6 +343,13 @@ export function SuperRalph({
            const ticketImplementationAgent = roundRobinAgent(implementationAgent, ticketIndex);
            const ticketTestingAgent = roundRobinAgent(testingAgent, ticketIndex);
            const ticketReportingAgent = roundRobinAgent(reportingAgent, ticketIndex);
@@ -895,7 +913,7 @@ index 96d1c69..74d1eb7 100644
  
            const mergeQueueRequest: MergeQueueRequest = {
              runId: ctx.runId,
-@@ -390,7 +427,16 @@ export function SuperRalph({
+@@ -390,7 +432,16 @@ export function SuperRalph({
                        return (
                          <>
                            {customImplement || (
@@ -913,7 +931,7 @@ index 96d1c69..74d1eb7 100644
                                <ImplementPrompt
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
-@@ -405,9 +451,11 @@ export function SuperRalph({
+@@ -405,9 +456,11 @@ export function SuperRalph({
                                  testWritingGuidance={["Write unit tests AND integration tests"]}
                                  implementationGuidance={["Follow architecture patterns from specs"]}
                                  formatterCommands={Object.entries(buildCmds).map(([lang, cmd]) => `Format ${lang}`)}
@@ -926,7 +944,7 @@ index 96d1c69..74d1eb7 100644
                                  mainBranch={mainBranch}
                                  emojiPrefixes={emojiPrefixes}
                                />
-@@ -420,11 +468,11 @@ export function SuperRalph({
+@@ -420,11 +473,11 @@ export function SuperRalph({
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
                                  ticketCategory={ticket.category}
@@ -943,7 +961,7 @@ index 96d1c69..74d1eb7 100644
                                  fixCommitPrefix={`🐛 fix`}
                                  mainBranch={mainBranch}
                                />
-@@ -480,7 +528,16 @@ export function SuperRalph({
+@@ -480,7 +533,16 @@ export function SuperRalph({
                            </Parallel>
  
                            {customReviewFix || (!noReviewIssues && (
@@ -961,7 +979,7 @@ index 96d1c69..74d1eb7 100644
                                <ReviewFixPrompt
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
-@@ -491,8 +548,10 @@ export function SuperRalph({
+@@ -491,8 +553,10 @@ export function SuperRalph({
                                  codeSeverity={worstCodeSeverity}
                                  codeFeedback={mergedCodeFeedback}
                                  codeIssues={mergedCodeIssues.length > 0 ? mergedCodeIssues : null}
@@ -973,7 +991,7 @@ index 96d1c69..74d1eb7 100644
                                  mainBranch={mainBranch}
                                  emojiPrefixes={emojiPrefixes}
                                />
-@@ -527,7 +586,16 @@ export function SuperRalph({
+@@ -527,7 +591,16 @@ export function SuperRalph({
                {/* Phase 2: Landing (stateful speculative merge queue coordinator) */}
                <MergeQueue id={mergeQueueId} maxConcurrency={Math.max(1, maxSpeculativeDepth)}>
                  {customLand || (
