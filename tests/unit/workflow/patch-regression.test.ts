@@ -6,6 +6,10 @@ const patchPath = resolve(
   process.cwd(),
   "patches/super-ralph-codex-schema.patch",
 );
+const smithersPatchPath = resolve(
+  process.cwd(),
+  "patches/smithers-orchestrator-jj-traceability.patch",
+);
 
 function parsePatchSections(patch: string): Map<string, string> {
   const sectionHeaders = [...patch.matchAll(/^diff --git a\/(.+?) b\/(.+)$/gm)];
@@ -33,6 +37,9 @@ describe("super-ralph patch regression", () => {
     expect(sections.has("src/components/SuperRalph.tsx")).toBe(true);
     expect(sections.has("src/components/index.ts")).toBe(true);
     expect(sections.has("src/components/InterpretConfig.tsx")).toBe(true);
+    expect(sections.has("src/prompts/Land.mdx")).toBe(true);
+    expect(sections.has("src/prompts/UpdateProgress.mdx")).toBe(true);
+    expect(sections.has("src/mergeQueue/coordinator.ts")).toBe(true);
   });
 
   test("CLI patch hunks retain safety-policy wiring and safe agent defaults", () => {
@@ -116,5 +123,37 @@ describe("super-ralph patch regression", () => {
     expect(interpretSection).toContain(
       "postLandChecks: z.array(z.string()).min(1)",
     );
+  });
+
+  test("smithers patch persists jj state reconciliation helpers", () => {
+    const rootPackage = JSON.parse(
+      readFileSync(resolve(process.cwd(), "package.json"), "utf8"),
+    ) as {
+      patchedDependencies?: Record<string, string>;
+    };
+    const patched = rootPackage.patchedDependencies ?? {};
+    expect(patched["smithers-orchestrator@0.8.5"]).toBe(
+      "patches/smithers-orchestrator-jj-traceability.patch",
+    );
+
+    const patch = readFileSync(smithersPatchPath, "utf8");
+    const sections = parsePatchSections(patch);
+    const jjSection = sections.get("src/vcs/jj.ts") ?? "";
+    const engineSection = sections.get("src/engine/index.ts") ?? "";
+    const indexSection = sections.get("src/index.ts") ?? "";
+
+    expect(sections.has("src/vcs/jj.ts")).toBe(true);
+    expect(sections.has("src/engine/index.ts")).toBe(true);
+    expect(sections.has("src/index.ts")).toBe(true);
+    expect(jjSection).toContain("export async function workspaceUpdateStale(");
+    expect(jjSection).toContain("export async function bookmarkSet(");
+    expect(engineSection).toContain(
+      "async function reconcileExistingJjWorktree(",
+    );
+    expect(engineSection).toContain(
+      "await reconcileExistingJjWorktree(vcs.root, worktreePath, branch);",
+    );
+    expect(indexSection).toContain("workspaceUpdateStale");
+    expect(indexSection).toContain("bookmarkSet");
   });
 });

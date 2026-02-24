@@ -13,6 +13,7 @@ type RenderOptions = {
     description: string;
   }>;
   agentSafetyPolicy?: AgentSafetyPolicy;
+  progressBookmark?: string;
 };
 
 function createCtx(
@@ -153,6 +154,7 @@ function renderSuperRalph(options: RenderOptions = {}) {
     preLandChecks: [],
     postLandChecks: [],
     testSuites: options.testSuites ?? [],
+    progressBookmark: options.progressBookmark,
     agentSafetyPolicy: options.agentSafetyPolicy,
   });
 }
@@ -253,5 +255,21 @@ describe("SuperRalph ticket-gate wiring", () => {
     expect(implementTaskProps.needsApproval).toBe(false);
     expect(reviewFixTaskProps.needsApproval).toBe(false);
     expect(landTaskProps.needsApproval).toBe(true);
+  });
+
+  test("binds update-progress worktree to deterministic bookmark branch", () => {
+    const tree = renderSuperRalph();
+    const updateProgressWorktreeProps = findTaskProps(tree, "wt-update-progress");
+
+    expect(updateProgressWorktreeProps.branch).toBe("progress/update-progress");
+  });
+
+  test("passes progress bookmark into UpdateProgressPrompt", () => {
+    const tree = renderSuperRalph({ progressBookmark: "progress/custom-track" });
+    const updateProgressPromptProps = findTaskPromptProps(tree, "update-progress");
+
+    expect(updateProgressPromptProps.progressBookmark).toBe(
+      "progress/custom-track",
+    );
   });
 });

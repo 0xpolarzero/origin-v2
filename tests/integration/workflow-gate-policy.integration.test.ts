@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { buildFallbackConfig } from "super-ralph/cli/fallback-config";
 import { buildGateCommandConfig } from "super-ralph/gate-config";
@@ -40,6 +41,22 @@ function assertNoNoopPatterns(commands: string[], context: string) {
 
   expect(commands.length).toBeGreaterThan(0);
   expect(context.length).toBeGreaterThan(0);
+}
+
+function runCommand(
+  command: string,
+  args: string[],
+  cwd: string,
+): { status: number | null; stdout: string; stderr: string } {
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: "utf8",
+  });
+  return {
+    status: result.status,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
 }
 
 describe("workflow gate policy integration", () => {
@@ -287,5 +304,114 @@ describe("workflow gate policy integration", () => {
         });
       },
     );
+  });
+
+  test("temp jj repo keeps progress checkpoints visible from bookmarks and accepts bookmarks(...) revsets", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "workflow-gates-jj-traceability-"));
+    const remoteRoot = join(repoRoot, "origin.git");
+
+    try {
+      expect(runCommand("jj", ["git", "init", "."], repoRoot).status).toBe(0);
+      expect(
+        runCommand(
+          "jj",
+          ["config", "set", "--repo", "user.name", "Workflow Bot"],
+          repoRoot,
+        ).status,
+      ).toBe(0);
+      expect(
+        runCommand(
+          "jj",
+          ["config", "set", "--repo", "user.email", "workflow@example.com"],
+          repoRoot,
+        ).status,
+      ).toBe(0);
+
+      writeFileSync(join(repoRoot, "PROGRESS.md"), "# Progress\n\n- Updated\n");
+
+      const describe = runCommand(
+        "jj",
+        ["describe", "-m", "📝 docs: update progress report"],
+        repoRoot,
+      );
+      expect(describe.status).toBe(0);
+
+      const bookmarkSet = runCommand(
+        "jj",
+        ["bookmark", "set", "progress/update-progress", "-r", "@"],
+        repoRoot,
+      );
+      expect(bookmarkSet.status).toBe(0);
+
+      const checkpoint = runCommand(
+        "jj",
+        ["log", "-r", "@", "--no-graph", "-T", "commit_id"],
+        repoRoot,
+      );
+      const checkpointCommit = checkpoint.stdout.trim().split("\n")[0] ?? "";
+      expect(checkpoint.status).toBe(0);
+      expect(checkpointCommit.length).toBeGreaterThan(0);
+
+      expect(runCommand("jj", ["new"], repoRoot).status).toBe(0);
+      expect(
+        runCommand("git", ["init", "--bare", remoteRoot], repoRoot).status,
+      ).toBe(0);
+      expect(
+        runCommand("git", ["remote", "add", "origin", remoteRoot], repoRoot)
+          .status,
+      ).toBe(0);
+      expect(
+        runCommand(
+          "jj",
+          [
+            "bookmark",
+            "track",
+            "progress/update-progress",
+            "--remote",
+            "origin",
+          ],
+          repoRoot,
+        ).status,
+      ).toBe(0);
+      expect(
+        runCommand(
+          "jj",
+          ["git", "push", "--bookmark", "progress/update-progress"],
+          repoRoot,
+        ).status,
+      ).toBe(0);
+
+      const visibleCheckpointLog = runCommand(
+        "jj",
+        [
+          "log",
+          "-r",
+          'ancestors(bookmarks("progress/update-progress")) & @-',
+          "--no-graph",
+          "-T",
+          "commit_id",
+        ],
+        repoRoot,
+      );
+      expect(visibleCheckpointLog.status).toBe(0);
+      expect(visibleCheckpointLog.stdout).toContain(checkpointCommit);
+
+      const ticketRevsetCheck = runCommand(
+        "jj",
+        [
+          "log",
+          "-r",
+          'bookmarks("ticket/CORE-REV-007")',
+          "--no-graph",
+          "-T",
+          "commit_id",
+        ],
+        repoRoot,
+      );
+      expect(ticketRevsetCheck.status).toBe(0);
+      expect(ticketRevsetCheck.stderr.trim()).toBe("");
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
   });
 });

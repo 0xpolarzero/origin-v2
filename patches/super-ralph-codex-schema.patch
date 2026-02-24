@@ -15,6 +15,7 @@ index 2368a78..093cbea 100644
    },
    "files": [
      "src/",
+
 diff --git a/src/cli/index.ts b/src/cli/index.ts
 index 633e857..a41b660 100644
 --- a/src/cli/index.ts
@@ -393,6 +394,7 @@ index 633e857..a41b660 100644
  `;
  }
  
+
 diff --git a/src/components/InterpretConfig.tsx b/src/components/InterpretConfig.tsx
 index 77be1f5..c25a2a8 100644
 --- a/src/components/InterpretConfig.tsx
@@ -430,8 +432,9 @@ index 77be1f5..c25a2a8 100644
      "- Never return null; omit fields instead.",
      clarificationSession
        ? "- CRITICAL: Interpret and apply the user's clarification answers to tailor the config."
+
 diff --git a/src/components/SuperRalph.tsx b/src/components/SuperRalph.tsx
-index 96d1c69..be877a2 100644
+index 96d1c69..1fed85e 100644
 --- a/src/components/SuperRalph.tsx
 +++ b/src/components/SuperRalph.tsx
 @@ -16,6 +16,12 @@ import CodeReviewPrompt from "../prompts/CodeReview.mdx";
@@ -447,7 +450,15 @@ index 96d1c69..be877a2 100644
  import {
    buildSpeculativeMergeQueuePrompt,
    createSpeculativeMergeQueueAgent,
-@@ -79,6 +85,7 @@ export type SuperRalphProps = {
+@@ -55,6 +61,7 @@ export type SuperRalphProps = {
+ 
+   // Configuration
+   progressFile?: string;
++  progressBookmark?: string;
+   findingsFile?: string;
+   commitConfig?: {
+     prefix?: string;
+@@ -79,6 +86,7 @@ export type SuperRalphProps = {
    /** Merge queue id used to isolate coordinator state */
    mergeQueueId?: string;
    skipPhases?: Set<string>;
@@ -455,7 +466,15 @@ index 96d1c69..be877a2 100644
  
    // Advanced: Override any step with custom component
    updateProgress?: ReactElement;
-@@ -160,6 +167,7 @@ export function SuperRalph({
+@@ -149,6 +157,7 @@ export function SuperRalph({
+   taskRetries = 3,
+   agents,
+   progressFile = "PROGRESS.md",
++  progressBookmark = "progress/update-progress",
+   findingsFile = "docs/test-suite-findings.md",
+   commitConfig = {},
+   testSuites = [],
+@@ -160,6 +169,7 @@ export function SuperRalph({
    maxSpeculativeDepth = 3,
    mergeQueueId = "land-queue",
    skipPhases = new Set(),
@@ -463,7 +482,7 @@ index 96d1c69..be877a2 100644
  
    // Advanced overrides
    updateProgress: customUpdateProgress,
-@@ -193,6 +201,7 @@ export function SuperRalph({
+@@ -193,6 +203,7 @@ export function SuperRalph({
    const mergeQueueAgent = normalizeAgent(
      agents.mergeQueue ?? createSpeculativeMergeQueueAgent(),
    );
@@ -471,7 +490,25 @@ index 96d1c69..be877a2 100644
  
    const ciCommands = postLandChecks.length > 0 ? postLandChecks : Object.values(testCmds);
  
-@@ -308,6 +317,12 @@ export function SuperRalph({
+@@ -229,11 +240,16 @@ export function SuperRalph({
+     <Ralph until={false} maxIterations={Infinity} onMaxReached="return-last">
+       <Parallel maxConcurrency={maxConcurrency}>
+         {!skipPhases.has("PROGRESS") && (customUpdateProgress || (
+-          <Worktree id="wt-update-progress" path="/tmp/workflow-wt-update-progress">
++          <Worktree
++            id="wt-update-progress"
++            path="/tmp/workflow-wt-update-progress"
++            branch={progressBookmark}
++          >
+             <Task id="update-progress" output={outputs.progress} agent={reportingAgent} retries={taskRetries}>
+               <UpdateProgressPrompt
+                 projectName={projectName}
+                 progressFile={progressFile}
++                progressBookmark={progressBookmark}
+                 commitMessage={`${prefix} docs: update progress`}
+                 completedTickets={completedTicketIds}
+               />
+@@ -308,6 +324,12 @@ export function SuperRalph({
            const ticketImplementationAgent = roundRobinAgent(implementationAgent, ticketIndex);
            const ticketTestingAgent = roundRobinAgent(testingAgent, ticketIndex);
            const ticketReportingAgent = roundRobinAgent(reportingAgent, ticketIndex);
@@ -484,7 +521,7 @@ index 96d1c69..be877a2 100644
  
            const mergeQueueRequest: MergeQueueRequest = {
              runId: ctx.runId,
-@@ -390,7 +405,16 @@ export function SuperRalph({
+@@ -390,7 +412,16 @@ export function SuperRalph({
                        return (
                          <>
                            {customImplement || (
@@ -502,7 +539,7 @@ index 96d1c69..be877a2 100644
                                <ImplementPrompt
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
-@@ -405,7 +429,7 @@ export function SuperRalph({
+@@ -405,7 +436,7 @@ export function SuperRalph({
                                  testWritingGuidance={["Write unit tests AND integration tests"]}
                                  implementationGuidance={["Follow architecture patterns from specs"]}
                                  formatterCommands={Object.entries(buildCmds).map(([lang, cmd]) => `Format ${lang}`)}
@@ -511,7 +548,7 @@ index 96d1c69..be877a2 100644
                                  architectureRules={[`Read ${specsPath} for patterns`]}
                                  commitPrefix={prefix}
                                  mainBranch={mainBranch}
-@@ -420,11 +444,11 @@ export function SuperRalph({
+@@ -420,11 +451,11 @@ export function SuperRalph({
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
                                  ticketCategory={ticket.category}
@@ -528,7 +565,7 @@ index 96d1c69..be877a2 100644
                                  fixCommitPrefix={`🐛 fix`}
                                  mainBranch={mainBranch}
                                />
-@@ -480,7 +504,16 @@ export function SuperRalph({
+@@ -480,7 +511,16 @@ export function SuperRalph({
                            </Parallel>
  
                            {customReviewFix || (!noReviewIssues && (
@@ -546,7 +583,7 @@ index 96d1c69..be877a2 100644
                                <ReviewFixPrompt
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
-@@ -491,7 +524,7 @@ export function SuperRalph({
+@@ -491,7 +531,7 @@ export function SuperRalph({
                                  codeSeverity={worstCodeSeverity}
                                  codeFeedback={mergedCodeFeedback}
                                  codeIssues={mergedCodeIssues.length > 0 ? mergedCodeIssues : null}
@@ -555,7 +592,7 @@ index 96d1c69..be877a2 100644
                                  commitPrefix={`🐛 fix`}
                                  mainBranch={mainBranch}
                                  emojiPrefixes={emojiPrefixes}
-@@ -527,7 +560,16 @@ export function SuperRalph({
+@@ -527,7 +567,16 @@ export function SuperRalph({
                {/* Phase 2: Landing (stateful speculative merge queue coordinator) */}
                <MergeQueue id={mergeQueueId} maxConcurrency={Math.max(1, maxSpeculativeDepth)}>
                  {customLand || (
@@ -573,6 +610,7 @@ index 96d1c69..be877a2 100644
                      {buildSpeculativeMergeQueuePrompt(mergeQueueRequest)}
                    </Task>
                  )}
+
 diff --git a/src/components/index.ts b/src/components/index.ts
 index f39fc15..1de282d 100644
 --- a/src/components/index.ts
@@ -588,3 +626,139 @@ index f39fc15..1de282d 100644
  
  export { ClarifyingQuestions, clarifyingQuestionsOutputSchema, generateQuestionsOutputSchema } from "./ClarifyingQuestions";
  export type { ClarifyingQuestionsOutput, ClarifyingQuestionsProps } from "./ClarifyingQuestions";
+
+diff --git a/src/prompts/Land.mdx b/src/prompts/Land.mdx
+index e665f25..0401efa 100644
+--- a/src/prompts/Land.mdx
++++ b/src/prompts/Land.mdx
+@@ -19,8 +19,8 @@ jj git fetch
+ Before rebasing, check what other tickets landed on main since this branch diverged. This helps you catch **semantic conflicts** (code that doesn't cause git conflicts but breaks at runtime — e.g. renamed functions, changed signatures, moved files, altered behavior your code depends on).
+ 
+ ```
+-jj log -r 'main..bookmark("ticket/{props.ticketId}")' --reversed
+-jj diff -r 'roots(main..bookmark("ticket/{props.ticketId}"))' --summary
++jj log -r 'main..bookmarks("ticket/{props.ticketId}")' --reversed
++jj diff -r 'roots(main..bookmarks("ticket/{props.ticketId}"))' --summary
+ ```
+ 
+ Review the log and diff carefully. If other tickets modified files or APIs that your branch also touches, check for:
+@@ -33,7 +33,7 @@ Review the log and diff carefully. If other tickets modified files or APIs that
+ ### Step 3: Rebase branch onto latest main
+ 
+ ```
+-jj rebase -b 'bookmark("ticket/{props.ticketId}") ' -d main
++jj rebase -b 'bookmarks("ticket/{props.ticketId}") ' -d main
+ ```
+ 
+ If there are explicit conflicts, resolve them and describe the resolution.
+@@ -56,7 +56,7 @@ If CI fails, output `{ "merged": false, "mergeCommit": null, "ciPassed": false,
+ 
+ If CI passes:
+ ```
+-jj bookmark set main -r 'bookmark("ticket/{props.ticketId}")'
++jj bookmark set main -r 'bookmarks("ticket/{props.ticketId}")'
+ ```
+ 
+ ### Step 6: Push main
+
+diff --git a/src/prompts/UpdateProgress.mdx b/src/prompts/UpdateProgress.mdx
+index 7626ebb..9f99523 100644
+--- a/src/prompts/UpdateProgress.mdx
++++ b/src/prompts/UpdateProgress.mdx
+@@ -22,9 +22,13 @@ Do NOT run build commands, test commands, or compilation. Those are expensive an
+ 
+ ## Commit
+ 
+-After updating, commit your changes in this worktree:
++After updating, create a bookmark-visible checkpoint in this worktree:
+ ```
+ jj describe -m "{props.commitMessage || '📝 docs: update progress report'}"
++jj bookmark set {props.progressBookmark || 'progress/update-progress'} -r @
++jj new
++jj git push --bookmark {props.progressBookmark || 'progress/update-progress'}
++jj log -r 'ancestors(bookmarks("{props.progressBookmark || 'progress/update-progress'}")) & @-' --no-graph -T commit_id
+ ```
+ 
+-Do NOT run `jj bookmark set main` or `jj git push` — landing is handled separately.
++Do NOT update `main` in this phase. Only update and push the progress bookmark so checkpoints stay auditable.
+
+diff --git a/src/mergeQueue/coordinator.ts b/src/mergeQueue/coordinator.ts
+index 4a8450a..bab6f27 100644
+--- a/src/mergeQueue/coordinator.ts
++++ b/src/mergeQueue/coordinator.ts
+@@ -101,8 +101,13 @@ export type MergeQueueRequest = {
+ 
+ const REQUEST_MARKER = "SUPER_RALPH_SPECULATIVE_MERGE_QUEUE_REQUEST";
+ 
+-function bookmarkRev(ticketId: string): string {
+-  return `bookmark("ticket/${ticketId}")`;
++function escapeRevsetString(value: string): string {
++  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
++}
++
++function ticketBookmarkRevset(ticketId: string): string {
++  const escapedTicketId = escapeRevsetString(ticketId);
++  return `bookmarks("ticket/${escapedTicketId}")`;
+ }
+ 
+ function truncate(text: string, maxChars = 12000): string {
+@@ -172,7 +177,7 @@ async function runCiInSpeculativeWorkspace(
+   try {
+     const added = await workspaceAdd(workspaceName, workspacePath, {
+       cwd: repoRoot,
+-      atRev: bookmarkRev(ticket.ticketId),
++      atRev: ticketBookmarkRevset(ticket.ticketId),
+     });
+     if (!added.success) {
+       return {
+@@ -207,19 +212,19 @@ async function collectDefaultEvictionContext(
+   const attemptedLog = await runJjCommand(repoRoot, [
+     "log",
+     "-r",
+-    `main..${bookmarkRev(ticketId)}`,
++    `main..${ticketBookmarkRevset(ticketId)}`,
+     "--reversed",
+   ]);
+   const attemptedDiff = await runJjCommand(repoRoot, [
+     "diff",
+     "-r",
+-    `roots(main..${bookmarkRev(ticketId)})`,
++    `roots(main..${ticketBookmarkRevset(ticketId)})`,
+     "--summary",
+   ]);
+   const landedOnMain = await runJjCommand(repoRoot, [
+     "log",
+     "-r",
+-    `${bookmarkRev(ticketId)}..main`,
++    `${ticketBookmarkRevset(ticketId)}..main`,
+     "--reversed",
+   ]);
+ 
+@@ -261,7 +266,7 @@ export function createDefaultMergeQueueOps(): MergeQueueOps {
+         await runJjCommand(repoRoot, [
+           "rebase",
+           "-b",
+-          bookmarkRev(ticketId),
++          ticketBookmarkRevset(ticketId),
+           "-d",
+           destinationRev,
+         ]),
+@@ -278,7 +283,7 @@ export function createDefaultMergeQueueOps(): MergeQueueOps {
+           "set",
+           "main",
+           "-r",
+-          bookmarkRev(ticketId),
++          ticketBookmarkRevset(ticketId),
+         ]),
+       );
+     },
+@@ -554,7 +559,7 @@ export class SpeculativeMergeQueueCoordinator {
+     for (const entry of entries) {
+       const commit = await this.ops.readCommitId(
+         this.repoRoot,
+-        bookmarkRev(entry.ticket.ticketId),
++        ticketBookmarkRevset(entry.ticket.ticketId),
+       );
+       const retestNote =
+         entry.invalidatedCount > 0
+

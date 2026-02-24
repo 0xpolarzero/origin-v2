@@ -1,0 +1,117 @@
+diff --git a/src/vcs/jj.ts b/src/vcs/jj.ts
+index d888fe3..66d6142 100644
+--- a/src/vcs/jj.ts
++++ b/src/vcs/jj.ts
+@@ -217,3 +217,28 @@ export async function workspaceClose(
+   if (res.code === 0) return { success: true };
+   return { success: false, error: jjError(res) };
+ }
++
++/**
++ * Run `jj workspace update-stale` to reconcile stale working-copy metadata.
++ * Safe to call even when no stale workspaces exist.
++ */
++export async function workspaceUpdateStale(
++  cwd?: string,
++): Promise<WorkspaceResult> {
++  const res = await runJj(["workspace", "update-stale"], { cwd });
++  if (res.code === 0) return { success: true };
++  return { success: false, error: jjError(res) };
++}
++
++/**
++ * Set or move a bookmark to a specific revision.
++ */
++export async function bookmarkSet(
++  name: string,
++  rev: string,
++  cwd?: string,
++): Promise<WorkspaceResult> {
++  const res = await runJj(["bookmark", "set", name, "-r", rev], { cwd });
++  if (res.code === 0) return { success: true };
++  return { success: false, error: jjError(res) };
++}
+
+diff --git a/src/index.ts b/src/index.ts
+index ee7c9a8..933bd34 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -51,6 +51,8 @@ export {
+   workspaceAdd,
+   workspaceList,
+   workspaceClose,
++  workspaceUpdateStale,
++  bookmarkSet,
+ } from "./vcs/jj";
+ export type {
+   RunJjOptions,
+
+diff --git a/src/engine/index.ts b/src/engine/index.ts
+index 6e25cc2..ad09d47 100644
+--- a/src/engine/index.ts
++++ b/src/engine/index.ts
+@@ -112,6 +112,30 @@ function findVcsRoot(startDir: string): { type: "git" | "jj"; root: string } | n
+   }
+ }
+ 
++async function reconcileExistingJjWorktree(
++  vcsRoot: string,
++  worktreePath: string,
++  branch?: string,
++): Promise<void> {
++  const { bookmarkSet, workspaceUpdateStale } = await import("../vcs/jj");
++
++  const staleUpdate = await workspaceUpdateStale(vcsRoot);
++  if (!staleUpdate.success) {
++    throw new Error(
++      `Failed to reconcile stale jj workspaces in ${vcsRoot}: ${staleUpdate.error}`,
++    );
++  }
++
++  if (!branch) return;
++
++  const bookmark = await bookmarkSet(branch, "@", worktreePath);
++  if (!bookmark.success) {
++    throw new Error(
++      `Failed to set jj bookmark ${branch} in existing worktree ${worktreePath}: ${bookmark.error}`,
++    );
++  }
++}
++
+ /**
+  * Ensure a worktree exists at `worktreePath`, creating it from `rootDir`
+  * if necessary. When `branch` is provided, a jj bookmark or git branch is
+@@ -123,15 +147,11 @@ async function ensureWorktree(
+   worktreePath: string,
+   branch?: string,
+ ): Promise<void> {
+-  if (createdWorktrees.has(worktreePath)) {
+-    if (existsSync(worktreePath)) return;
++  const worktreeExists = existsSync(worktreePath);
++  if (createdWorktrees.has(worktreePath) && !worktreeExists) {
+     // Process-global cache can become stale if the path is later deleted.
+     createdWorktrees.delete(worktreePath);
+   }
+-  if (existsSync(worktreePath)) {
+-    createdWorktrees.add(worktreePath);
+-    return;
+-  }
+ 
+   // Walk up from rootDir to find the actual VCS root
+   const vcs = findVcsRoot(rootDir);
+@@ -141,6 +161,14 @@ async function ensureWorktree(
+     );
+   }
+ 
++  if (worktreeExists) {
++    if (vcs.type === "jj") {
++      await reconcileExistingJjWorktree(vcs.root, worktreePath, branch);
++    }
++    createdWorktrees.add(worktreePath);
++    return;
++  }
++
+   // Best effort: refresh remote refs for git so origin/main can be used as a
+   // base when local main is absent.
+   if (vcs.type === "git") {
+
