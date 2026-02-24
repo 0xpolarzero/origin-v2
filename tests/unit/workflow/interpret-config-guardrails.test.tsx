@@ -125,4 +125,28 @@ describe("InterpretConfig guardrails", () => {
       "requireAtomicChecks must stay true to enforce typecheck + relevant tests before each atomic commit.",
     );
   });
+
+  test("schema rejects permissive commit policy drift", () => {
+    const output = buildValidInterpretConfigOutput();
+
+    expect(() =>
+      interpretConfigOutputSchema.parse({
+        ...output,
+        commitPolicy: {
+          allowedTypes: ["feat", "refactor", "docs", "chore"],
+          requireAtomicChecks: true,
+        },
+      } as unknown),
+    ).toThrow();
+
+    expect(() =>
+      interpretConfigOutputSchema.parse({
+        ...output,
+        commitPolicy: {
+          allowedTypes: ["feat", "fix", "docs", "chore"],
+          requireAtomicChecks: false,
+        },
+      } as unknown),
+    ).toThrow();
+  });
 });

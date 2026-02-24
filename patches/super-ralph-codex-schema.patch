@@ -264,7 +264,7 @@ index 0000000..23febe5
 +  };
 +};
 diff --git a/src/cli/index.ts b/src/cli/index.ts
-index 633e857..b05bc06 100644
+index 633e857..2537c12 100644
 --- a/src/cli/index.ts
 +++ b/src/cli/index.ts
 @@ -18,9 +18,10 @@
@@ -478,7 +478,7 @@ index 633e857..b05bc06 100644
  const PACKAGE_SCRIPTS = ${JSON.stringify(packageScripts, null, 2)};
  const FALLBACK_CONFIG = ${JSON.stringify(fallbackConfig, null, 2)};
  const CLARIFICATION_SESSION = ${JSON.stringify(clarificationSession)};
-@@ -327,84 +260,199 @@ const { smithers, outputs, Workflow } = createSmithers(
+@@ -327,84 +260,197 @@ const { smithers, outputs, Workflow } = createSmithers(
    { dbPath: DB_PATH }
  );
  
@@ -510,18 +510,16 @@ index 633e857..b05bc06 100644
 +    return normalizedFallback;
 +  }
 +
-+  const candidateRecord = candidate as {
-+    allowedTypes?: unknown;
-+    requireAtomicChecks?: unknown;
-+  };
++  const normalizedCandidate = normalizeCommitPolicy(candidate);
++  const matchesStrictDefaults =
++    normalizedCandidate.allowedTypes.length === normalizedFallback.allowedTypes.length &&
++    normalizedFallback.allowedTypes.every(
++      (type, index) => normalizedCandidate.allowedTypes[index] === type,
++    ) &&
++    normalizedCandidate.requireAtomicChecks ===
++      normalizedFallback.requireAtomicChecks;
 +
-+  return normalizeCommitPolicy({
-+    allowedTypes: candidateRecord.allowedTypes ?? normalizedFallback.allowedTypes,
-+    requireAtomicChecks:
-+      typeof candidateRecord.requireAtomicChecks === "boolean"
-+        ? candidateRecord.requireAtomicChecks
-+        : normalizedFallback.requireAtomicChecks,
-+  });
++  return matchesStrictDefaults ? normalizedCandidate : normalizedFallback;
 +}
 +
 +function createClaude(systemPrompt: string, policy: AgentSafetyPolicy) {
@@ -735,10 +733,10 @@ index 633e857..b05bc06 100644
  }
  
 diff --git a/src/components/InterpretConfig.tsx b/src/components/InterpretConfig.tsx
-index 77be1f5..f7f8c61 100644
+index 77be1f5..18272dd 100644
 --- a/src/components/InterpretConfig.tsx
 +++ b/src/components/InterpretConfig.tsx
-@@ -14,14 +14,21 @@ export const interpretConfigOutputSchema = z.object({
+@@ -14,14 +14,26 @@ export const interpretConfigOutputSchema = z.object({
    focuses: z.array(focusSchema).min(1).max(12),
    specsPath: z.string().min(1),
    referenceFiles: z.array(z.string()),
@@ -753,8 +751,13 @@ index 77be1f5..f7f8c61 100644
 +  preLandChecks: z.array(z.string()).min(1),
 +  postLandChecks: z.array(z.string()).min(1),
 +  commitPolicy: z.object({
-+    allowedTypes: z.array(z.string().min(1)).min(1),
-+    requireAtomicChecks: z.boolean(),
++    allowedTypes: z.tuple([
++      z.literal("feat"),
++      z.literal("fix"),
++      z.literal("docs"),
++      z.literal("chore"),
++    ]),
++    requireAtomicChecks: z.literal(true),
 +  }),
    codeStyle: z.string().min(1),
    reviewChecklist: z.array(z.string()).min(1),
@@ -765,7 +768,7 @@ index 77be1f5..f7f8c61 100644
  });
  
  export type InterpretConfigOutput = z.infer<typeof interpretConfigOutputSchema>;
-@@ -98,6 +105,10 @@ export function InterpretConfig({
+@@ -98,6 +110,10 @@ export function InterpretConfig({
          testCmds: { language_or_tool: "command" },
          preLandChecks: ["command"],
          postLandChecks: ["command"],
@@ -776,7 +779,7 @@ index 77be1f5..f7f8c61 100644
          codeStyle: "string",
          reviewChecklist: ["string"],
          maxConcurrency: 8,
-@@ -112,6 +123,12 @@ export function InterpretConfig({
+@@ -112,6 +128,12 @@ export function InterpretConfig({
      "- Keep focuses concise (2-6).",
      "- Prefer paths relative to repo root.",
      "- Include the user prompt file as a reference when relevant.",
@@ -1088,10 +1091,10 @@ index 0000000..063bbc4
 +}
 diff --git a/src/components/commit-policy.ts b/src/components/commit-policy.ts
 new file mode 100644
-index 0000000..950db56
+index 0000000..b435dc5
 --- /dev/null
 +++ b/src/components/commit-policy.ts
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,94 @@
 +export const DEFAULT_ALLOWED_COMMIT_TYPES = [
 +  "feat",
 +  "fix",
@@ -1099,9 +1102,12 @@ index 0000000..950db56
 +  "chore",
 +] as const;
 +
++export type CommitPolicyAllowedType =
++  (typeof DEFAULT_ALLOWED_COMMIT_TYPES)[number];
++
 +export type CommitPolicy = {
-+  allowedTypes: string[];
-+  requireAtomicChecks: boolean;
++  allowedTypes: CommitPolicyAllowedType[];
++  requireAtomicChecks: true;
 +};
 +
 +export function parseCommitType(commitMessage: string): string | null {
@@ -1118,40 +1124,48 @@ index 0000000..950db56
 +
 +export function normalizeCommitPolicy(input: unknown): CommitPolicy {
 +  const fallbackAllowedTypes = [...DEFAULT_ALLOWED_COMMIT_TYPES];
++  const fallbackPolicy: CommitPolicy = {
++    allowedTypes: fallbackAllowedTypes,
++    requireAtomicChecks: true,
++  };
 +  if (!input || typeof input !== "object") {
-+    return {
-+      allowedTypes: fallbackAllowedTypes,
-+      requireAtomicChecks: true,
-+    };
++    return fallbackPolicy;
 +  }
 +
 +  const candidate = input as {
 +    allowedTypes?: unknown;
-+    requireAtomicChecks?: unknown;
 +  };
 +
-+  const dedupedAllowedTypes: string[] = [];
-+  const seen = new Set<string>();
++  const dedupedAllowedTypes: CommitPolicyAllowedType[] = [];
++  const seen = new Set<CommitPolicyAllowedType>();
++  const allowedTypeSet = new Set<CommitPolicyAllowedType>(
++    DEFAULT_ALLOWED_COMMIT_TYPES,
++  );
 +  if (Array.isArray(candidate.allowedTypes)) {
 +    for (const rawType of candidate.allowedTypes) {
 +      if (typeof rawType !== "string") continue;
 +      const normalizedType = rawType.trim().toLowerCase();
-+      if (!/^[a-z]+$/.test(normalizedType)) continue;
-+      if (seen.has(normalizedType)) continue;
-+      seen.add(normalizedType);
-+      dedupedAllowedTypes.push(normalizedType);
++      if (!allowedTypeSet.has(normalizedType as CommitPolicyAllowedType)) {
++        continue;
++      }
++      const typedCommitType = normalizedType as CommitPolicyAllowedType;
++      if (seen.has(typedCommitType)) continue;
++      seen.add(typedCommitType);
++      dedupedAllowedTypes.push(typedCommitType);
 +    }
 +  }
 +
++  const hasExactStrictAllowlist =
++    dedupedAllowedTypes.length === fallbackAllowedTypes.length &&
++    fallbackAllowedTypes.every((type) => seen.has(type));
++
++  if (!hasExactStrictAllowlist) {
++    return fallbackPolicy;
++  }
++
 +  return {
-+    allowedTypes:
-+      dedupedAllowedTypes.length > 0
-+        ? dedupedAllowedTypes
-+        : fallbackAllowedTypes,
-+    requireAtomicChecks:
-+      typeof candidate.requireAtomicChecks === "boolean"
-+        ? candidate.requireAtomicChecks
-+        : true,
++    allowedTypes: fallbackAllowedTypes,
++    requireAtomicChecks: true,
 +  };
 +}
 +
@@ -1167,7 +1181,7 @@ index 0000000..950db56
 +  }
 +
 +  const allowedTypes = normalizeCommitPolicy(policy).allowedTypes;
-+  if (!allowedTypes.includes(commitType)) {
++  if (!allowedTypes.includes(commitType as CommitPolicyAllowedType)) {
 +    throw new Error(
 +      `Commit type "${commitType}" is not allowed. Allowed commit types: ${allowedTypes.join(
 +        ", ",

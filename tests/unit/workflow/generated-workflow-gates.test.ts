@@ -4,6 +4,7 @@ import { isAbsolute, resolve } from "node:path";
 
 import { buildGateCommandConfig } from "super-ralph/gate-config";
 import {
+  loadRuntimeConfigHelpers,
   loadResolveAgentSafetyPolicy,
   readGeneratedWorkflowSource,
   withEnv,
@@ -146,6 +147,27 @@ describe("generated workflow gates", () => {
       "const commitPolicy = resolveCommitPolicy(FALLBACK_CONFIG.commitPolicy, interpreted.commitPolicy);",
     );
     expect(source).toContain("commitPolicy,");
+  });
+
+  test("generated workflow runtime commit policy fails closed to strict defaults", () => {
+    const source = readGeneratedWorkflowSource();
+    const { resolveRuntimeConfig, fallbackConfig } = loadRuntimeConfigHelpers(
+      source,
+    );
+
+    const resolved = resolveRuntimeConfig({
+      outputMaybe(schema) {
+        if (schema !== "interpret-config") return undefined;
+        return {
+          commitPolicy: {
+            allowedTypes: ["feat", "refactor", "docs", "chore"],
+            requireAtomicChecks: false,
+          },
+        };
+      },
+    });
+
+    expect(resolved.commitPolicy).toEqual(fallbackConfig.commitPolicy);
   });
 
   test("workflow artifact wires runtime command-map merge into SuperRalph and Monitor", () => {

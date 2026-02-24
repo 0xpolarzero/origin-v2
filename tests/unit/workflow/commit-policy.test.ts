@@ -23,15 +23,15 @@ describe("commit-policy", () => {
     expect(parseCommitType("")).toBeNull();
   });
 
-  test("normalizeCommitPolicy fails closed and dedupes allowlist", () => {
+  test("normalizeCommitPolicy fails closed to strict allowlist + atomic checks", () => {
     const deduped = normalizeCommitPolicy({
       allowedTypes: [" fix ", "docs", "fix", "", 1, "DOCS"],
       requireAtomicChecks: false,
     });
 
     expect(deduped).toEqual({
-      allowedTypes: ["fix", "docs"],
-      requireAtomicChecks: false,
+      allowedTypes: [...DEFAULT_ALLOWED_COMMIT_TYPES],
+      requireAtomicChecks: true,
     });
 
     expect(
@@ -45,6 +45,16 @@ describe("commit-policy", () => {
     });
 
     expect(normalizeCommitPolicy(null)).toEqual({
+      allowedTypes: [...DEFAULT_ALLOWED_COMMIT_TYPES],
+      requireAtomicChecks: true,
+    });
+
+    expect(
+      normalizeCommitPolicy({
+        allowedTypes: ["feat", "fix", "docs", "chore"],
+        requireAtomicChecks: false,
+      }),
+    ).toEqual({
       allowedTypes: [...DEFAULT_ALLOWED_COMMIT_TYPES],
       requireAtomicChecks: true,
     });
