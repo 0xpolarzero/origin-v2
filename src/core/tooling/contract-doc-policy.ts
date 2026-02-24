@@ -36,6 +36,11 @@ export interface PersistedSchemaContractViolation {
   documented?: string;
 }
 
+export interface AuthoritativeWorkflowContract {
+  routes: ReadonlyArray<WorkflowRouteContractRow>;
+  persistedSchema: PersistedSchemaContract;
+}
+
 const isHeadingLine = (line: string): boolean => /^#{1,6}\s+/.test(line.trim());
 
 const headingTextFromLine = (line: string): string | null => {
@@ -346,6 +351,45 @@ export const parsePersistedSchemaContract = (
     tables,
     triggerNames,
     indexNames,
+  };
+};
+
+const assertRequiredContractSection = (
+  section: string,
+  count: number,
+): void => {
+  if (count <= 0) {
+    throw new Error(`missing required contract section: ${section}`);
+  }
+};
+
+export const parseAuthoritativeWorkflowContract = (
+  markdown: string,
+): AuthoritativeWorkflowContract => {
+  const routes = parseWorkflowRouteContractRows(markdown);
+  assertRequiredContractSection("Route Matrix", routes.length);
+
+  const persistedSchema = parsePersistedSchemaContract(markdown);
+  assertRequiredContractSection(
+    "Migration Ledger",
+    persistedSchema.migrationIds.length,
+  );
+  assertRequiredContractSection(
+    "Table Column Matrix",
+    persistedSchema.tables.length,
+  );
+  assertRequiredContractSection(
+    "Trigger Contract",
+    persistedSchema.triggerNames.length,
+  );
+  assertRequiredContractSection(
+    "Index Contract",
+    persistedSchema.indexNames.length,
+  );
+
+  return {
+    routes,
+    persistedSchema,
   };
 };
 
