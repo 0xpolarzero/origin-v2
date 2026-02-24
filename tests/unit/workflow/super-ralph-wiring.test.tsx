@@ -264,6 +264,26 @@ describe("SuperRalph ticket-gate wiring", () => {
     ]);
   });
 
+  test("does not pass legacy commit prefix props into prompts", () => {
+    const tree = renderSuperRalph({ specReviewSeverity: "major" });
+
+    const planProps = findTaskPromptProps(tree, "CORE-REV-004:plan");
+    const implementProps = findTaskPromptProps(tree, "CORE-REV-004:implement");
+    const testProps = findTaskPromptProps(tree, "CORE-REV-004:test");
+    const reviewFixProps = findTaskPromptProps(tree, "CORE-REV-004:review-fix");
+
+    expect(planProps.commitPrefix).toBeUndefined();
+    expect(planProps.mainBranch).toBeUndefined();
+    expect(implementProps.commitPrefix).toBeUndefined();
+    expect(implementProps.mainBranch).toBeUndefined();
+    expect(implementProps.emojiPrefixes).toBeUndefined();
+    expect(testProps.fixCommitPrefix).toBeUndefined();
+    expect(testProps.mainBranch).toBeUndefined();
+    expect(reviewFixProps.commitPrefix).toBeUndefined();
+    expect(reviewFixProps.mainBranch).toBeUndefined();
+    expect(reviewFixProps.emojiPrefixes).toBeUndefined();
+  });
+
   test("uses deterministic default allowed commit types when commitConfig is omitted", () => {
     const tree = renderSuperRalph({ specReviewSeverity: "major" });
     const implementProps = findTaskPromptProps(tree, "CORE-REV-004:implement");

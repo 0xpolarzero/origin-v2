@@ -793,7 +793,7 @@ index 77be1f5..18272dd 100644
      clarificationSession
        ? "- CRITICAL: Interpret and apply the user's clarification answers to tailor the config."
 diff --git a/src/components/SuperRalph.tsx b/src/components/SuperRalph.tsx
-index 96d1c69..eaf0832 100644
+index 96d1c69..02ba50c 100644
 --- a/src/components/SuperRalph.tsx
 +++ b/src/components/SuperRalph.tsx
 @@ -16,6 +16,16 @@ import CodeReviewPrompt from "../prompts/CodeReview.mdx";
@@ -813,16 +813,16 @@ index 96d1c69..eaf0832 100644
  import {
    buildSpeculativeMergeQueuePrompt,
    createSpeculativeMergeQueueAgent,
-@@ -55,11 +65,18 @@ export type SuperRalphProps = {
+@@ -55,11 +65,15 @@ export type SuperRalphProps = {
  
    // Configuration
    progressFile?: string;
 +  progressBookmark?: string;
    findingsFile?: string;
    commitConfig?: {
-     prefix?: string;
-     mainBranch?: string;
-     emojiPrefixes?: string;
+-    prefix?: string;
+-    mainBranch?: string;
+-    emojiPrefixes?: string;
 +    allowedTypes?: string[];
 +    requireAtomicChecks?: boolean;
 +  };
@@ -832,7 +832,7 @@ index 96d1c69..eaf0832 100644
    };
    testSuites?: Array<{
      name: string;
-@@ -79,6 +96,7 @@ export type SuperRalphProps = {
+@@ -79,6 +93,7 @@ export type SuperRalphProps = {
    /** Merge queue id used to isolate coordinator state */
    mergeQueueId?: string;
    skipPhases?: Set<string>;
@@ -840,7 +840,7 @@ index 96d1c69..eaf0832 100644
  
    // Advanced: Override any step with custom component
    updateProgress?: ReactElement;
-@@ -149,8 +167,10 @@ export function SuperRalph({
+@@ -149,8 +164,10 @@ export function SuperRalph({
    taskRetries = 3,
    agents,
    progressFile = "PROGRESS.md",
@@ -851,7 +851,7 @@ index 96d1c69..eaf0832 100644
    testSuites = [],
    focusTestSuites = {},
    focusDirs = {},
-@@ -160,6 +180,7 @@ export function SuperRalph({
+@@ -160,6 +177,7 @@ export function SuperRalph({
    maxSpeculativeDepth = 3,
    mergeQueueId = "land-queue",
    skipPhases = new Set(),
@@ -859,10 +859,11 @@ index 96d1c69..eaf0832 100644
  
    // Advanced overrides
    updateProgress: customUpdateProgress,
-@@ -184,6 +205,14 @@ export function SuperRalph({
+@@ -183,7 +201,14 @@ export function SuperRalph({
+   const { completed: completedTicketIds, unfinished: unfinishedTickets } = selectAllTickets(ctx, focuses);
    const progressSummary = selectProgressSummary(ctx);
  
-   const { prefix = "📝", mainBranch = "main", emojiPrefixes = "✨ feat, 🐛 fix, ♻️ refactor, 📝 docs, 🧪 test" } = commitConfig;
+-  const { prefix = "📝", mainBranch = "main", emojiPrefixes = "✨ feat, 🐛 fix, ♻️ refactor, 📝 docs, 🧪 test" } = commitConfig;
 +  const commitPolicy = normalizeCommitPolicy(
 +    rawCommitPolicy ?? {
 +      allowedTypes: commitConfig.allowedTypes,
@@ -874,7 +875,7 @@ index 96d1c69..eaf0832 100644
  
    const planningAgent = normalizeAgent(agents.planning);
    const implementationAgent = normalizeAgent(agents.implementation);
-@@ -193,6 +222,7 @@ export function SuperRalph({
+@@ -193,6 +218,7 @@ export function SuperRalph({
    const mergeQueueAgent = normalizeAgent(
      agents.mergeQueue ?? createSpeculativeMergeQueueAgent(),
    );
@@ -882,7 +883,7 @@ index 96d1c69..eaf0832 100644
  
    const ciCommands = postLandChecks.length > 0 ? postLandChecks : Object.values(testCmds);
  
-@@ -229,12 +259,17 @@ export function SuperRalph({
+@@ -229,12 +255,17 @@ export function SuperRalph({
      <Ralph until={false} maxIterations={Infinity} onMaxReached="return-last">
        <Parallel maxConcurrency={maxConcurrency}>
          {!skipPhases.has("PROGRESS") && (customUpdateProgress || (
@@ -902,7 +903,7 @@ index 96d1c69..eaf0832 100644
                  completedTickets={completedTicketIds}
                />
              </Task>
-@@ -308,6 +343,13 @@ export function SuperRalph({
+@@ -308,6 +339,13 @@ export function SuperRalph({
            const ticketImplementationAgent = roundRobinAgent(implementationAgent, ticketIndex);
            const ticketTestingAgent = roundRobinAgent(testingAgent, ticketIndex);
            const ticketReportingAgent = roundRobinAgent(reportingAgent, ticketIndex);
@@ -916,7 +917,16 @@ index 96d1c69..eaf0832 100644
  
            const mergeQueueRequest: MergeQueueRequest = {
              runId: ctx.runId,
-@@ -390,7 +432,16 @@ export function SuperRalph({
+@@ -355,8 +393,6 @@ export function SuperRalph({
+                         evictionContext={evictionContext}
+                         planFilePath={planFilePath}
+                         tddPatterns={["Write tests FIRST, then implementation"]}
+-                        commitPrefix={prefix}
+-                        mainBranch={mainBranch}
+                       />
+                     </Task>
+                   )}
+@@ -390,7 +426,16 @@ export function SuperRalph({
                        return (
                          <>
                            {customImplement || (
@@ -934,7 +944,7 @@ index 96d1c69..eaf0832 100644
                                <ImplementPrompt
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
-@@ -405,9 +456,11 @@ export function SuperRalph({
+@@ -405,11 +450,10 @@ export function SuperRalph({
                                  testWritingGuidance={["Write unit tests AND integration tests"]}
                                  implementationGuidance={["Follow architecture patterns from specs"]}
                                  formatterCommands={Object.entries(buildCmds).map(([lang, cmd]) => `Format ${lang}`)}
@@ -942,12 +952,14 @@ index 96d1c69..eaf0832 100644
 +                                verifyCommands={ticketGateSelection.verifyCommands}
 +                                atomicCheckCommands={ticketGateSelection.verifyCommands}
                                  architectureRules={[`Read ${specsPath} for patterns`]}
-                                 commitPrefix={prefix}
+-                                commitPrefix={prefix}
+-                                mainBranch={mainBranch}
+-                                emojiPrefixes={emojiPrefixes}
 +                                allowedCommitTypes={commitPolicy.allowedTypes}
-                                 mainBranch={mainBranch}
-                                 emojiPrefixes={emojiPrefixes}
                                />
-@@ -420,11 +473,11 @@ export function SuperRalph({
+                             </Task>
+                           )}
+@@ -420,13 +464,11 @@ export function SuperRalph({
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
                                  ticketCategory={ticket.category}
@@ -956,15 +968,17 @@ index 96d1c69..eaf0832 100644
 -                                  command,
 -                                  description: `Run ${name} tests`,
 -                                }))}
+-                                fixCommitPrefix={`🐛 fix`}
+-                                mainBranch={mainBranch}
 +                                testSuites={
 +                                  testSuites.length > 0
 +                                    ? testSuites
 +                                    : ticketGateSelection.testSuites
 +                                }
-                                 fixCommitPrefix={`🐛 fix`}
-                                 mainBranch={mainBranch}
                                />
-@@ -480,7 +533,16 @@ export function SuperRalph({
+                             </Task>
+                           )}
+@@ -480,7 +522,16 @@ export function SuperRalph({
                            </Parallel>
  
                            {customReviewFix || (!noReviewIssues && (
@@ -982,19 +996,21 @@ index 96d1c69..eaf0832 100644
                                <ReviewFixPrompt
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
-@@ -491,8 +553,10 @@ export function SuperRalph({
+@@ -491,10 +542,9 @@ export function SuperRalph({
                                  codeSeverity={worstCodeSeverity}
                                  codeFeedback={mergedCodeFeedback}
                                  codeIssues={mergedCodeIssues.length > 0 ? mergedCodeIssues : null}
 -                                validationCommands={Object.values(testCmds)}
+-                                commitPrefix={`🐛 fix`}
+-                                mainBranch={mainBranch}
+-                                emojiPrefixes={emojiPrefixes}
 +                                validationCommands={ticketGateSelection.validationCommands}
 +                                atomicCheckCommands={ticketGateSelection.validationCommands}
-                                 commitPrefix={`🐛 fix`}
 +                                allowedCommitTypes={commitPolicy.allowedTypes}
-                                 mainBranch={mainBranch}
-                                 emojiPrefixes={emojiPrefixes}
                                />
-@@ -527,7 +591,16 @@ export function SuperRalph({
+                             </Task>
+                           ))}
+@@ -527,7 +577,16 @@ export function SuperRalph({
                {/* Phase 2: Landing (stateful speculative merge queue coordinator) */}
                <MergeQueue id={mergeQueueId} maxConcurrency={Math.max(1, maxSpeculativeDepth)}>
                  {customLand || (
