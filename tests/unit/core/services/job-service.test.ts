@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Either, Effect } from "effect";
 
 import { createJob } from "../../../../src/core/domain/job";
 import { makeInMemoryCoreRepository } from "../../../../src/core/repositories/in-memory-core-repository";
@@ -198,6 +198,124 @@ describe("job-service", () => {
       previousFailure: "Provider timeout",
       fixSummary: "Increase timeout to 15s and rerun",
     });
+  });
+
+  test("retryJobRun rejects duplicate retries while runState=retrying and appends no extra transition", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const job = await Effect.runPromise(
+      createJob({
+        id: "job-retry-duplicate-1",
+        name: "Duplicate retry job",
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("job", job.id, job));
+
+    await Effect.runPromise(
+      recordJobRun(repository, {
+        jobId: "job-retry-duplicate-1",
+        outcome: "failed",
+        diagnostics: "primary failure",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T14:22:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      retryJobRun(
+        repository,
+        "job-retry-duplicate-1",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T14:23:00.000Z"),
+      ),
+    );
+
+    const auditBeforeDuplicate = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "job",
+        entityId: "job-retry-duplicate-1",
+      }),
+    );
+
+    const duplicateRetry = await Effect.runPromise(
+      Effect.either(
+        retryJobRun(
+          repository,
+          "job-retry-duplicate-1",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T14:24:00.000Z"),
+        ),
+      ),
+    );
+
+    const persistedJob = await Effect.runPromise(
+      repository.getEntity<{
+        runState: string;
+        retryCount: number;
+      }>("job", "job-retry-duplicate-1"),
+    );
+    const auditAfterDuplicate = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "job",
+        entityId: "job-retry-duplicate-1",
+      }),
+    );
+
+    expect(Either.isLeft(duplicateRetry)).toBe(true);
+    if (Either.isLeft(duplicateRetry)) {
+      expect(duplicateRetry.left).toMatchObject({
+        _tag: "JobServiceError",
+        code: "conflict",
+      });
+    }
+    expect(persistedJob?.runState).toBe("retrying");
+    expect(persistedJob?.retryCount).toBe(1);
+    expect(auditAfterDuplicate).toEqual(auditBeforeDuplicate);
+  });
+
+  test("retryJobRun rejects retries when job is not in failed state", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const job = await Effect.runPromise(
+      createJob({
+        id: "job-retry-idle-1",
+        name: "Idle retry guard",
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("job", job.id, job));
+
+    const retryFromIdle = await Effect.runPromise(
+      Effect.either(
+        retryJobRun(
+          repository,
+          "job-retry-idle-1",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T14:25:00.000Z"),
+        ),
+      ),
+    );
+
+    const persistedJob = await Effect.runPromise(
+      repository.getEntity<{
+        runState: string;
+        retryCount: number;
+      }>("job", "job-retry-idle-1"),
+    );
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "job",
+        entityId: "job-retry-idle-1",
+      }),
+    );
+
+    expect(Either.isLeft(retryFromIdle)).toBe(true);
+    if (Either.isLeft(retryFromIdle)) {
+      expect(retryFromIdle.left).toMatchObject({
+        _tag: "JobServiceError",
+        code: "conflict",
+      });
+      expect(retryFromIdle.left.message).toContain("must be in failed state");
+    }
+    expect(persistedJob?.runState).toBe("idle");
+    expect(persistedJob?.retryCount).toBe(0);
+    expect(auditTrail).toHaveLength(0);
   });
 
   test("recordJobRun and retryJobRun execute within repository transaction boundaries", async () => {

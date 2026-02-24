@@ -7,7 +7,7 @@ import { CoreRepository } from "../repositories/core-repository";
 
 export class JobServiceError extends Data.TaggedError("JobServiceError")<{
   message: string;
-  code?: "not_found" | "invalid_request";
+  code?: "not_found" | "invalid_request" | "conflict";
 }> {}
 
 export interface RecordJobRunInput {
@@ -217,6 +217,16 @@ const loadJob = (
     return job;
   });
 
+const ensureRetryable = (job: Job): Effect.Effect<void, JobServiceError> =>
+  job.runState === "failed"
+    ? Effect.void
+    : Effect.fail(
+        new JobServiceError({
+          message: `job ${job.id} must be in failed state before retry`,
+          code: "conflict",
+        }),
+      );
+
 export const recordJobRun = (
   repository: CoreRepository,
   input: RecordJobRunInput,
@@ -298,6 +308,7 @@ export const retryJobRun = (
   repository.withTransaction(
     Effect.gen(function* () {
       const job = yield* loadJob(repository, jobId);
+      yield* ensureRetryable(job);
       const atIso = at.toISOString();
 
       const updated: Job = {

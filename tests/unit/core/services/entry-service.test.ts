@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Either, Effect } from "effect";
 
 import {
   acceptEntryAsTask,
@@ -36,6 +36,38 @@ describe("entry-service", () => {
     expect(auditTrail[0]?.fromState).toBe("none");
     expect(auditTrail[0]?.toState).toBe("captured");
     expect(auditTrail[0]?.actor.id).toBe("user-1");
+  });
+
+  test("captureEntry rejects whitespace-only content without persisting entity or audit", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    const captured = await Effect.runPromise(
+      Effect.either(
+        captureEntry(repository, {
+          entryId: "entry-invalid-capture-1",
+          content: "    ",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T09:01:00.000Z"),
+        }),
+      ),
+    );
+
+    const persistedEntry = await Effect.runPromise(
+      repository.getEntity("entry", "entry-invalid-capture-1"),
+    );
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "entry",
+        entityId: "entry-invalid-capture-1",
+      }),
+    );
+
+    expect(Either.isLeft(captured)).toBe(true);
+    if (Either.isLeft(captured)) {
+      expect(captured.left.message).toContain("content is required");
+    }
+    expect(persistedEntry).toBeUndefined();
+    expect(auditTrail).toHaveLength(0);
   });
 
   test("acceptEntryAsTask converts Entry -> Task and writes linked transitions", async () => {

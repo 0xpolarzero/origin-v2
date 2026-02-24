@@ -22,4 +22,15 @@ describe("createEntry", () => {
     expect(entry.createdAt).toBe("2026-02-23T08:00:00.000Z");
     expect(entry.updatedAt).toBe("2026-02-23T08:00:00.000Z");
   });
+
+  test("rejects whitespace-only content", async () => {
+    await expect(
+      Effect.runPromise(
+        createEntry({
+          id: "entry-empty-content-1",
+          content: "   ",
+        }),
+      ),
+    ).rejects.toThrow("content is required");
+  });
 });
