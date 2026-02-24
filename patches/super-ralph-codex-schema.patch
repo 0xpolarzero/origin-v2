@@ -17,12 +17,12 @@ index 2368a78..093cbea 100644
      "src/",
 diff --git a/src/cli/fallback-config.ts b/src/cli/fallback-config.ts
 new file mode 100644
-index 0000000..69b666e
+index 0000000..563f300
 --- /dev/null
 +++ b/src/cli/fallback-config.ts
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,128 @@
 +import { existsSync } from "node:fs";
-+import { basename, join } from "node:path";
++import { basename, isAbsolute, join, relative } from "node:path";
 +
 +import {
 +  buildGateCommandConfig,
@@ -48,11 +48,31 @@ index 0000000..69b666e
 +    .replace(/^-+|-+$/g, "") || "project";
 +}
 +
++export function toRepoRelativePath(repoRoot: string, pathValue: string): string {
++  const normalizedInput = pathValue.trim().replaceAll("\\", "/");
++  if (normalizedInput.length === 0) return ".";
++
++  if (!isAbsolute(pathValue)) {
++    return normalizedInput
++      .replace(/^\.\/+/, "")
++      .replace(/^\/+/, "");
++  }
++
++  const relativeCandidate = relative(repoRoot, pathValue).replaceAll("\\", "/");
++  if (relativeCandidate.length === 0) return ".";
++  if (relativeCandidate.startsWith("..")) {
++    return basename(pathValue);
++  }
++
++  return relativeCandidate;
++}
++
 +export function buildFallbackConfig(
 +  repoRoot: string,
 +  promptSpecPath: string,
 +  packageScripts: Record<string, string>,
 +) {
++  const normalizedPromptSpecPath = toRepoRelativePath(repoRoot, promptSpecPath);
 +  const runner = detectScriptRunner(repoRoot);
 +  const hasNodeGateScripts = hasScript(packageScripts, "test") && hasScript(packageScripts, "typecheck");
 +  const buildCmds: Record<string, string> = {};
@@ -81,13 +101,15 @@ index 0000000..69b666e
 +  }
 +
 +  const specsPathCandidates = [
-+    join(repoRoot, "docs/specs/engineering.md"),
-+    join(repoRoot, "docs/specs"),
-+    join(repoRoot, "specs"),
-+    promptSpecPath,
++    "docs/specs/engineering.md",
++    "docs/specs",
++    "specs",
++    normalizedPromptSpecPath,
 +  ];
 +
-+  const chosenSpecs = specsPathCandidates.find((candidate) => existsSync(candidate)) ?? promptSpecPath;
++  const chosenSpecs =
++    specsPathCandidates.find((candidate) => existsSync(join(repoRoot, candidate))) ??
++    normalizedPromptSpecPath;
 +
 +  const projectName = basename(repoRoot);
 +  const maxConcurrency = Math.min(
@@ -105,7 +127,7 @@ index 0000000..69b666e
 +    ],
 +    specsPath: chosenSpecs,
 +    referenceFiles: [
-+      promptSpecPath,
++      normalizedPromptSpecPath,
 +      existsSync(join(repoRoot, "README.md")) ? "README.md" : "",
 +      existsSync(join(repoRoot, "docs")) ? "docs" : "",
 +    ].filter(Boolean),
@@ -354,7 +376,26 @@ index 633e857..a41b660
 -  };
 -}
 -
- function findSmithersCliPath(repoRoot: string): string | null {
+@@ -173,6 +153,22 @@ async function ensureJjAvailable(repoRoot: string) {
++function resolveWorkflowImportPrefix(params: {
++  isSuperRalphRepo: boolean;
++  runningFromSource: boolean;
++}): string {
++  const { isSuperRalphRepo, runningFromSource } = params;
++
++  if (isSuperRalphRepo) return "../../src";
++  if (runningFromSource) return "super-ralph";
++  return "super-ralph";
++}
++
++function resolveRepoRootFromWorkflowFile(): string {
++  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
++}
++
++function resolveRepoPath(pathFromRepoRoot: string): string {
++  return resolve(REPO_ROOT, pathFromRepoRoot);
++}
+function findSmithersCliPath(repoRoot: string): string | null {
    const candidates = [
      join(repoRoot, "node_modules/smithers-orchestrator/src/cli/index.ts"),
 @@ -309,7 +210,12 @@ function renderWorkflowFile(params: {

@@ -85,6 +85,29 @@ describe("super-ralph patch regression", () => {
     expect(cliSection).toContain(
       "+            agentSafetyPolicy={agentSafetyPolicy}",
     );
+    expect(cliSection).toContain("function resolveWorkflowImportPrefix(");
+    expect(cliSection).toContain("function resolveRepoRootFromWorkflowFile()");
+    expect(cliSection).toContain("function resolveRepoPath(pathFromRepoRoot");
+    expect(cliSection).not.toContain("superRalphSourceRoot + '/src'");
+  });
+
+  test("fallback-config patch hunks retain portable path normalization helpers", () => {
+    const patch = readFileSync(patchPath, "utf8");
+    const sections = parsePatchSections(patch);
+    const fallbackSection = sections.get("src/cli/fallback-config.ts") ?? "";
+
+    expect(fallbackSection).toContain(
+      "export function toRepoRelativePath(repoRoot: string, pathValue: string): string",
+    );
+    expect(fallbackSection).toContain('.replaceAll("\\\\", "/")');
+    expect(fallbackSection).toContain("const specsPathCandidates = [");
+    expect(fallbackSection).toContain('"docs/specs/engineering.md"');
+    expect(fallbackSection).toContain(
+      "toRepoRelativePath(repoRoot, promptSpecPath)",
+    );
+    expect(fallbackSection).not.toContain(
+      'join(repoRoot, "docs/specs/engineering.md")',
+    );
   });
 
   test("component wiring hunks preserve ticket gates and approval gating markers", () => {

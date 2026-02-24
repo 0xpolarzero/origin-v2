@@ -1,6 +1,8 @@
 export type CommandMap = Record<string, string>;
 
 export type FallbackConfig = {
+  specsPath: string;
+  referenceFiles: string[];
   buildCmds: CommandMap;
   testCmds: CommandMap;
   preLandChecks: string[];
@@ -11,8 +13,10 @@ export type FallbackConfig = {
   };
 };
 
+export function toRepoRelativePath(repoRoot: string, pathValue: string): string;
+
 export function buildFallbackConfig(
   repoRoot: string,
-  ticketPath: string,
+  promptSpecPath: string,
   packageScripts: CommandMap,
 ): FallbackConfig;

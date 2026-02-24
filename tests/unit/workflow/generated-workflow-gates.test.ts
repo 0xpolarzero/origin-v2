@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 
 import { buildGateCommandConfig } from "super-ralph/gate-config";
 import {
@@ -61,6 +61,32 @@ export function assertNoPlaceholderCommands(
 }
 
 describe("generated workflow gates", () => {
+  test("workflow artifact uses portable import specifiers", () => {
+    const source = readGeneratedWorkflowSource();
+
+    expect(source).toContain('import { SuperRalph } from "super-ralph";');
+    expect(source).toContain('} from "super-ralph/components";');
+    expect(source).toContain(
+      'import { ralphOutputSchemas } from "super-ralph";',
+    );
+    expect(source).not.toContain('from "/');
+    expect(source).not.toContain("node_modules/super-ralph/src");
+  });
+
+  test("workflow artifact resolves repo paths at runtime without hardcoded absolute constants", () => {
+    const source = readGeneratedWorkflowSource();
+
+    expect(source).toContain(
+      "function resolveRepoRootFromWorkflowFile(): string",
+    );
+    expect(source).toContain(
+      "function resolveRepoPath(pathFromRepoRoot: string): string",
+    );
+    expect(source).not.toMatch(/const REPO_ROOT = "\//);
+    expect(source).not.toMatch(/const DB_PATH = "\//);
+    expect(source).not.toMatch(/const PROMPT_SPEC_PATH = "\//);
+  });
+
   test("workflow artifact contains script-derived gate command maps with no placeholders", () => {
     const source = readGeneratedWorkflowSource();
     const packageScripts = extractConstJson<Record<string, string>>(
@@ -213,5 +239,19 @@ describe("generated workflow gates", () => {
         });
       },
     );
+  });
+
+  test("serialized FALLBACK_CONFIG path fields are repo-relative in generated artifact", () => {
+    const source = readGeneratedWorkflowSource();
+    const fallbackConfig = extractConstJson<{
+      specsPath: string;
+      referenceFiles: string[];
+    }>(source, "FALLBACK_CONFIG");
+
+    expect(isAbsolute(fallbackConfig.specsPath)).toBe(false);
+
+    for (const referenceFile of fallbackConfig.referenceFiles) {
+      expect(isAbsolute(referenceFile)).toBe(false);
+    }
   });
 });
