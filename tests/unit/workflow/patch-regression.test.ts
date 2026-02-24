@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  loadRuntimeConfigHelpers,
+  readGeneratedWorkflowSource,
+} from "../../helpers/generated-workflow";
 
 const patchPath = resolve(
   process.cwd(),
@@ -155,5 +159,72 @@ describe("super-ralph patch regression", () => {
     );
     expect(indexSection).toContain("workspaceUpdateStale");
     expect(indexSection).toContain("bookmarkSet");
+  });
+
+  test("generated workflow runtime helpers execute merge and check resolution behavior", () => {
+    const source = readGeneratedWorkflowSource();
+    const { mergeCommandMap, resolveRuntimeConfig, fallbackConfig } =
+      loadRuntimeConfigHelpers(source);
+
+    const merged = mergeCommandMap(
+      { typecheck: "bun run typecheck" },
+      {
+        lint: "bun run lint",
+        ignoredEmpty: "   ",
+        ignoredNonString: 1,
+      },
+    );
+    expect(merged).toEqual({
+      typecheck: "bun run typecheck",
+      lint: "bun run lint",
+    });
+
+    const mergedFallback = resolveRuntimeConfig({
+      outputMaybe(schema) {
+        if (schema !== "interpret-config") return undefined;
+        return {
+          buildCmds: {
+            lint: "bun run lint",
+            ignoredEmpty: "   ",
+          },
+          testCmds: {
+            unit: "bun test unit",
+            ignoredEmpty: "",
+          },
+          preLandChecks: [],
+          postLandChecks: [],
+        };
+      },
+    });
+    expect(mergedFallback.buildCmds).toMatchObject({
+      ...fallbackConfig.buildCmds,
+      lint: "bun run lint",
+    });
+    expect(mergedFallback.buildCmds.ignoredEmpty).toBeUndefined();
+    expect(mergedFallback.testCmds).toMatchObject({
+      ...fallbackConfig.testCmds,
+      unit: "bun test unit",
+    });
+    expect(mergedFallback.testCmds.ignoredEmpty).toBeUndefined();
+    expect(mergedFallback.preLandChecks).toEqual(
+      Object.values(mergedFallback.buildCmds),
+    );
+    expect(mergedFallback.postLandChecks).toEqual(
+      Object.values(mergedFallback.testCmds),
+    );
+
+    const explicitChecks = resolveRuntimeConfig({
+      outputMaybe() {
+        return {
+          preLandChecks: ["bun run typecheck", "bun run lint"],
+          postLandChecks: ["bun run test"],
+        };
+      },
+    });
+    expect(explicitChecks.preLandChecks).toEqual([
+      "bun run typecheck",
+      "bun run lint",
+    ]);
+    expect(explicitChecks.postLandChecks).toEqual(["bun run test"]);
   });
 });
