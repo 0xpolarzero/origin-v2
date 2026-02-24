@@ -317,5 +317,9 @@ describe("api contract docs", () => {
 
     expect(routeDoc).toContain(AUTHORITATIVE_WORKFLOW_CONTRACT_DOC_PATH);
     expect(schemaDoc).toContain(AUTHORITATIVE_WORKFLOW_CONTRACT_DOC_PATH);
+    expect(routeDoc.toLowerCase()).toContain("version");
+    expect(schemaDoc.toLowerCase()).toContain("version");
+    expect(routeDoc.toLowerCase()).toContain("update");
+    expect(schemaDoc.toLowerCase()).toContain("update");
   });
 });
