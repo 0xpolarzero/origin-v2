@@ -14,6 +14,12 @@ export interface JobRunHistoryQuery {
   beforeAt?: Date;
 }
 
+export interface ListJobsQuery {
+  runState?: "idle" | "running" | "succeeded" | "failed" | "retrying";
+  limit?: number;
+  beforeUpdatedAt?: Date;
+}
+
 export interface CoreRepository {
   saveEntity: <T>(
     entityType: EntityType | string,
@@ -34,6 +40,7 @@ export interface CoreRepository {
   listJobRunHistory?: (
     query: JobRunHistoryQuery,
   ) => Effect.Effect<ReadonlyArray<unknown>>;
+  listJobs?: (query: ListJobsQuery) => Effect.Effect<ReadonlyArray<unknown>>;
   appendAuditTransition: (transition: AuditTransition) => Effect.Effect<void>;
   listAuditTrail: (
     filter?: AuditTrailFilter,

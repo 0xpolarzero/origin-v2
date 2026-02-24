@@ -371,6 +371,18 @@ export const listJobs = (
       );
     }
 
+    if (repository.listJobs) {
+      const queriedRows = yield* repository.listJobs({
+        runState: input.runState,
+        limit: input.limit,
+        beforeUpdatedAt: input.beforeUpdatedAt,
+      });
+
+      return queriedRows
+        .map((row) => toJobListItem(row))
+        .filter((row): row is JobListItem => row !== undefined);
+    }
+
     const beforeUpdatedAtIso = input.beforeUpdatedAt?.toISOString();
     const jobs = yield* repository.listEntities<unknown>("job");
     const filtered = jobs

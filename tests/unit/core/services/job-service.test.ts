@@ -392,6 +392,57 @@ describe("job-service", () => {
     expect(listEntitiesCalls).toBe(0);
   });
 
+  test("listJobs uses repository-level filtered query when available", async () => {
+    const baseRepository = makeInMemoryCoreRepository();
+
+    let listEntitiesCalls = 0;
+    const repository = {
+      ...baseRepository,
+      listEntities: <T>(entityType: string) => {
+        if (entityType === "job") {
+          listEntitiesCalls += 1;
+        }
+        return baseRepository.listEntities<T>(entityType);
+      },
+      listJobs: () =>
+        Effect.succeed([
+          {
+            id: "job-repo-query-1",
+            name: "Repo queried job",
+            runState: "failed",
+            retryCount: 2,
+            createdAt: "2026-02-23T09:00:00.000Z",
+            updatedAt: "2026-02-23T10:00:00.000Z",
+          },
+        ]),
+    };
+
+    const jobs = await Effect.runPromise(
+      listJobs(repository, {
+        runState: "failed",
+        limit: 10,
+        beforeUpdatedAt: new Date("2026-02-24T00:00:00.000Z"),
+      }),
+    );
+
+    expect(jobs).toEqual([
+      {
+        id: "job-repo-query-1",
+        name: "Repo queried job",
+        runState: "failed",
+        retryCount: 2,
+        createdAt: "2026-02-23T09:00:00.000Z",
+        updatedAt: "2026-02-23T10:00:00.000Z",
+        lastRunAt: undefined,
+        lastSuccessAt: undefined,
+        lastFailureAt: undefined,
+        lastFailureReason: undefined,
+        diagnostics: undefined,
+      },
+    ]);
+    expect(listEntitiesCalls).toBe(0);
+  });
+
   test("listJobs returns newest-updated-first and supports runState/limit/beforeUpdatedAt filters", async () => {
     const repository = makeInMemoryCoreRepository();
     const jobIdle = await Effect.runPromise(

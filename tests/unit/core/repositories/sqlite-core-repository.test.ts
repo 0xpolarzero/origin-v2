@@ -270,6 +270,89 @@ describe("makeSqliteCoreRepository", () => {
     }
   });
 
+  test("listJobs queries filtered rows with SQL ordering and limit", async () => {
+    const { tempDir, databasePath } = makeTempDatabasePath();
+
+    try {
+      const repository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+
+      await Effect.runPromise(
+        repository.saveEntity("job", "job-list-query-1", {
+          id: "job-list-query-1",
+          name: "Job list one",
+          runState: "failed",
+          retryCount: 1,
+          createdAt: "2026-02-23T09:00:00.000Z",
+          updatedAt: "2026-02-23T11:00:00.000Z",
+        }),
+      );
+      await Effect.runPromise(
+        repository.saveEntity("job", "job-list-query-2", {
+          id: "job-list-query-2",
+          name: "Job list two",
+          runState: "failed",
+          retryCount: 0,
+          createdAt: "2026-02-23T09:00:00.000Z",
+          updatedAt: "2026-02-23T10:00:00.000Z",
+        }),
+      );
+      await Effect.runPromise(
+        repository.saveEntity("job", "job-list-query-3", {
+          id: "job-list-query-3",
+          name: "Job list three",
+          runState: "succeeded",
+          retryCount: 0,
+          createdAt: "2026-02-23T09:00:00.000Z",
+          updatedAt: "2026-02-23T12:00:00.000Z",
+        }),
+      );
+
+      const listJobs = (
+        repository as {
+          listJobs?: (query: {
+            runState?: "idle" | "running" | "succeeded" | "failed" | "retrying";
+            limit?: number;
+            beforeUpdatedAt?: Date;
+          }) => Effect.Effect<
+            ReadonlyArray<{ id: string; runState: string; updatedAt: string }>
+          >;
+        }
+      ).listJobs;
+
+      expect(listJobs).toBeDefined();
+
+      const queried = await Effect.runPromise(
+        listJobs!({
+          runState: "failed",
+          beforeUpdatedAt: new Date("2026-02-23T11:30:00.000Z"),
+          limit: 1,
+        }),
+      );
+
+      expect(queried).toEqual([
+        {
+          id: "job-list-query-1",
+          name: "Job list one",
+          runState: "failed",
+          retryCount: 1,
+          createdAt: "2026-02-23T09:00:00.000Z",
+          updatedAt: "2026-02-23T11:00:00.000Z",
+          lastRunAt: undefined,
+          lastSuccessAt: undefined,
+          lastFailureAt: undefined,
+          lastFailureReason: undefined,
+          diagnostics: undefined,
+        },
+      ]);
+
+      await Effect.runPromise(repository.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("saveEntity returns deterministic relation-constraint errors", async () => {
     const { tempDir, databasePath } = makeTempDatabasePath();
 
