@@ -17,6 +17,7 @@ import {
   loadJobsSurface,
   retryJobFromSurface,
 } from "../../src/ui/workflows/jobs-surface";
+import { makeWorkflowSurfaceFiltersStore } from "../../src/ui/workflows/workflow-surface-filters";
 import { makeWorkflowSurfaceClient } from "../../src/ui/workflows/workflow-surface-client";
 
 const ACTOR = { id: "user-1", kind: "user" } as const;
@@ -45,6 +46,12 @@ describe("workflow surfaces integration", () => {
       makeWorkflowRoutes(makeWorkflowApi({ platform })),
     );
     const client = makeWorkflowSurfaceClient(dispatch);
+    const filtersStore = makeWorkflowSurfaceFiltersStore({
+      getJobsView: platform.getJobsView,
+      saveJobsView: platform.saveJobsView,
+      getActivityView: platform.getActivityView,
+      saveActivityView: platform.saveActivityView,
+    });
 
     await expectOk(dispatch, "job.create", {
       jobId: "job-surface-e2e-1",
@@ -60,7 +67,11 @@ describe("workflow surfaces integration", () => {
       at: "2026-02-23T20:01:00.000Z",
     });
 
-    let jobsState = await Effect.runPromise(loadJobsSurface(client));
+    let jobsState = await Effect.runPromise(
+      loadJobsSurface(client, filtersStore, {
+        runState: "failed",
+      }),
+    );
     jobsState = await Effect.runPromise(
       inspectJobFromSurface(client, jobsState, "job-surface-e2e-1"),
     );
@@ -82,6 +93,9 @@ describe("workflow surfaces integration", () => {
     jobsState = await Effect.runPromise(
       inspectJobFromSurface(client, jobsState, "job-surface-e2e-1"),
     );
+    const reloadedJobsState = await Effect.runPromise(
+      loadJobsSurface(client, filtersStore),
+    );
 
     await expectOk(dispatch, "checkpoint.create", {
       checkpointId: "checkpoint-surface-e2e-1",
@@ -94,7 +108,7 @@ describe("workflow surfaces integration", () => {
     });
 
     let activityState = await Effect.runPromise(
-      loadActivitySurface(client, {
+      loadActivitySurface(client, filtersStore, {
         entityType: "checkpoint",
         entityId: "checkpoint-surface-e2e-1",
       }),
@@ -120,15 +134,25 @@ describe("workflow surfaces integration", () => {
         at: new Date("2026-02-23T20:06:00.000Z"),
       }),
     );
+    const reloadedActivityState = await Effect.runPromise(
+      loadActivitySurface(client, filtersStore),
+    );
 
     expect(jobsState.inspection?.runState).toBe("succeeded");
     expect(jobsState.history.map((entry) => entry.outcome)).toEqual([
       "succeeded",
       "failed",
     ]);
+    expect(reloadedJobsState.filters).toEqual({
+      runState: "failed",
+    });
     expect(activityState.selectedCheckpoint?.status).toBe("recovered");
     expect(activityState.feed.some((item) => item.toState === "recovered")).toBe(
       true,
     );
+    expect(reloadedActivityState.filters).toEqual({
+      entityType: "checkpoint",
+      entityId: "checkpoint-surface-e2e-1",
+    });
   });
 });

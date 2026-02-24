@@ -8,6 +8,7 @@ import {
   WorkflowSurfaceClient,
   WorkflowSurfaceClientError,
 } from "./workflow-surface-client";
+import { WorkflowSurfaceFiltersStore } from "./workflow-surface-filters";
 
 export class ActivitySurfaceError extends Data.TaggedError(
   "ActivitySurfaceError",
@@ -23,24 +24,40 @@ export interface ActivitySurfaceState {
 }
 
 const toActivitySurfaceError = (
-  error: WorkflowSurfaceClientError,
-): ActivitySurfaceError =>
-  new ActivitySurfaceError({
-    message: error.message,
+  error: unknown,
+): ActivitySurfaceError => {
+  if (error instanceof WorkflowSurfaceClientError) {
+    return new ActivitySurfaceError({
+      message: error.message,
+      cause: error,
+    });
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return new ActivitySurfaceError({
+    message,
     cause: error,
   });
+};
 
 export const loadActivitySurface = (
   client: WorkflowSurfaceClient,
-  input: ListActivityRequest = {},
+  filtersStore: WorkflowSurfaceFiltersStore,
+  input?: ListActivityRequest,
 ): Effect.Effect<ActivitySurfaceState, ActivitySurfaceError> =>
-  client.listActivity(input).pipe(
-    Effect.map((feed) => ({
+  Effect.gen(function* () {
+    const filters = input ?? (yield* filtersStore.loadActivityFilters());
+
+    if (input !== undefined) {
+      yield* filtersStore.saveActivityFilters(filters);
+    }
+
+    const feed = yield* client.listActivity(filters);
+    return {
       feed,
-      filters: { ...input },
-    })),
-    Effect.mapError(toActivitySurfaceError),
-  );
+      filters: { ...filters },
+    };
+  }).pipe(Effect.mapError(toActivitySurfaceError));
 
 export const inspectCheckpointFromActivity = (
   client: WorkflowSurfaceClient,

@@ -7,6 +7,7 @@ import {
   loadJobsSurface,
   retryJobFromSurface,
 } from "../../../../src/ui/workflows/jobs-surface";
+import { WorkflowSurfaceFiltersStore } from "../../../../src/ui/workflows/workflow-surface-filters";
 import { WorkflowSurfaceClient } from "../../../../src/ui/workflows/workflow-surface-client";
 
 const ACTOR: ActorRef = { id: "user-1", kind: "user" };
@@ -82,17 +83,51 @@ const makeClientStub = (): {
   return { client, calls };
 };
 
+const makeFiltersStoreStub = (
+  initialJobsFilters: { runState?: "idle" | "running" | "succeeded" | "failed" | "retrying"; limit?: number; beforeUpdatedAt?: Date } = {},
+): {
+  store: WorkflowSurfaceFiltersStore;
+  calls: Array<{ method: string; input?: unknown }>;
+} => {
+  const calls: Array<{ method: string; input?: unknown }> = [];
+  let savedJobsFilters = { ...initialJobsFilters };
+
+  const store: WorkflowSurfaceFiltersStore = {
+    loadJobsFilters: () =>
+      Effect.sync(() => {
+        calls.push({ method: "loadJobsFilters" });
+        return { ...savedJobsFilters };
+      }),
+    saveJobsFilters: (filters) =>
+      Effect.sync(() => {
+        calls.push({ method: "saveJobsFilters", input: filters });
+        savedJobsFilters = { ...filters };
+      }),
+    loadActivityFilters: () => Effect.die("unused"),
+    saveActivityFilters: () => Effect.die("unused"),
+  };
+
+  return { store, calls };
+};
+
 describe("jobs-surface", () => {
-  test("loadJobsSurface loads list state", async () => {
+  test("loadJobsSurface persists explicit filters and loads list state", async () => {
     const { client, calls } = makeClientStub();
+    const { store, calls: storeCalls } = makeFiltersStoreStub();
 
     const state = await Effect.runPromise(
-      loadJobsSurface(client, { runState: "failed", limit: 10 }),
+      loadJobsSurface(client, store, { runState: "failed", limit: 10 }),
     );
 
     expect(state.jobs).toHaveLength(1);
     expect(state.jobs[0]?.id).toBe("job-1");
     expect(state.filters).toEqual({ runState: "failed", limit: 10 });
+    expect(storeCalls).toEqual([
+      {
+        method: "saveJobsFilters",
+        input: { runState: "failed", limit: 10 },
+      },
+    ]);
     expect(calls).toEqual([
       {
         method: "listJobs",
@@ -101,9 +136,32 @@ describe("jobs-surface", () => {
     ]);
   });
 
+  test("loadJobsSurface reuses persisted filters when no input is provided", async () => {
+    const { client, calls } = makeClientStub();
+    const { store, calls: storeCalls } = makeFiltersStoreStub({
+      runState: "retrying",
+      limit: 5,
+    });
+
+    const state = await Effect.runPromise(loadJobsSurface(client, store));
+
+    expect(state.filters).toEqual({
+      runState: "retrying",
+      limit: 5,
+    });
+    expect(storeCalls.map((call) => call.method)).toEqual(["loadJobsFilters"]);
+    expect(calls).toEqual([
+      {
+        method: "listJobs",
+        input: { runState: "retrying", limit: 5 },
+      },
+    ]);
+  });
+
   test("inspectJobFromSurface loads run inspection and history", async () => {
     const { client, calls } = makeClientStub();
-    const loaded = await Effect.runPromise(loadJobsSurface(client));
+    const { store } = makeFiltersStoreStub();
+    const loaded = await Effect.runPromise(loadJobsSurface(client, store, {}));
 
     const inspected = await Effect.runPromise(
       inspectJobFromSurface(client, loaded, "job-1"),
@@ -121,7 +179,8 @@ describe("jobs-surface", () => {
 
   test("retryJobFromSurface forwards fixSummary and refreshes state", async () => {
     const { client, calls } = makeClientStub();
-    const loaded = await Effect.runPromise(loadJobsSurface(client));
+    const { store } = makeFiltersStoreStub();
+    const loaded = await Effect.runPromise(loadJobsSurface(client, store, {}));
     const inspected = await Effect.runPromise(
       inspectJobFromSurface(client, loaded, "job-1"),
     );

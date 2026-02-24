@@ -4,6 +4,7 @@ import { createAuditTransition } from "../domain/audit-transition";
 import { Checkpoint } from "../domain/checkpoint";
 import { ActorRef, ENTITY_TYPES } from "../domain/common";
 import { createJob, CreateJobInput, Job } from "../domain/job";
+import { View } from "../domain/view";
 import { CoreRepository } from "../repositories/core-repository";
 import { makeFileCoreRepository } from "../repositories/file-core-repository";
 import { makeInMemoryCoreRepository } from "../repositories/in-memory-core-repository";
@@ -49,7 +50,15 @@ import {
   RecordJobRunInput,
   retryJobRun,
 } from "../services/job-service";
-import { saveView, SaveViewInput } from "../services/view-service";
+import {
+  getActivityView as getActivityViewInService,
+  getJobsView as getJobsViewInService,
+  saveActivityView as saveActivityViewInService,
+  saveJobsView as saveJobsViewInService,
+  saveView,
+  SaveScopedViewInput,
+  SaveViewInput,
+} from "../services/view-service";
 import { upsertMemory, UpsertMemoryInput } from "../services/memory-service";
 import { requestOutboundDraftExecution } from "../services/outbound-draft-service";
 import {
@@ -172,6 +181,14 @@ export interface CorePlatform {
     actor: ActorRef,
     at?: Date,
   ) => ReturnType<typeof recoverCheckpoint>;
+  saveJobsView: (
+    input: SaveScopedViewInput,
+  ) => ReturnType<typeof saveJobsViewInService>;
+  getJobsView: () => Effect.Effect<View | undefined>;
+  saveActivityView: (
+    input: SaveScopedViewInput,
+  ) => ReturnType<typeof saveActivityViewInService>;
+  getActivityView: () => Effect.Effect<View | undefined>;
   saveView: (input: SaveViewInput) => ReturnType<typeof saveView>;
   upsertMemory: (input: UpsertMemoryInput) => ReturnType<typeof upsertMemory>;
   getEntity: <T>(
@@ -417,6 +434,12 @@ export const buildCorePlatform = (
         withMutationBoundary(
           recoverCheckpoint(repository, checkpointId, actor, at),
         ),
+      saveJobsView: (input) =>
+        withMutationBoundary(saveJobsViewInService(repository, input)),
+      getJobsView: () => getJobsViewInService(repository),
+      saveActivityView: (input) =>
+        withMutationBoundary(saveActivityViewInService(repository, input)),
+      getActivityView: () => getActivityViewInService(repository),
       saveView: (input) => withMutationBoundary(saveView(repository, input)),
       upsertMemory: (input) =>
         withMutationBoundary(upsertMemory(repository, input)),

@@ -11,6 +11,7 @@ import {
   WorkflowSurfaceClient,
   WorkflowSurfaceClientError,
 } from "./workflow-surface-client";
+import { WorkflowSurfaceFiltersStore } from "./workflow-surface-filters";
 
 export class JobsSurfaceError extends Data.TaggedError("JobsSurfaceError")<{
   message: string;
@@ -25,24 +26,40 @@ export interface JobsSurfaceState {
   history: ReadonlyArray<JobRunHistoryRecord>;
 }
 
-const toJobsSurfaceError = (error: WorkflowSurfaceClientError): JobsSurfaceError =>
-  new JobsSurfaceError({
-    message: error.message,
+const toJobsSurfaceError = (error: unknown): JobsSurfaceError => {
+  if (error instanceof WorkflowSurfaceClientError) {
+    return new JobsSurfaceError({
+      message: error.message,
+      cause: error,
+    });
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return new JobsSurfaceError({
+    message,
     cause: error,
   });
+};
 
 export const loadJobsSurface = (
   client: WorkflowSurfaceClient,
-  input: ListJobsRequest = {},
+  filtersStore: WorkflowSurfaceFiltersStore,
+  input?: ListJobsRequest,
 ): Effect.Effect<JobsSurfaceState, JobsSurfaceError> =>
-  client.listJobs(input).pipe(
-    Effect.map((jobs) => ({
+  Effect.gen(function* () {
+    const filters = input ?? (yield* filtersStore.loadJobsFilters());
+
+    if (input !== undefined) {
+      yield* filtersStore.saveJobsFilters(filters);
+    }
+
+    const jobs = yield* client.listJobs(filters);
+    return {
       jobs,
-      filters: { ...input },
+      filters: { ...filters },
       history: [],
-    })),
-    Effect.mapError(toJobsSurfaceError),
-  );
+    };
+  }).pipe(Effect.mapError(toJobsSurfaceError));
 
 export const inspectJobFromSurface = (
   client: WorkflowSurfaceClient,

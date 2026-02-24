@@ -8,6 +8,7 @@ import {
   loadActivitySurface,
   recoverCheckpointFromActivity,
 } from "../../../../src/ui/workflows/activity-surface";
+import { WorkflowSurfaceFiltersStore } from "../../../../src/ui/workflows/workflow-surface-filters";
 import { WorkflowSurfaceClient } from "../../../../src/ui/workflows/workflow-surface-client";
 
 const ACTOR: ActorRef = { id: "user-1", kind: "user" };
@@ -97,12 +98,47 @@ const makeClientStub = (): {
   return { client, calls };
 };
 
+const makeFiltersStoreStub = (
+  initialActivityFilters: {
+    entityType?: string;
+    entityId?: string;
+    actorKind?: "user" | "system" | "ai";
+    aiOnly?: boolean;
+    limit?: number;
+    beforeAt?: Date;
+  } = {},
+): {
+  store: WorkflowSurfaceFiltersStore;
+  calls: Array<{ method: string; input?: unknown }>;
+} => {
+  const calls: Array<{ method: string; input?: unknown }> = [];
+  let savedActivityFilters = { ...initialActivityFilters };
+
+  const store: WorkflowSurfaceFiltersStore = {
+    loadJobsFilters: () => Effect.die("unused"),
+    saveJobsFilters: () => Effect.die("unused"),
+    loadActivityFilters: () =>
+      Effect.sync(() => {
+        calls.push({ method: "loadActivityFilters" });
+        return { ...savedActivityFilters };
+      }),
+    saveActivityFilters: (filters) =>
+      Effect.sync(() => {
+        calls.push({ method: "saveActivityFilters", input: filters });
+        savedActivityFilters = { ...filters };
+      }),
+  };
+
+  return { store, calls };
+};
+
 describe("activity-surface", () => {
-  test("loadActivitySurface stores feed with filters", async () => {
+  test("loadActivitySurface persists explicit filters and stores feed", async () => {
     const { client, calls } = makeClientStub();
+    const { store, calls: storeCalls } = makeFiltersStoreStub();
 
     const state = await Effect.runPromise(
-      loadActivitySurface(client, {
+      loadActivitySurface(client, store, {
         aiOnly: true,
         limit: 10,
       }),
@@ -110,6 +146,12 @@ describe("activity-surface", () => {
 
     expect(state.feed).toHaveLength(1);
     expect(state.filters).toEqual({ aiOnly: true, limit: 10 });
+    expect(storeCalls).toEqual([
+      {
+        method: "saveActivityFilters",
+        input: { aiOnly: true, limit: 10 },
+      },
+    ]);
     expect(calls).toEqual([
       {
         method: "listActivity",
@@ -118,9 +160,34 @@ describe("activity-surface", () => {
     ]);
   });
 
+  test("loadActivitySurface reuses persisted filters when no input is provided", async () => {
+    const { client, calls } = makeClientStub();
+    const { store, calls: storeCalls } = makeFiltersStoreStub({
+      aiOnly: true,
+      limit: 5,
+    });
+
+    const state = await Effect.runPromise(loadActivitySurface(client, store));
+
+    expect(state.filters).toEqual({
+      aiOnly: true,
+      limit: 5,
+    });
+    expect(storeCalls.map((call) => call.method)).toEqual([
+      "loadActivityFilters",
+    ]);
+    expect(calls).toEqual([
+      {
+        method: "listActivity",
+        input: { aiOnly: true, limit: 5 },
+      },
+    ]);
+  });
+
   test("inspectCheckpointFromActivity updates selected checkpoint", async () => {
     const { client, calls } = makeClientStub();
-    const loaded = await Effect.runPromise(loadActivitySurface(client));
+    const { store } = makeFiltersStoreStub();
+    const loaded = await Effect.runPromise(loadActivitySurface(client, store, {}));
 
     const inspected = await Effect.runPromise(
       inspectCheckpointFromActivity(client, loaded, "checkpoint-1"),
@@ -136,7 +203,8 @@ describe("activity-surface", () => {
 
   test("keep/recover actions refresh feed and selected checkpoint", async () => {
     const { client, calls } = makeClientStub();
-    const loaded = await Effect.runPromise(loadActivitySurface(client));
+    const { store } = makeFiltersStoreStub();
+    const loaded = await Effect.runPromise(loadActivitySurface(client, store, {}));
 
     const kept = await Effect.runPromise(
       keepCheckpointFromActivity(client, loaded, {
