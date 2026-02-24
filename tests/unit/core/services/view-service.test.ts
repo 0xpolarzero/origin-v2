@@ -47,6 +47,36 @@ describe("view-service", () => {
     expect(views).toHaveLength(1);
   });
 
+  test("saveView preserves existing filters when update omits filters", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    await Effect.runPromise(
+      saveView(repository, {
+        viewId: "view-preserve-filters-1",
+        name: "Initial view",
+        query: "status:planned",
+        filters: {
+          status: "planned",
+          daysAhead: 7,
+        },
+      }),
+    );
+
+    const updated = await Effect.runPromise(
+      saveView(repository, {
+        viewId: "view-preserve-filters-1",
+        name: "Updated view",
+        query: "status:planned due<5d",
+      }),
+    );
+
+    expect(updated.query).toBe("status:planned due<5d");
+    expect(updated.filters).toEqual({
+      status: "planned",
+      daysAhead: 7,
+    });
+  });
+
   test("scoped Jobs/Activity views persist and load independent filters", async () => {
     const repository = makeInMemoryCoreRepository();
 

@@ -57,7 +57,7 @@ export const saveView = (
           ...existing,
           name: input.name,
           query: input.query,
-          filters: { ...(input.filters ?? {}) },
+          filters: { ...(input.filters ?? existing.filters ?? {}) },
           updatedAt: at.toISOString(),
         }
       : yield* createView({
