@@ -88,7 +88,19 @@ describe("super-ralph patch regression", () => {
     expect(cliSection).toContain("function resolveWorkflowImportPrefix(");
     expect(cliSection).toContain("function resolveRepoRootFromWorkflowFile()");
     expect(cliSection).toContain("function resolveRepoPath(pathFromRepoRoot");
-    expect(cliSection).not.toContain("superRalphSourceRoot + '/src'");
+    expect(cliSection).toContain(
+      "const REPO_ROOT = resolveRepoRootFromWorkflowFile();",
+    );
+    expect(cliSection).not.toMatch(
+      /^\+const REPO_ROOT = \$\{JSON\.stringify\(repoRoot\)\};/m,
+    );
+    expect(cliSection).not.toContain(
+      `+function resolveRepoPath(pathFromRepoRoot: string): string {
++  return resolve(REPO_ROOT, pathFromRepoRoot);
++}
+function findSmithersCliPath(repoRoot: string): string | null {`,
+    );
+    expect(cliSection).not.toMatch(/^\+.*superRalphSourceRoot \+ '\/src'/m);
   });
 
   test("fallback-config patch hunks retain portable path normalization helpers", () => {

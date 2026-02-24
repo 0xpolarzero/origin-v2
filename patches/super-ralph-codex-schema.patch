@@ -17,7 +17,7 @@ index 2368a78..093cbea 100644
      "src/",
 diff --git a/src/cli/fallback-config.ts b/src/cli/fallback-config.ts
 new file mode 100644
-index 0000000..563f300
+index 0000000..670da0a
 --- /dev/null
 +++ b/src/cli/fallback-config.ts
 @@ -0,0 +1,128 @@
@@ -248,9 +248,7 @@ index 0000000..23febe5
 +  };
 +};
 diff --git a/src/cli/index.ts b/src/cli/index.ts
-old mode 100755
-new mode 100644
-index 633e857..a41b660
+index 633e857..30caddd 100644
 --- a/src/cli/index.ts
 +++ b/src/cli/index.ts
 @@ -18,9 +18,10 @@
@@ -376,31 +374,62 @@ index 633e857..a41b660
 -  };
 -}
 -
-@@ -173,6 +153,22 @@ async function ensureJjAvailable(repoRoot: string) {
+ function findSmithersCliPath(repoRoot: string): string | null {
+   const candidates = [
+     join(repoRoot, "node_modules/smithers-orchestrator/src/cli/index.ts"),
+@@ -275,6 +176,23 @@ const cliDir = import.meta.dir || dirname(fileURLToPath(import.meta.url));
+ const superRalphSourceRoot = dirname(dirname(cliDir));
+ const runningFromSource = existsSync(join(superRalphSourceRoot, 'src/components/SuperRalph.tsx'));
+ 
 +function resolveWorkflowImportPrefix(params: {
 +  isSuperRalphRepo: boolean;
 +  runningFromSource: boolean;
 +}): string {
 +  const { isSuperRalphRepo, runningFromSource } = params;
 +
-+  if (isSuperRalphRepo) return "../../src";
-+  if (runningFromSource) return "super-ralph";
++  if (isSuperRalphRepo) {
++    return "../../src";
++  }
++
++  if (runningFromSource) {
++    return "super-ralph";
++  }
++
 +  return "super-ralph";
 +}
 +
-+function resolveRepoRootFromWorkflowFile(): string {
-+  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-+}
-+
-+function resolveRepoPath(pathFromRepoRoot: string): string {
-+  return resolve(REPO_ROOT, pathFromRepoRoot);
-+}
-function findSmithersCliPath(repoRoot: string): string | null {
-   const candidates = [
-     join(repoRoot, "node_modules/smithers-orchestrator/src/cli/index.ts"),
-@@ -309,7 +210,12 @@ function renderWorkflowFile(params: {
+ function renderWorkflowFile(params: {
+   promptText: string;
+   promptSpecPath: string;
+@@ -294,30 +212,44 @@ function renderWorkflowFile(params: {
+   const isSuperRalphRepo = existsSync(join(repoRoot, 'src/components/SuperRalph.tsx')) &&
+                            existsSync(join(repoRoot, 'src/components/ClarifyingQuestions.tsx'));
+ 
+-  let importPrefix: string;
+-  if (isSuperRalphRepo) {
+-    // Generating workflow IN super-ralph repo - use relative imports
+-    importPrefix = '../../src';
+-  } else if (runningFromSource) {
+-    // Running from super-ralph source for another repo - use absolute imports to source
+-    importPrefix = superRalphSourceRoot + '/src';
+-  } else {
+-    // Running from installed package
+-    importPrefix = 'super-ralph';
+-  }
++  const importPrefix = resolveWorkflowImportPrefix({
++    isSuperRalphRepo,
++    runningFromSource,
++  });
++  const promptSpecPathFromConfig =
++    typeof fallbackConfig?.referenceFiles?.[0] === "string" &&
++    fallbackConfig.referenceFiles[0].trim().length > 0
++      ? fallbackConfig.referenceFiles[0]
++      : promptSpecPath;
+ 
    return `import React from "react";
  import { createSmithers, ClaudeCodeAgent, CodexAgent, Sequence, Parallel } from "smithers-orchestrator";
++import { dirname, resolve } from "node:path";
++import { fileURLToPath } from "node:url";
  import { SuperRalph } from "${importPrefix}";
 -import { InterpretConfig, Monitor } from "${importPrefix}/components";
 +import {
@@ -411,8 +440,28 @@ function findSmithersCliPath(repoRoot: string): string | null {
 +} from "${importPrefix}/components";
  import { ralphOutputSchemas } from "${importPrefix}";
  
- const REPO_ROOT = ${JSON.stringify(repoRoot)};
-@@ -327,84 +233,177 @@ const { smithers, outputs, Workflow } = createSmithers(
+-const REPO_ROOT = ${JSON.stringify(repoRoot)};
+-const DB_PATH = ${JSON.stringify(dbPath)};
++function resolveRepoRootFromWorkflowFile(): string {
++  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
++}
++
++const REPO_ROOT = resolveRepoRootFromWorkflowFile();
++
++function resolveRepoPath(pathFromRepoRoot: string): string {
++  return resolve(REPO_ROOT, pathFromRepoRoot);
++}
++
++const DB_PATH = resolveRepoPath(".super-ralph/workflow.db");
+ const HAS_CLAUDE = ${detectedAgents.claude};
+ const HAS_CODEX = ${detectedAgents.codex};
+ const PROMPT_TEXT = ${JSON.stringify(promptText)};
+-const PROMPT_SPEC_PATH = ${JSON.stringify(promptSpecPath)};
++const PROMPT_SPEC_PATH = resolveRepoPath(${JSON.stringify(promptSpecPathFromConfig)});
+ const PACKAGE_SCRIPTS = ${JSON.stringify(packageScripts, null, 2)};
+ const FALLBACK_CONFIG = ${JSON.stringify(fallbackConfig, null, 2)};
+ const CLARIFICATION_SESSION = ${JSON.stringify(clarificationSession)};
+@@ -327,84 +259,177 @@ const { smithers, outputs, Workflow } = createSmithers(
    { dbPath: DB_PATH }
  );
  
