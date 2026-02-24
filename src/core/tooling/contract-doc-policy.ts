@@ -267,6 +267,10 @@ const parseCommaSeparatedList = (value: string): ReadonlyArray<string> =>
     .filter((item) => item !== "");
 
 const joinValues = (values: ReadonlyArray<string>): string => values.join(",");
+const normalizedValues = (values: ReadonlyArray<string>): ReadonlyArray<string> =>
+  [...values].sort((left, right) => left.localeCompare(right));
+const joinNormalizedValues = (values: ReadonlyArray<string>): string =>
+  joinValues(normalizedValues(values));
 
 const countValues = (values: ReadonlyArray<string>): Map<string, number> => {
   const counts = new Map<string, number>();
@@ -435,19 +439,20 @@ export const findPersistedSchemaContractViolations = (params: {
       violations.push({
         subject: `table:${expectedTable.table}`,
         issue: "missing",
-        expected: joinValues(expectedTable.columns),
+        expected: joinNormalizedValues(expectedTable.columns),
       });
       continue;
     }
 
     if (
-      joinValues(documentedTable.columns) !== joinValues(expectedTable.columns)
+      joinNormalizedValues(documentedTable.columns) !==
+      joinNormalizedValues(expectedTable.columns)
     ) {
       violations.push({
         subject: `table:${expectedTable.table}`,
         issue: "mismatch",
-        expected: joinValues(expectedTable.columns),
-        documented: joinValues(documentedTable.columns),
+        expected: joinNormalizedValues(expectedTable.columns),
+        documented: joinNormalizedValues(documentedTable.columns),
       });
     }
   }

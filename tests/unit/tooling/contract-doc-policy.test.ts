@@ -397,8 +397,8 @@ describe("contract-doc-policy", () => {
       {
         subject: "table:entry",
         issue: "mismatch",
-        expected: "id,content,source",
-        documented: "id,content",
+        expected: "content,id,source",
+        documented: "content,id",
       },
       {
         subject: "table:event",
@@ -502,5 +502,28 @@ describe("contract-doc-policy", () => {
         documented: "id,content,source",
       },
     ]);
+  });
+
+  test("findPersistedSchemaContractViolations ignores table column order differences", () => {
+    const documented: PersistedSchemaContract = {
+      migrationIds: ["001_core_schema"],
+      tables: [{ table: "entry", columns: ["source", "id", "content"] }],
+      triggerNames: ["task_status_check_insert"],
+      indexNames: ["idx_task_status"],
+    };
+
+    const expected: PersistedSchemaContractExpected = {
+      migrationIds: ["001_core_schema"],
+      tables: [{ table: "entry", columns: ["id", "content", "source"] }],
+      triggerNames: ["task_status_check_insert"],
+      indexNames: ["idx_task_status"],
+    };
+
+    expect(
+      findPersistedSchemaContractViolations({
+        documented,
+        expected,
+      }),
+    ).toEqual([]);
   });
 });
