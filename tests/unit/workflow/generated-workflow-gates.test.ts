@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { buildGateCommandConfig } from "super-ralph/gate-config";
-
-const workflowPath = resolve(
-  process.cwd(),
-  ".super-ralph/generated/workflow.tsx",
-);
+import {
+  loadResolveAgentSafetyPolicy,
+  readGeneratedWorkflowSource,
+  withEnv,
+} from "../../helpers/generated-workflow";
 
 type WorkflowConfig = {
   buildCmds: Record<string, string>;
@@ -15,10 +13,6 @@ type WorkflowConfig = {
   preLandChecks: string[];
   postLandChecks: string[];
 };
-
-function readWorkflowSource(): string {
-  return readFileSync(workflowPath, "utf8");
-}
 
 export function extractConstJson<T = unknown>(
   source: string,
@@ -66,7 +60,7 @@ export function assertNoPlaceholderCommands(
 
 describe("generated workflow gates", () => {
   test("workflow artifact contains script-derived gate command maps with no placeholders", () => {
-    const source = readWorkflowSource();
+    const source = readGeneratedWorkflowSource();
     const packageScripts = extractConstJson<Record<string, string>>(
       source,
       "PACKAGE_SCRIPTS",
@@ -105,7 +99,7 @@ describe("generated workflow gates", () => {
   });
 
   test("workflow artifact wires runtime command-map merge into SuperRalph and Monitor", () => {
-    const source = readWorkflowSource();
+    const source = readGeneratedWorkflowSource();
 
     expect(source).toContain("function mergeCommandMap(");
     expect(source).toContain("function resolveRuntimeConfig(ctx: any)");
@@ -129,7 +123,7 @@ describe("generated workflow gates", () => {
   });
 
   test("workflow artifact bans hardcoded permissive agent flags and wires safety policy", () => {
-    const source = readWorkflowSource();
+    const source = readGeneratedWorkflowSource();
 
     expect(source).not.toContain("dangerouslySkipPermissions: true");
     expect(source).not.toContain("yolo: true");
@@ -139,27 +133,62 @@ describe("generated workflow gates", () => {
     expect(source).toContain("agentSafetyPolicy={agentSafetyPolicy}");
   });
 
-  test("workflow artifact uses policy-aware agent constructors with explicit safe defaults", () => {
-    const source = readWorkflowSource();
+  test("workflow artifact resolves policy behavior with env precedence and fail-closed normalization", () => {
+    const source = readGeneratedWorkflowSource();
+    const resolveAgentSafetyPolicy = loadResolveAgentSafetyPolicy(source);
 
-    expect(source).toContain(
-      "function resolveAgentSafetyPolicy(input: unknown): AgentSafetyPolicy",
+    withEnv(
+      {
+        SUPER_RALPH_RISKY_MODE: undefined,
+        SUPER_RALPH_APPROVAL_REQUIRED_PHASES: undefined,
+      },
+      () => {
+        expect(resolveAgentSafetyPolicy(undefined)).toEqual({
+          riskyModeEnabled: false,
+          approvalRequiredPhases: [],
+        });
+        expect(
+          resolveAgentSafetyPolicy({
+            riskyModeEnabled: true,
+            approvalRequiredPhases: ["land", "unknown", " LAND "],
+          }),
+        ).toEqual({
+          riskyModeEnabled: true,
+          approvalRequiredPhases: ["land"],
+        });
+      },
     );
-    expect(source).toContain(
-      "function createClaude(systemPrompt: string, policy: AgentSafetyPolicy)",
+
+    withEnv(
+      {
+        SUPER_RALPH_RISKY_MODE: "1",
+        SUPER_RALPH_APPROVAL_REQUIRED_PHASES: undefined,
+      },
+      () => {
+        expect(resolveAgentSafetyPolicy(undefined)).toEqual({
+          riskyModeEnabled: true,
+          approvalRequiredPhases: ["implement", "review-fix", "land"],
+        });
+      },
     );
-    expect(source).toContain(
-      "function createCodex(systemPrompt: string, policy: AgentSafetyPolicy)",
-    );
-    expect(source).toContain(
-      'function choose(primary: "claude" | "codex", systemPrompt: string, policy: AgentSafetyPolicy)',
-    );
-    expect(source).toContain("yolo: false");
-    expect(source).toContain(
-      "dangerouslySkipPermissions: policy.riskyModeEnabled",
-    );
-    expect(source).toContain(
-      "const agentSafetyPolicy = resolveAgentSafetyPolicy(runtimeConfig.agentSafetyPolicy);",
+
+    withEnv(
+      {
+        SUPER_RALPH_RISKY_MODE: "1",
+        SUPER_RALPH_APPROVAL_REQUIRED_PHASES:
+          " land,unknown,IMPLEMENT,land ",
+      },
+      () => {
+        expect(
+          resolveAgentSafetyPolicy({
+            riskyModeEnabled: true,
+            approvalRequiredPhases: ["review-fix"],
+          }),
+        ).toEqual({
+          riskyModeEnabled: true,
+          approvalRequiredPhases: ["land", "implement"],
+        });
+      },
     );
   });
 });

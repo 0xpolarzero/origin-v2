@@ -6,6 +6,10 @@ import { join, resolve } from "node:path";
 import { buildFallbackConfig } from "super-ralph/cli/fallback-config";
 import { buildGateCommandConfig } from "super-ralph/gate-config";
 import { resolveTicketGateSelection } from "super-ralph/ticket-gates";
+import {
+  loadResolveAgentSafetyPolicy,
+  withEnv,
+} from "../helpers/generated-workflow";
 
 function readPackageScripts() {
   const packageJsonPath = resolve(process.cwd(), "package.json");
@@ -243,25 +247,45 @@ describe("workflow gate policy integration", () => {
     }
   });
 
-  test("generated workflow keeps agent execution safe by default and wires policy through runtime", () => {
-    const source = readGeneratedWorkflowSource();
+  test("generated workflow resolves safety policy behavior from env overrides at runtime", () => {
+    const resolveAgentSafetyPolicy = loadResolveAgentSafetyPolicy(
+      readGeneratedWorkflowSource(),
+    );
 
-    expect(source).toContain(
-      "function resolveAgentSafetyPolicy(input: unknown): AgentSafetyPolicy",
+    withEnv(
+      {
+        SUPER_RALPH_RISKY_MODE: "1",
+        SUPER_RALPH_APPROVAL_REQUIRED_PHASES: "review-fix",
+      },
+      () => {
+        expect(
+          resolveAgentSafetyPolicy({
+            riskyModeEnabled: true,
+            approvalRequiredPhases: ["land"],
+          }),
+        ).toEqual({
+          riskyModeEnabled: true,
+          approvalRequiredPhases: ["review-fix"],
+        });
+      },
     );
-    expect(source).toContain('process.env.SUPER_RALPH_RISKY_MODE === "1"');
-    expect(source).toContain(
-      "process.env.SUPER_RALPH_APPROVAL_REQUIRED_PHASES",
+
+    withEnv(
+      {
+        SUPER_RALPH_RISKY_MODE: undefined,
+        SUPER_RALPH_APPROVAL_REQUIRED_PHASES: "implement",
+      },
+      () => {
+        expect(
+          resolveAgentSafetyPolicy({
+            riskyModeEnabled: true,
+            approvalRequiredPhases: ["land"],
+          }),
+        ).toEqual({
+          riskyModeEnabled: true,
+          approvalRequiredPhases: ["land"],
+        });
+      },
     );
-    expect(source).toContain("yolo: false");
-    expect(source).toContain(
-      "dangerouslySkipPermissions: policy.riskyModeEnabled",
-    );
-    expect(source).toContain(
-      "const agentSafetyPolicy = resolveAgentSafetyPolicy(runtimeConfig.agentSafetyPolicy);",
-    );
-    expect(source).toContain("agentSafetyPolicy={agentSafetyPolicy}");
-    expect(source).not.toContain("dangerouslySkipPermissions: true");
-    expect(source).not.toContain("yolo: true");
   });
 });
