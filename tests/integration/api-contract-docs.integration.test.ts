@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { Effect } from "effect";
 
@@ -21,7 +22,10 @@ import {
   parseWorkflowRouteContractRows,
 } from "../../src/core/tooling/contract-doc-policy";
 
-const repositoryRoot = process.cwd();
+const repositoryRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
 
 const applyCoreMigrations = (db: Database): Promise<void> =>
   Effect.runPromise(runSqliteMigrations(db, CORE_DB_MIGRATIONS));
