@@ -904,7 +904,7 @@ describe("api/workflows/routes", () => {
     );
   });
 
-  test("route handlers accept broader ISO-8601 variants for timestamp fields", async () => {
+  test("route handlers reject timezone-less ISO timestamps in payload date fields", async () => {
     const calls: Array<{ route: WorkflowRouteKey; input: unknown }> = [];
     const routes = makeWorkflowRoutes(
       makeApiSpy((route, input) => {
@@ -927,22 +927,29 @@ describe("api/workflows/routes", () => {
       }),
     );
 
-    await Effect.runPromise(
-      historyRoute!.handle({
-        jobId: "job-route-iso-variant-1",
-        beforeAt: "2026-02-23T10:00:00",
-        limit: 5,
-      }),
+    const timezoneLessTimestamp = await Effect.runPromise(
+      Effect.either(
+        historyRoute!.handle({
+          jobId: "job-route-iso-variant-1",
+          beforeAt: "2026-02-23T10:00:00",
+          limit: 5,
+        }),
+      ),
     );
 
     const captureCall = calls.find((entry) => entry.route === "capture.entry");
     const historyCall = calls.find((entry) => entry.route === "job.listHistory");
 
     expect(captureCall).toBeDefined();
-    expect(historyCall).toBeDefined();
     expect((captureCall!.input as { at: Date }).at).toBeInstanceOf(Date);
-    expect((historyCall!.input as { beforeAt: Date }).beforeAt).toBeInstanceOf(
-      Date,
-    );
+    expect(historyCall).toBeUndefined();
+    expect(Either.isLeft(timezoneLessTimestamp)).toBe(true);
+    if (Either.isLeft(timezoneLessTimestamp)) {
+      expect(timezoneLessTimestamp.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "job.listHistory",
+      });
+      expect(timezoneLessTimestamp.left.message).toContain("beforeAt");
+    }
   });
 });
