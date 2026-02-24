@@ -42,6 +42,8 @@ describe("super-ralph patch regression", () => {
     const cliSection = sections.get("src/cli/index.ts") ?? "";
     const fallbackSection = sections.get("src/cli/fallback-config.ts") ?? "";
 
+    expect(cliSection).not.toContain("old mode 100644");
+    expect(cliSection).not.toContain("new mode 100755");
     expect(cliSection).toContain('import { buildFallbackConfig } from "./fallback-config"');
     expect(cliSection).toContain("-function buildFallbackConfig(");
     expect(cliSection).toContain("-function detectScriptRunner(");

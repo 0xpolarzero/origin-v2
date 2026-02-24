@@ -16,8 +16,6 @@ index 2368a78..093cbea 100644
    "files": [
      "src/",
 diff --git a/src/cli/index.ts b/src/cli/index.ts
-old mode 100644
-new mode 100755
 index 633e857..c60186d
 --- a/src/cli/index.ts
 +++ b/src/cli/index.ts
