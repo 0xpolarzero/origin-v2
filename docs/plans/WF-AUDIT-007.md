@@ -126,3 +126,10 @@ This remains core-first: path normalization and generation logic are covered by 
 
 6. `rg -n 'from \"/|\"/Users/|[A-Za-z]:\\\\' .super-ralph/generated/workflow.tsx`
    - explicit scan confirming generated artifact no longer embeds machine-specific absolute paths.
+
+## Review-Fix TDD Evidence (2026-02-24)
+- RED: `bun test tests/unit/workflow/patch-regression.test.ts` failed after adding portability assertions for patch durability (`const REPO_ROOT = resolveRepoRootFromWorkflowFile();` missing in patch artifact contract checks).
+- GREEN: regenerated `patches/super-ralph-codex-schema.patch`, tightened patch assertions to target added hunks, then `bun test tests/unit/workflow/patch-regression.test.ts` passed.
+- RED: `bun test tests/unit/workflow/cli-fallback-config-types.test.ts` failed for missing `FallbackConfig` declaration fields (`projectName`, `projectId`, `focuses`, `codeStyle`, `reviewChecklist`, `maxConcurrency`).
+- GREEN: updated `src/types/super-ralph/cli-fallback-config.d.ts`, then `bun test tests/unit/workflow/cli-fallback-config-types.test.ts` passed.
+- Verification: `bun run typecheck` and workflow portability suite (`generated-workflow-gates`, `fallback-config-portability`, `patch-regression`, `workflow-gate-policy`, `cli-fallback-config-types`) passed.
