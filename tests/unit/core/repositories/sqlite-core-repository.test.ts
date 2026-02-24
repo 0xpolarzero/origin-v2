@@ -316,7 +316,19 @@ describe("makeSqliteCoreRepository", () => {
             limit?: number;
             beforeUpdatedAt?: Date;
           }) => Effect.Effect<
-            ReadonlyArray<{ id: string; runState: string; updatedAt: string }>
+            ReadonlyArray<{
+              id: string;
+              name: string;
+              runState: string;
+              retryCount: number;
+              createdAt: string;
+              updatedAt: string;
+              lastRunAt?: string;
+              lastSuccessAt?: string;
+              lastFailureAt?: string;
+              lastFailureReason?: string;
+              diagnostics?: string;
+            }>
           >;
         }
       ).listJobs;
@@ -953,7 +965,19 @@ describe("makeSqliteCoreRepository", () => {
             aiOnly?: boolean;
             limit?: number;
             beforeAt?: Date;
-          }) => Effect.Effect<ReadonlyArray<{ id: string; actor: { kind: string } }>>;
+          }) => Effect.Effect<
+            ReadonlyArray<{
+              id: string;
+              entityType: string;
+              entityId: string;
+              fromState: string;
+              toState: string;
+              actor: { id: string; kind: "user" | "system" | "ai" };
+              reason: string;
+              at: string;
+              metadata?: Record<string, string>;
+            }>
+          >;
         }
       ).listActivityFeed;
 
