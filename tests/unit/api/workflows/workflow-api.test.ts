@@ -713,9 +713,16 @@ describe("api/workflows/workflow-api", () => {
     }
   });
 
-  test("capture.suggest/planning.completeTask/signal.triage preserve not_found mapping and signal.convert preserves conflict mapping", async () => {
+  test("capture.suggest/capture.acceptAsTask/planning.completeTask/signal.triage preserve not_found mapping and signal.convert preserves conflict mapping", async () => {
     const platform = makePlatformStub({
       suggestEntryAsTask: () =>
+        Effect.fail(
+          new EntryServiceError({
+            message: "entry entry-api-404 was not found",
+            code: "not_found",
+          }),
+        ),
+      acceptEntryAsTask: () =>
         Effect.fail(
           new EntryServiceError({
             message: "entry entry-api-404 was not found",
@@ -749,6 +756,9 @@ describe("api/workflows/workflow-api", () => {
     const suggestResult = await Effect.runPromise(
       Effect.either(api.suggestEntryAsTask(suggestEntryInput)),
     );
+    const acceptResult = await Effect.runPromise(
+      Effect.either(api.acceptEntryAsTask(acceptAsTaskInput)),
+    );
     const completeResult = await Effect.runPromise(
       Effect.either(api.completeTask(completeTaskInput)),
     );
@@ -764,6 +774,17 @@ describe("api/workflows/workflow-api", () => {
       expect(suggestResult.left).toMatchObject({
         _tag: "WorkflowApiError",
         route: "capture.suggest",
+        code: "not_found",
+        statusCode: 404,
+        message: "entry entry-api-404 was not found",
+      });
+    }
+
+    expect(Either.isLeft(acceptResult)).toBe(true);
+    if (Either.isLeft(acceptResult)) {
+      expect(acceptResult.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "capture.acceptAsTask",
         code: "not_found",
         statusCode: 404,
         message: "entry entry-api-404 was not found",
@@ -791,7 +812,6 @@ describe("api/workflows/workflow-api", () => {
         message: "signal signal-api-404 was not found",
       });
     }
-
     expect(Either.isLeft(convertResult)).toBe(true);
     if (Either.isLeft(convertResult)) {
       expect(convertResult.left).toMatchObject({

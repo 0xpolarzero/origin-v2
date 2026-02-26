@@ -387,19 +387,31 @@ describe("workflow-api http integration", () => {
     });
   });
 
-  test("capture.suggest/planning.completeTask/signal.triage map missing resources to 404 and signal.convert precondition to 409", async () => {
+  test("capture.suggest/capture.acceptAsTask/planning.completeTask/signal.triage map missing resources to 404 and signal.convert precondition to 409", async () => {
     const platform = await Effect.runPromise(buildCorePlatform());
     const dispatcher = makeWorkflowHttpDispatcher(
       makeWorkflowRoutes(makeWorkflowApi({ platform })),
     );
 
-    const missingEntry = await Effect.runPromise(
+    const missingSuggestedEntry = await Effect.runPromise(
       dispatcher({
         method: "POST",
         path: WORKFLOW_ROUTE_PATHS["capture.suggest"],
         body: {
           entryId: "entry-http-missing-404",
           suggestedTitle: "Missing entry suggestion",
+          actor: ACTOR,
+          at: "2026-02-23T09:35:00.000Z",
+        },
+      }),
+    );
+    const missingAcceptedEntry = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["capture.acceptAsTask"],
+        body: {
+          entryId: "entry-http-missing-404",
+          taskId: "task-http-created-1",
           actor: ACTOR,
           at: "2026-02-23T09:35:00.000Z",
         },
@@ -450,9 +462,13 @@ describe("workflow-api http integration", () => {
       }),
     );
 
-    expectSanitizedError(missingEntry, {
+    expectSanitizedError(missingSuggestedEntry, {
       status: 404,
       route: "capture.suggest",
+    });
+    expectSanitizedError(missingAcceptedEntry, {
+      status: 404,
+      route: "capture.acceptAsTask",
     });
     expectSanitizedError(missingTask, {
       status: 404,
