@@ -1219,39 +1219,33 @@ describe("database-backed core platform", () => {
           databasePath,
         }),
       );
-      let seededUpdatedAt: string | undefined;
-      let seededAuditCount = 0;
 
-      try {
-        await Effect.runPromise(
-          platformA.captureEntry({
-            entryId: existingEntryId,
-            content: existingEntryContent,
-            actor: { id: "user-1", kind: "user" },
-            at: new Date("2026-02-23T11:00:00.000Z"),
-          }),
-        );
+      await Effect.runPromise(
+        platformA.captureEntry({
+          entryId: existingEntryId,
+          content: existingEntryContent,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T11:00:00.000Z"),
+        }),
+      );
 
-        const seededEntryBeforeImport = await Effect.runPromise(
-          platformA.getEntity<{ content: string; updatedAt: string }>(
-            "entry",
-            existingEntryId,
-          ),
-        );
-        const seededAuditBeforeImport = await Effect.runPromise(
-          platformA.listAuditTrail({
-            entityType: "entry",
-            entityId: existingEntryId,
-          }),
-        );
+      const seededEntryBeforeImport = await Effect.runPromise(
+        platformA.getEntity<{ content: string; updatedAt: string }>(
+          "entry",
+          existingEntryId,
+        ),
+      );
+      const seededAuditBeforeImport = await Effect.runPromise(
+        platformA.listAuditTrail({
+          entityType: "entry",
+          entityId: existingEntryId,
+        }),
+      );
 
-        seededUpdatedAt = seededEntryBeforeImport?.updatedAt;
-        seededAuditCount = seededAuditBeforeImport.length;
-      } finally {
-        if (platformA.close) {
-          await Effect.runPromise(Effect.either(platformA.close()));
-        }
+      if (!platformA.close) {
+        throw new Error("database-backed platform should expose close()");
       }
+      await Effect.runPromise(platformA.close());
 
       writeLegacySnapshot(snapshotPath, {
         version: 1,
@@ -1299,37 +1293,41 @@ describe("database-backed core platform", () => {
         }),
       );
 
-      try {
-        const seededEntryAfterImportAttempt = await Effect.runPromise(
-          platformB.getEntity<{ content: string; updatedAt: string }>(
-            "entry",
-            existingEntryId,
-          ),
-        );
-        const snapshotOnlyEntry = await Effect.runPromise(
-          platformB.getEntity("entry", snapshotOnlyEntryId),
-        );
-        const seededAuditAfterImportAttempt = await Effect.runPromise(
-          platformB.listAuditTrail({
-            entityType: "entry",
-            entityId: existingEntryId,
-          }),
-        );
+      const seededEntryAfterImportAttempt = await Effect.runPromise(
+        platformB.getEntity<{ content: string; updatedAt: string }>(
+          "entry",
+          existingEntryId,
+        ),
+      );
+      const snapshotOnlyEntry = await Effect.runPromise(
+        platformB.getEntity("entry", snapshotOnlyEntryId),
+      );
+      const seededAuditAfterImportAttempt = await Effect.runPromise(
+        platformB.listAuditTrail({
+          entityType: "entry",
+          entityId: existingEntryId,
+        }),
+      );
 
-        expect(seededEntryAfterImportAttempt?.content).toBe(existingEntryContent);
-        expect(seededEntryAfterImportAttempt?.updatedAt).toBe(seededUpdatedAt);
-        expect(snapshotOnlyEntry).toBeUndefined();
-        expect(seededAuditAfterImportAttempt).toHaveLength(seededAuditCount);
-        expect(
-          seededAuditAfterImportAttempt.some(
-            (transition) => transition.reason === snapshotAuditMarker,
-          ),
-        ).toBe(false);
-      } finally {
-        if (platformB.close) {
-          await Effect.runPromise(Effect.either(platformB.close()));
-        }
+      expect(seededEntryBeforeImport).toBeDefined();
+      expect(seededEntryAfterImportAttempt?.content).toBe(existingEntryContent);
+      expect(seededEntryAfterImportAttempt?.updatedAt).toBe(
+        seededEntryBeforeImport?.updatedAt,
+      );
+      expect(snapshotOnlyEntry).toBeUndefined();
+      expect(seededAuditAfterImportAttempt).toHaveLength(
+        seededAuditBeforeImport.length,
+      );
+      expect(
+        seededAuditAfterImportAttempt.some(
+          (transition) => transition.reason === snapshotAuditMarker,
+        ),
+      ).toBe(false);
+
+      if (!platformB.close) {
+        throw new Error("database-backed platform should expose close()");
       }
+      await Effect.runPromise(platformB.close());
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

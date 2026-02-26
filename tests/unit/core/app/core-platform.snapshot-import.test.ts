@@ -33,12 +33,14 @@ const createTrackedRepository = (): CoreRepository & {
   counters: {
     saveEntity: number;
     appendAuditTransition: number;
+    withTransaction: number;
   };
 } => {
   const baseRepository = makeInMemoryCoreRepository();
   const counters = {
     saveEntity: 0,
     appendAuditTransition: 0,
+    withTransaction: 0,
   };
 
   return {
@@ -58,6 +60,10 @@ const createTrackedRepository = (): CoreRepository & {
       }).pipe(
         Effect.flatMap(() => baseRepository.appendAuditTransition(transition)),
       ),
+    withTransaction: (effect) =>
+      Effect.sync(() => {
+        counters.withTransaction += 1;
+      }).pipe(Effect.flatMap(() => baseRepository.withTransaction(effect))),
   };
 };
 
@@ -137,6 +143,7 @@ describe("buildCorePlatform legacy snapshot import guard", () => {
       expect(snapshotOnlyEntry).toBeUndefined();
       expect(repository.counters.saveEntity).toBe(0);
       expect(repository.counters.appendAuditTransition).toBe(0);
+      expect(repository.counters.withTransaction).toBe(1);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

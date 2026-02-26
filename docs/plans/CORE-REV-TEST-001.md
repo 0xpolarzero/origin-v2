@@ -1,4 +1,4 @@
-# CORE-REV-TEST-001 Plan: Snapshot Import Skip Regression on Non-Empty Repository
+# CORE-REV-TEST-001 Plan: Snapshot Import Skip Regression on Non-Empty Repository (TDD First)
 
 ## Overview of the approach
 This ticket is a regression-safety slice for the `buildCorePlatform` legacy snapshot import path. The goal is to lock behavior that already exists in `src/core/app/core-platform.ts`: when the repository is not empty, snapshot import must be skipped.
@@ -14,7 +14,7 @@ Approach:
 - This ticket delivers regression coverage for that existing behavior; it does not claim original implementation provenance.
 - TDD here is enforced for the ticket slice itself: write failing tests for regression expectations first, then only change production code if those tests expose a bug.
 
-## TDD step order for this regression slice (tests before implementation)
+## TDD step order (tests before implementation)
 1. **Unit test (RED):** create `tests/unit/core/app/core-platform.snapshot-import.test.ts` with:
    - test: `skips legacy snapshot import when repository is already non-empty`
    - setup: repository wrapper with write counters and pre-existing row exposure (`listEntities` and/or `listAuditTrail` non-empty)

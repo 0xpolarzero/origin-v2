@@ -1131,6 +1131,22 @@ describe("api/workflows/routes", () => {
       expect(invalidLimit.left.message).toContain("limit");
     }
 
+    const invalidZeroLimit = await Effect.runPromise(
+      Effect.either(
+        activityRoute!.handle({
+          limit: 0,
+        }),
+      ),
+    );
+    expect(Either.isLeft(invalidZeroLimit)).toBe(true);
+    if (Either.isLeft(invalidZeroLimit)) {
+      expect(invalidZeroLimit.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "activity.list",
+      });
+      expect(invalidZeroLimit.left.message).toContain("limit");
+    }
+
     const invalidBeforeAt = await Effect.runPromise(
       Effect.either(
         activityRoute!.handle({

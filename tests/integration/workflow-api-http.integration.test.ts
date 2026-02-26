@@ -6,9 +6,13 @@ import {
   makeWorkflowRoutes,
   WORKFLOW_ROUTE_PATHS,
 } from "../../src/api/workflows/routes";
-import { makeWorkflowHttpDispatcher } from "../../src/api/workflows/http-dispatch";
-import { buildCorePlatform } from "../../src/core/app/core-platform";
+import {
+  makeWorkflowHttpDispatcher,
+  WorkflowHttpAuthContext,
+} from "../../src/api/workflows/http-dispatch";
+import { buildCorePlatform, CorePlatform } from "../../src/core/app/core-platform";
 import { WorkflowRouteKey } from "../../src/api/workflows/contracts";
+import { WORKFLOW_ROUTE_KEYS } from "../../src/contracts/workflow-route-keys";
 import { createEvent } from "../../src/core/domain/event";
 import { makeInMemoryCoreRepository } from "../../src/core/repositories/in-memory-core-repository";
 
@@ -272,6 +276,467 @@ const expectInvalidActorKind400 = async (
   });
 };
 
+const expectInvalidActivityList400 = async (
+  dispatch: ReturnType<typeof makeWorkflowHttpDispatcher>,
+  body: Record<string, unknown>,
+  messageIncludes: string,
+): Promise<void> => {
+  const response = await Effect.runPromise(
+    dispatch({
+      method: "POST",
+      path: WORKFLOW_ROUTE_PATHS["activity.list"],
+      body,
+    }),
+  );
+
+  expectSanitizedError(response, {
+    status: 400,
+    route: "activity.list",
+    messageIncludes,
+  });
+};
+
+interface IntegrationWorkflowNegativeCase {
+  route: WorkflowRouteKey;
+  expectedStatus: 400 | 403 | 404 | 409;
+  body?: Record<string, unknown>;
+  auth?: WorkflowHttpAuthContext;
+  setup?: (ctx: {
+    dispatch: ReturnType<typeof makeWorkflowHttpDispatcher>;
+    platform: CorePlatform;
+  }) => Promise<void>;
+  messageIncludes?: string;
+}
+
+const postWorkflowRoute = async (
+  dispatch: ReturnType<typeof makeWorkflowHttpDispatcher>,
+  route: WorkflowRouteKey,
+  body?: unknown,
+  auth?: WorkflowHttpAuthContext,
+): Promise<{ status: number; body: unknown }> =>
+  Effect.runPromise(
+    dispatch({
+      method: "POST",
+      path: WORKFLOW_ROUTE_PATHS[route],
+      body,
+      auth,
+    }),
+  );
+
+const assertRouteNegativeCase = async (
+  dispatch: ReturnType<typeof makeWorkflowHttpDispatcher>,
+  routeCase: IntegrationWorkflowNegativeCase,
+): Promise<void> => {
+  const response = await postWorkflowRoute(
+    dispatch,
+    routeCase.route,
+    routeCase.body,
+    routeCase.auth,
+  );
+
+  expectSanitizedError(response, {
+    status: routeCase.expectedStatus,
+    route: routeCase.route,
+    messageIncludes: routeCase.messageIncludes,
+  });
+};
+
+const seedPendingApprovalEvent = async (
+  dispatch: ReturnType<typeof makeWorkflowHttpDispatcher>,
+  ids: { signalId: string; eventId: string },
+): Promise<void> => {
+  await expectOk(dispatch, "signal.ingest", {
+    signalId: ids.signalId,
+    source: "email",
+    payload: "Seed event pending approval",
+    actor: ACTOR,
+    at: "2026-02-26T10:00:00.000Z",
+  });
+  await expectOk(dispatch, "signal.triage", {
+    signalId: ids.signalId,
+    decision: "ready_for_conversion",
+    actor: ACTOR,
+    at: "2026-02-26T10:01:00.000Z",
+  });
+  await expectOk(dispatch, "signal.convert", {
+    signalId: ids.signalId,
+    targetType: "event",
+    targetId: ids.eventId,
+    actor: ACTOR,
+    at: "2026-02-26T10:02:00.000Z",
+  });
+  await expectOk(dispatch, "approval.requestEventSync", {
+    eventId: ids.eventId,
+    actor: ACTOR,
+    at: "2026-02-26T10:03:00.000Z",
+  });
+};
+
+const seedPendingApprovalDraft = async (
+  dispatch: ReturnType<typeof makeWorkflowHttpDispatcher>,
+  ids: { signalId: string; draftId: string },
+): Promise<void> => {
+  await expectOk(dispatch, "signal.ingest", {
+    signalId: ids.signalId,
+    source: "email",
+    payload: "Seed draft pending approval",
+    actor: ACTOR,
+    at: "2026-02-26T10:10:00.000Z",
+  });
+  await expectOk(dispatch, "signal.triage", {
+    signalId: ids.signalId,
+    decision: "requires_outbound",
+    actor: ACTOR,
+    at: "2026-02-26T10:11:00.000Z",
+  });
+  await expectOk(dispatch, "signal.convert", {
+    signalId: ids.signalId,
+    targetType: "outbound_draft",
+    targetId: ids.draftId,
+    actor: ACTOR,
+    at: "2026-02-26T10:12:00.000Z",
+  });
+  await expectOk(dispatch, "approval.requestOutboundDraftExecution", {
+    draftId: ids.draftId,
+    actor: ACTOR,
+    at: "2026-02-26T10:13:00.000Z",
+  });
+};
+
+const INTEGRATION_NEGATIVE_CASES: ReadonlyArray<IntegrationWorkflowNegativeCase> = [
+  {
+    route: "capture.entry",
+    expectedStatus: 400,
+    body: {
+      entryId: "entry-http-negative-1",
+      content: "   ",
+      actor: ACTOR,
+      at: "2026-02-26T11:00:00.000Z",
+    },
+    messageIncludes: "content",
+  },
+  {
+    route: "capture.suggest",
+    expectedStatus: 404,
+    body: {
+      entryId: "entry-http-negative-missing-1",
+      suggestedTitle: "Missing entry suggestion",
+      actor: ACTOR,
+      at: "2026-02-26T11:01:00.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "capture.editSuggestion",
+    expectedStatus: 404,
+    body: {
+      entryId: "entry-http-negative-missing-2",
+      suggestedTitle: "Missing entry edit",
+      actor: ACTOR,
+      at: "2026-02-26T11:02:00.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "capture.rejectSuggestion",
+    expectedStatus: 404,
+    body: {
+      entryId: "entry-http-negative-missing-3",
+      reason: "No longer needed",
+      actor: ACTOR,
+      at: "2026-02-26T11:03:00.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "capture.acceptAsTask",
+    expectedStatus: 404,
+    body: {
+      entryId: "entry-http-negative-missing-4",
+      actor: ACTOR,
+      at: "2026-02-26T11:04:00.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "signal.ingest",
+    expectedStatus: 400,
+    body: {
+      signalId: "signal-http-negative-1",
+      source: "email",
+      payload: "   ",
+      actor: ACTOR,
+      at: "2026-02-26T11:05:00.000Z",
+    },
+    messageIncludes: "payload",
+  },
+  {
+    route: "signal.triage",
+    expectedStatus: 404,
+    body: {
+      signalId: "signal-http-negative-missing-1",
+      decision: "ready_for_conversion",
+      actor: ACTOR,
+      at: "2026-02-26T11:06:00.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "signal.convert",
+    expectedStatus: 409,
+    setup: async ({ dispatch }) => {
+      await expectOk(dispatch, "signal.ingest", {
+        signalId: "signal-http-negative-untriaged-1",
+        source: "email",
+        payload: "Need conversion precondition",
+        actor: ACTOR,
+        at: "2026-02-26T11:07:00.000Z",
+      });
+    },
+    body: {
+      signalId: "signal-http-negative-untriaged-1",
+      targetType: "task",
+      targetId: "task-http-negative-convert-1",
+      actor: ACTOR,
+      at: "2026-02-26T11:08:00.000Z",
+    },
+    messageIncludes: "must be triaged",
+  },
+  {
+    route: "planning.completeTask",
+    expectedStatus: 404,
+    body: {
+      taskId: "task-http-negative-missing-1",
+      actor: ACTOR,
+      at: "2026-02-26T11:09:00.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "planning.deferTask",
+    expectedStatus: 404,
+    body: {
+      taskId: "task-http-negative-missing-2",
+      until: "2026-02-27T11:10:00.000Z",
+      actor: ACTOR,
+      at: "2026-02-26T11:10:00.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "planning.rescheduleTask",
+    expectedStatus: 404,
+    body: {
+      taskId: "task-http-negative-missing-3",
+      nextAt: "2026-02-27T11:11:00.000Z",
+      actor: ACTOR,
+      at: "2026-02-26T11:11:00.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "approval.requestEventSync",
+    expectedStatus: 409,
+    setup: async ({ dispatch }) => {
+      await seedPendingApprovalEvent(dispatch, {
+        signalId: "signal-http-negative-event-sync-1",
+        eventId: "event-http-negative-event-sync-1",
+      });
+    },
+    body: {
+      eventId: "event-http-negative-event-sync-1",
+      actor: ACTOR,
+      at: "2026-02-26T11:12:00.000Z",
+    },
+    messageIncludes: "must be local_only",
+  },
+  {
+    route: "approval.requestOutboundDraftExecution",
+    expectedStatus: 409,
+    setup: async ({ dispatch }) => {
+      await seedPendingApprovalDraft(dispatch, {
+        signalId: "signal-http-negative-draft-exec-1",
+        draftId: "outbound-draft-http-negative-draft-exec-1",
+      });
+    },
+    body: {
+      draftId: "outbound-draft-http-negative-draft-exec-1",
+      actor: ACTOR,
+      at: "2026-02-26T11:13:00.000Z",
+    },
+    messageIncludes: "must be in draft before requesting approval",
+  },
+  {
+    route: "approval.approveOutboundAction",
+    expectedStatus: 403,
+    setup: async ({ dispatch }) => {
+      await seedPendingApprovalEvent(dispatch, {
+        signalId: "signal-http-negative-approve-1",
+        eventId: "event-http-negative-approve-1",
+      });
+    },
+    body: {
+      actionType: "event_sync",
+      entityType: "event",
+      entityId: "event-http-negative-approve-1",
+      approved: true,
+      at: "2026-02-26T11:14:00.000Z",
+    },
+    auth: {
+      sessionActor: TRUSTED_SYSTEM_ACTOR,
+    },
+    messageIncludes: "only user actors",
+  },
+  {
+    route: "job.create",
+    expectedStatus: 400,
+    body: {
+      jobId: "job-http-negative-1",
+      name: "   ",
+      actor: { id: "system-1", kind: "system" },
+      at: "2026-02-26T11:15:00.000Z",
+    },
+    messageIncludes: "name",
+  },
+  {
+    route: "job.recordRun",
+    expectedStatus: 404,
+    body: {
+      jobId: "job-http-negative-missing-1",
+      outcome: "failed",
+      diagnostics: "timeout",
+      actor: { id: "system-1", kind: "system" },
+      at: "2026-02-26T11:16:00.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "job.inspectRun",
+    expectedStatus: 404,
+    body: {
+      jobId: "job-http-negative-missing-2",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "job.list",
+    expectedStatus: 400,
+    body: {
+      limit: 0,
+    },
+    messageIncludes: "positive integer",
+  },
+  {
+    route: "job.listHistory",
+    expectedStatus: 404,
+    body: {
+      jobId: "job-http-negative-missing-3",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "job.retry",
+    expectedStatus: 409,
+    setup: async ({ dispatch }) => {
+      await expectOk(dispatch, "job.create", {
+        jobId: "job-http-negative-retry-1",
+        name: "Retry negative case",
+        actor: { id: "system-1", kind: "system" },
+        at: "2026-02-26T11:17:00.000Z",
+      });
+    },
+    body: {
+      jobId: "job-http-negative-retry-1",
+      actor: ACTOR,
+      at: "2026-02-26T11:18:00.000Z",
+    },
+    messageIncludes: "must be in failed state before retry",
+  },
+  {
+    route: "checkpoint.create",
+    expectedStatus: 400,
+    body: {
+      checkpointId: "checkpoint-http-negative-1",
+      name: "Invalid checkpoint",
+      snapshotEntityRefs: [],
+      auditCursor: 1,
+      rollbackTarget: "   ",
+      actor: ACTOR,
+      at: "2026-02-26T11:19:00.000Z",
+    },
+    messageIncludes: "rollbackTarget",
+  },
+  {
+    route: "checkpoint.inspect",
+    expectedStatus: 404,
+    body: {
+      checkpointId: "checkpoint-http-negative-missing-1",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "checkpoint.keep",
+    expectedStatus: 409,
+    setup: async ({ dispatch }) => {
+      await expectOk(dispatch, "checkpoint.create", {
+        checkpointId: "checkpoint-http-negative-keep-1",
+        name: "Checkpoint keep conflict",
+        snapshotEntityRefs: [],
+        auditCursor: 1,
+        rollbackTarget: "audit-negative-1",
+        actor: ACTOR,
+        at: "2026-02-26T11:20:00.000Z",
+      });
+      await expectOk(dispatch, "checkpoint.recover", {
+        checkpointId: "checkpoint-http-negative-keep-1",
+        actor: ACTOR,
+        at: "2026-02-26T11:21:00.000Z",
+      });
+    },
+    body: {
+      checkpointId: "checkpoint-http-negative-keep-1",
+      actor: ACTOR,
+      at: "2026-02-26T11:22:00.000Z",
+    },
+    messageIncludes: "cannot transition recovered -> kept",
+  },
+  {
+    route: "checkpoint.recover",
+    expectedStatus: 409,
+    setup: async ({ dispatch }) => {
+      await expectOk(dispatch, "checkpoint.create", {
+        checkpointId: "checkpoint-http-negative-recover-1",
+        name: "Checkpoint recover conflict",
+        snapshotEntityRefs: [],
+        auditCursor: 1,
+        rollbackTarget: "audit-negative-2",
+        actor: ACTOR,
+        at: "2026-02-26T11:23:00.000Z",
+      });
+      await expectOk(dispatch, "checkpoint.recover", {
+        checkpointId: "checkpoint-http-negative-recover-1",
+        actor: ACTOR,
+        at: "2026-02-26T11:24:00.000Z",
+      });
+    },
+    body: {
+      checkpointId: "checkpoint-http-negative-recover-1",
+      actor: ACTOR,
+      at: "2026-02-26T11:25:00.000Z",
+    },
+    messageIncludes: "cannot transition recovered -> recovered",
+  },
+  {
+    route: "activity.list",
+    expectedStatus: 400,
+    body: {
+      actorKind: "robot",
+      limit: 10,
+      beforeAt: "2026-02-26T11:26:00.000Z",
+    },
+    messageIncludes: "actorKind must be one of",
+  },
+];
 describe("workflow-api http integration", () => {
   test("dispatcher returns 404 for unknown route path and 405 for unsupported method", async () => {
     const platform = await Effect.runPromise(buildCorePlatform());
@@ -487,6 +952,85 @@ describe("workflow-api http integration", () => {
       status: 200,
       body: [],
     });
+  });
+
+  test("activity.list returns sanitized 400 for non-boolean aiOnly", async () => {
+    const platform = await Effect.runPromise(buildCorePlatform());
+    const dispatcher = makeWorkflowHttpDispatcher(
+      makeWorkflowRoutes(makeWorkflowApi({ platform })),
+    );
+
+    await expectInvalidActivityList400(
+      dispatcher,
+      {
+        entityType: "checkpoint",
+        entityId: "checkpoint-http-invalid-activity-aiOnly-1",
+        aiOnly: "true",
+        limit: 10,
+        beforeAt: "2026-02-23T12:00:00.000Z",
+      },
+      "aiOnly",
+    );
+  });
+
+  test("activity.list returns sanitized 400 for unsupported actorKind", async () => {
+    const platform = await Effect.runPromise(buildCorePlatform());
+    const dispatcher = makeWorkflowHttpDispatcher(
+      makeWorkflowRoutes(makeWorkflowApi({ platform })),
+    );
+
+    await expectInvalidActivityList400(
+      dispatcher,
+      {
+        entityType: "checkpoint",
+        entityId: "checkpoint-http-invalid-activity-actorKind-1",
+        actorKind: "robot",
+        aiOnly: true,
+        limit: 10,
+        beforeAt: "2026-02-23T12:00:00.000Z",
+      },
+      "actorKind",
+    );
+  });
+
+  test("activity.list returns sanitized 400 for non-positive limit", async () => {
+    const platform = await Effect.runPromise(buildCorePlatform());
+    const dispatcher = makeWorkflowHttpDispatcher(
+      makeWorkflowRoutes(makeWorkflowApi({ platform })),
+    );
+
+    await expectInvalidActivityList400(
+      dispatcher,
+      {
+        entityType: "checkpoint",
+        entityId: "checkpoint-http-invalid-activity-limit-1",
+        actorKind: "ai",
+        aiOnly: true,
+        limit: 0,
+        beforeAt: "2026-02-23T12:00:00.000Z",
+      },
+      "limit",
+    );
+  });
+
+  test("activity.list returns sanitized 400 for malformed beforeAt", async () => {
+    const platform = await Effect.runPromise(buildCorePlatform());
+    const dispatcher = makeWorkflowHttpDispatcher(
+      makeWorkflowRoutes(makeWorkflowApi({ platform })),
+    );
+
+    await expectInvalidActivityList400(
+      dispatcher,
+      {
+        entityType: "checkpoint",
+        entityId: "checkpoint-http-invalid-activity-beforeAt-1",
+        actorKind: "ai",
+        aiOnly: true,
+        limit: 10,
+        beforeAt: "not-a-date",
+      },
+      "beforeAt",
+    );
   });
 
   test("checkpoint.create(ai) -> activity.list(aiOnly) -> checkpoint.inspect -> keep/recover executes through HTTP routes", async () => {
@@ -1110,5 +1654,28 @@ describe("workflow-api http integration", () => {
       route: "approval.approveOutboundAction",
     });
     expect(executeCount).toBe(1);
+  });
+
+  test("negative-path matrix returns sanitized contract statuses for all workflow routes", async () => {
+    for (const routeCase of INTEGRATION_NEGATIVE_CASES) {
+      const platform = await Effect.runPromise(buildCorePlatform());
+      const dispatch = makeWorkflowHttpDispatcher(
+        makeWorkflowRoutes(makeWorkflowApi({ platform })),
+      );
+
+      if (routeCase.setup) {
+        await routeCase.setup({ dispatch, platform });
+      }
+      await assertRouteNegativeCase(dispatch, routeCase);
+    }
+  });
+
+  test("integration negative-case matrix includes every workflow route key", () => {
+    const coveredRoutes = INTEGRATION_NEGATIVE_CASES.map(
+      (routeCase) => routeCase.route,
+    );
+    expect(INTEGRATION_NEGATIVE_CASES).toHaveLength(WORKFLOW_ROUTE_KEYS.length);
+    expect(new Set(coveredRoutes).size).toBe(WORKFLOW_ROUTE_KEYS.length);
+    expect(new Set(coveredRoutes)).toEqual(new Set(WORKFLOW_ROUTE_KEYS));
   });
 });
