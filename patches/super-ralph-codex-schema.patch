@@ -16,7 +16,7 @@ index 2368a78..093cbea 100644
    "files": [
      "src/",
 diff --git a/src/cli/index.ts b/src/cli/index.ts
-index 633e857..c60186d
+index 633e857..a41b660 100644
 --- a/src/cli/index.ts
 +++ b/src/cli/index.ts
 @@ -18,9 +18,10 @@
@@ -145,10 +145,99 @@ index 633e857..c60186d
  function findSmithersCliPath(repoRoot: string): string | null {
    const candidates = [
      join(repoRoot, "node_modules/smithers-orchestrator/src/cli/index.ts"),
-@@ -360,51 +261,94 @@ const testingAgent = choose("claude", "Run tests and validate behavior changes."
- const reviewingAgent = choose("codex", "Review for regressions, spec drift, and correctness.");
- const reportingAgent = choose("claude", "Write concise, accurate ticket status reports.");
+@@ -309,7 +210,12 @@ function renderWorkflowFile(params: {
+   return `import React from "react";
+ import { createSmithers, ClaudeCodeAgent, CodexAgent, Sequence, Parallel } from "smithers-orchestrator";
+ import { SuperRalph } from "${importPrefix}";
+-import { InterpretConfig, Monitor } from "${importPrefix}/components";
++import {
++  InterpretConfig,
++  Monitor,
++  normalizeAgentSafetyPolicy,
++  type AgentSafetyPolicy,
++} from "${importPrefix}/components";
+ import { ralphOutputSchemas } from "${importPrefix}";
  
+ const REPO_ROOT = ${JSON.stringify(repoRoot)};
+@@ -327,84 +233,177 @@ const { smithers, outputs, Workflow } = createSmithers(
+   { dbPath: DB_PATH }
+ );
+ 
+-function createClaude(systemPrompt: string) {
++function resolveAgentSafetyPolicy(input: unknown): AgentSafetyPolicy {
++  const envRiskyModeEnabled = process.env.SUPER_RALPH_RISKY_MODE === "1";
++  const envApprovalRequiredPhases = (process.env.SUPER_RALPH_APPROVAL_REQUIRED_PHASES ?? "")
++    .split(",")
++    .map((phase) => phase.trim())
++    .filter((phase) => phase.length > 0);
++
++  if (!envRiskyModeEnabled) {
++    return normalizeAgentSafetyPolicy(input);
++  }
++
++  const normalizedInput = normalizeAgentSafetyPolicy(input);
++  return normalizeAgentSafetyPolicy({
++    riskyModeEnabled: true,
++    approvalRequiredPhases:
++      envApprovalRequiredPhases.length > 0
++        ? envApprovalRequiredPhases
++        : normalizedInput.approvalRequiredPhases,
++  });
++}
++
++function createClaude(systemPrompt: string, policy: AgentSafetyPolicy) {
++  const safeDefaults = {
++    yolo: false,
++    dangerouslySkipPermissions: false,
++  };
++
+   return new ClaudeCodeAgent({
++    ...safeDefaults,
+     model: "claude-sonnet-4-6",
+     systemPrompt,
+     cwd: REPO_ROOT,
+-    dangerouslySkipPermissions: true,
++    yolo: policy.riskyModeEnabled,
++    dangerouslySkipPermissions: policy.riskyModeEnabled,
+     timeoutMs: 60 * 60 * 1000,
+   });
+ }
+ 
+-function createCodex(systemPrompt: string) {
++function createCodex(systemPrompt: string, policy: AgentSafetyPolicy) {
++  const safeDefaults = {
++    yolo: false,
++  };
++
+   return new CodexAgent({
++    ...safeDefaults,
+     model: "gpt-5.3-codex",
+     systemPrompt,
+     cwd: REPO_ROOT,
+-    yolo: true,
++    yolo: policy.riskyModeEnabled,
+     timeoutMs: 60 * 60 * 1000,
+   });
+ }
+ 
+-function choose(primary: "claude" | "codex", systemPrompt: string) {
+-  if (primary === "claude" && HAS_CLAUDE) return createClaude(systemPrompt);
+-  if (primary === "codex" && HAS_CODEX) return createCodex(systemPrompt);
+-  if (HAS_CLAUDE) return createClaude(systemPrompt);
+-  return createCodex(systemPrompt);
++function choose(primary: "claude" | "codex", systemPrompt: string, policy: AgentSafetyPolicy) {
++  if (primary === "claude" && HAS_CLAUDE) return createClaude(systemPrompt, policy);
++  if (primary === "codex" && HAS_CODEX) return createCodex(systemPrompt, policy);
++  if (HAS_CLAUDE) return createClaude(systemPrompt, policy);
++  return createCodex(systemPrompt, policy);
+ }
+ 
+-const planningAgent = choose("claude", "Plan and research next tickets.");
+-const implementationAgent = choose("claude", "Implement with test-driven development and jj workflows.");
+-const testingAgent = choose("claude", "Run tests and validate behavior changes.");
+-const reviewingAgent = choose("codex", "Review for regressions, spec drift, and correctness.");
+-const reportingAgent = choose("claude", "Write concise, accurate ticket status reports.");
+-
 -export default smithers((ctx) => (
 -  <Workflow name="super-ralph-full">
 -    <Sequence>
@@ -227,6 +316,28 @@ index 633e857..c60186d
 +
 +export default smithers((ctx) => {
 +  const runtimeConfig = resolveRuntimeConfig(ctx);
++  const agentSafetyPolicy = resolveAgentSafetyPolicy(runtimeConfig.agentSafetyPolicy);
++  const planningAgent = choose("claude", "Plan and research next tickets.", agentSafetyPolicy);
++  const implementationAgent = choose(
++    "claude",
++    "Implement with test-driven development and jj workflows.",
++    agentSafetyPolicy,
++  );
++  const testingAgent = choose(
++    "claude",
++    "Run tests and validate behavior changes.",
++    agentSafetyPolicy,
++  );
++  const reviewingAgent = choose(
++    "codex",
++    "Review for regressions, spec drift, and correctness.",
++    agentSafetyPolicy,
++  );
++  const reportingAgent = choose(
++    "claude",
++    "Write concise, accurate ticket status reports.",
++    agentSafetyPolicy,
++  );
 +
 +  return (
 +    <Workflow name="super-ralph-full">
@@ -263,6 +374,7 @@ index 633e857..c60186d
 +              reviewing: reviewingAgent,
 +              reporting: reportingAgent,
 +            }}
++            agentSafetyPolicy={agentSafetyPolicy}
 +          />
 +
 +          <Monitor
@@ -319,18 +431,47 @@ index 77be1f5..c25a2a8 100644
      clarificationSession
        ? "- CRITICAL: Interpret and apply the user's clarification answers to tailor the config."
 diff --git a/src/components/SuperRalph.tsx b/src/components/SuperRalph.tsx
-index 96d1c69..2db4704 100644
+index 96d1c69..be877a2 100644
 --- a/src/components/SuperRalph.tsx
 +++ b/src/components/SuperRalph.tsx
-@@ -16,6 +16,7 @@ import CodeReviewPrompt from "../prompts/CodeReview.mdx";
+@@ -16,6 +16,12 @@ import CodeReviewPrompt from "../prompts/CodeReview.mdx";
  import ReviewFixPrompt from "../prompts/ReviewFix.mdx";
  import ReportPrompt from "../prompts/Report.mdx";
  import CategoryReviewPrompt from "../prompts/CategoryReview.mdx";
 +import { resolveTicketGateSelection } from "./ticket-gates";
++import {
++  normalizeAgentSafetyPolicy,
++  requiresApprovalForPhase,
++  type AgentSafetyPolicy,
++} from "./agent-safety-policy";
  import {
    buildSpeculativeMergeQueuePrompt,
    createSpeculativeMergeQueueAgent,
-@@ -308,6 +309,12 @@ export function SuperRalph({
+@@ -79,6 +85,7 @@ export type SuperRalphProps = {
+   /** Merge queue id used to isolate coordinator state */
+   mergeQueueId?: string;
+   skipPhases?: Set<string>;
++  agentSafetyPolicy?: AgentSafetyPolicy;
+ 
+   // Advanced: Override any step with custom component
+   updateProgress?: ReactElement;
+@@ -160,6 +167,7 @@ export function SuperRalph({
+   maxSpeculativeDepth = 3,
+   mergeQueueId = "land-queue",
+   skipPhases = new Set(),
++  agentSafetyPolicy: rawAgentSafetyPolicy,
+ 
+   // Advanced overrides
+   updateProgress: customUpdateProgress,
+@@ -193,6 +201,7 @@ export function SuperRalph({
+   const mergeQueueAgent = normalizeAgent(
+     agents.mergeQueue ?? createSpeculativeMergeQueueAgent(),
+   );
++  const agentSafetyPolicy = normalizeAgentSafetyPolicy(rawAgentSafetyPolicy);
+ 
+   const ciCommands = postLandChecks.length > 0 ? postLandChecks : Object.values(testCmds);
+ 
+@@ -308,6 +317,12 @@ export function SuperRalph({
            const ticketImplementationAgent = roundRobinAgent(implementationAgent, ticketIndex);
            const ticketTestingAgent = roundRobinAgent(testingAgent, ticketIndex);
            const ticketReportingAgent = roundRobinAgent(reportingAgent, ticketIndex);
@@ -343,7 +484,25 @@ index 96d1c69..2db4704 100644
  
            const mergeQueueRequest: MergeQueueRequest = {
              runId: ctx.runId,
-@@ -405,7 +412,7 @@ export function SuperRalph({
+@@ -390,7 +405,16 @@ export function SuperRalph({
+                       return (
+                         <>
+                           {customImplement || (
+-                            <Task id={`${ticket.id}:implement`} output={outputs.implement} agent={ticketImplementationAgent} retries={taskRetries}>
++                            <Task
++                              id={`${ticket.id}:implement`}
++                              output={outputs.implement}
++                              agent={ticketImplementationAgent}
++                              retries={taskRetries}
++                              needsApproval={requiresApprovalForPhase(
++                                "implement",
++                                agentSafetyPolicy,
++                              )}
++                            >
+                               <ImplementPrompt
+                                 ticketId={ticket.id}
+                                 ticketTitle={ticket.title}
+@@ -405,7 +429,7 @@ export function SuperRalph({
                                  testWritingGuidance={["Write unit tests AND integration tests"]}
                                  implementationGuidance={["Follow architecture patterns from specs"]}
                                  formatterCommands={Object.entries(buildCmds).map(([lang, cmd]) => `Format ${lang}`)}
@@ -352,7 +511,7 @@ index 96d1c69..2db4704 100644
                                  architectureRules={[`Read ${specsPath} for patterns`]}
                                  commitPrefix={prefix}
                                  mainBranch={mainBranch}
-@@ -420,11 +427,11 @@ export function SuperRalph({
+@@ -420,11 +444,11 @@ export function SuperRalph({
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
                                  ticketCategory={ticket.category}
@@ -369,7 +528,25 @@ index 96d1c69..2db4704 100644
                                  fixCommitPrefix={`🐛 fix`}
                                  mainBranch={mainBranch}
                                />
-@@ -491,7 +498,7 @@ export function SuperRalph({
+@@ -480,7 +504,16 @@ export function SuperRalph({
+                           </Parallel>
+ 
+                           {customReviewFix || (!noReviewIssues && (
+-                            <Task id={`${ticket.id}:review-fix`} output={outputs.review_fix} agent={ticketImplementationAgent} retries={taskRetries}>
++                            <Task
++                              id={`${ticket.id}:review-fix`}
++                              output={outputs.review_fix}
++                              agent={ticketImplementationAgent}
++                              retries={taskRetries}
++                              needsApproval={requiresApprovalForPhase(
++                                "review-fix",
++                                agentSafetyPolicy,
++                              )}
++                            >
+                               <ReviewFixPrompt
+                                 ticketId={ticket.id}
+                                 ticketTitle={ticket.title}
+@@ -491,7 +524,7 @@ export function SuperRalph({
                                  codeSeverity={worstCodeSeverity}
                                  codeFeedback={mergedCodeFeedback}
                                  codeIssues={mergedCodeIssues.length > 0 ? mergedCodeIssues : null}
@@ -378,355 +555,36 @@ index 96d1c69..2db4704 100644
                                  commitPrefix={`🐛 fix`}
                                  mainBranch={mainBranch}
                                  emojiPrefixes={emojiPrefixes}
-diff --git a/src/cli/gate-config.ts b/src/cli/gate-config.ts
-new file mode 100644
-index 0000000..23febe5
---- /dev/null
-+++ b/src/cli/gate-config.ts
-@@ -0,0 +1,92 @@
-+export type ScriptRunner = "bun" | "pnpm" | "yarn" | "npm";
-+
-+export type GateCommandConfig = {
-+  buildCmds: Record<string, string>;
-+  testCmds: Record<string, string>;
-+  preLandChecks: string[];
-+  postLandChecks: string[];
-+};
-+
-+const REQUIRED_GATE_SCRIPTS = ["test", "typecheck"] as const;
-+
-+function hasScript(packageScripts: Record<string, string>, scriptName: string): boolean {
-+  const command = packageScripts[scriptName];
-+  return typeof command === "string" && command.trim().length > 0;
-+}
-+
-+function scriptCommand(runner: ScriptRunner, scriptName: string): string {
-+  if (runner === "bun") return `bun run ${scriptName}`;
-+  if (runner === "pnpm") return `pnpm run ${scriptName}`;
-+  if (runner === "yarn") return `yarn ${scriptName}`;
-+  return `npm run ${scriptName}`;
-+}
-+
-+function firstExistingScript(packageScripts: Record<string, string>, candidates: string[]): string | null {
-+  for (const scriptName of candidates) {
-+    if (hasScript(packageScripts, scriptName)) {
-+      return scriptName;
-+    }
-+  }
-+
-+  return null;
-+}
-+
-+export const assertRequiredGateScripts = (packageScripts: Record<string, string>): void => {
-+  const missingScripts = REQUIRED_GATE_SCRIPTS.filter((scriptName) => !hasScript(packageScripts, scriptName));
-+
-+  if (missingScripts.length > 0) {
-+    throw new Error(`Missing required package scripts: ${missingScripts.join(", ")}`);
-+  }
-+};
-+
-+export const resolveFocusTestCommands = (
-+  runner: ScriptRunner,
-+  packageScripts: Record<string, string>,
-+): Record<string, string> => {
-+  const testCmds: Record<string, string> = {
-+    test: scriptCommand(runner, "test"),
-+  };
-+
-+  const focusScriptCandidates: Record<string, string[]> = {
-+    core: ["test:core", "test:unit:core", "test:integration:core"],
-+    api: ["test:integration:api", "test:api"],
-+    workflow: ["test:integration:workflow", "test:workflow"],
-+    db: ["test:integration:db", "test:db"],
-+  };
-+
-+  for (const [focus, candidates] of Object.entries(focusScriptCandidates)) {
-+    const selectedScript = firstExistingScript(packageScripts, candidates);
-+    if (selectedScript) {
-+      testCmds[focus] = scriptCommand(runner, selectedScript);
-+    }
-+  }
-+
-+  return testCmds;
-+};
-+
-+export const buildGateCommandConfig = (
-+  runner: ScriptRunner,
-+  packageScripts: Record<string, string>,
-+): GateCommandConfig => {
-+  assertRequiredGateScripts(packageScripts);
-+
-+  const buildCmds: Record<string, string> = {
-+    typecheck: scriptCommand(runner, "typecheck"),
-+  };
-+
-+  if (hasScript(packageScripts, "build")) {
-+    buildCmds.build = scriptCommand(runner, "build");
-+  }
-+  if (hasScript(packageScripts, "lint")) {
-+    buildCmds.lint = scriptCommand(runner, "lint");
-+  }
-+
-+  const testCmds = resolveFocusTestCommands(runner, packageScripts);
-+
-+  return {
-+    buildCmds,
-+    testCmds,
-+    preLandChecks: Object.values(buildCmds),
-+    postLandChecks: Object.values(testCmds),
-+  };
-+};
-diff --git a/src/cli/fallback-config.ts b/src/cli/fallback-config.ts
-new file mode 100644
-index 0000000..965dccd
---- /dev/null
-+++ b/src/cli/fallback-config.ts
-@@ -0,0 +1,102 @@
-+import { existsSync } from "node:fs";
-+import { basename, join } from "node:path";
-+
-+import {
-+  buildGateCommandConfig,
-+  type ScriptRunner,
-+} from "./gate-config";
-+
-+function hasScript(packageScripts: Record<string, string>, scriptName: string): boolean {
-+  const command = packageScripts[scriptName];
-+  return typeof command === "string" && command.trim().length > 0;
-+}
-+
-+export function detectScriptRunner(repoRoot: string): ScriptRunner {
-+  if (existsSync(join(repoRoot, "bun.lock")) || existsSync(join(repoRoot, "bun.lockb"))) return "bun";
-+  if (existsSync(join(repoRoot, "pnpm-lock.yaml"))) return "pnpm";
-+  if (existsSync(join(repoRoot, "yarn.lock"))) return "yarn";
-+  return "npm";
-+}
-+
-+function slugify(value: string): string {
-+  return value
-+    .toLowerCase()
-+    .replace(/[^a-z0-9]+/g, "-")
-+    .replace(/^-+|-+$/g, "") || "project";
-+}
-+
-+export function buildFallbackConfig(
-+  repoRoot: string,
-+  promptSpecPath: string,
-+  packageScripts: Record<string, string>,
-+) {
-+  const runner = detectScriptRunner(repoRoot);
-+  const hasNodeGateScripts = hasScript(packageScripts, "test") && hasScript(packageScripts, "typecheck");
-+  const buildCmds: Record<string, string> = {};
-+  const testCmds: Record<string, string> = {};
-+
-+  if (hasNodeGateScripts) {
-+    const gateConfig = buildGateCommandConfig(runner, packageScripts);
-+    Object.assign(buildCmds, gateConfig.buildCmds);
-+    Object.assign(testCmds, gateConfig.testCmds);
-+  }
-+
-+  if (existsSync(join(repoRoot, "go.mod"))) {
-+    buildCmds.go = buildCmds.go ?? "go build ./...";
-+    testCmds.go = testCmds.go ?? "go test ./...";
-+  }
-+
-+  if (existsSync(join(repoRoot, "Cargo.toml"))) {
-+    buildCmds.rust = buildCmds.rust ?? "cargo build";
-+    testCmds.rust = testCmds.rust ?? "cargo test";
-+  }
-+
-+  if (Object.keys(buildCmds).length === 0 || Object.keys(testCmds).length === 0) {
-+    throw new Error(
-+      "Unable to derive runnable gate commands. Configure package.json test/typecheck scripts or provide Go/Rust project files.",
-+    );
-+  }
-+
-+  const specsPathCandidates = [
-+    join(repoRoot, "docs/specs/engineering.md"),
-+    join(repoRoot, "docs/specs"),
-+    join(repoRoot, "specs"),
-+    promptSpecPath,
-+  ];
-+
-+  const chosenSpecs = specsPathCandidates.find((candidate) => existsSync(candidate)) ?? promptSpecPath;
-+
-+  const projectName = basename(repoRoot);
-+  const maxConcurrency = Math.min(
-+    Math.max(Number(process.env.WORKFLOW_MAX_CONCURRENCY ?? "6") || 6, 1),
-+    32,
-+  );
-+
-+  return {
-+    projectName,
-+    projectId: slugify(projectName),
-+    focuses: [
-+      { id: "core", name: "Core Platform" },
-+      { id: "api", name: "API and Data" },
-+      { id: "workflow", name: "Workflow and Automation" },
-+    ],
-+    specsPath: chosenSpecs,
-+    referenceFiles: [
-+      promptSpecPath,
-+      existsSync(join(repoRoot, "README.md")) ? "README.md" : "",
-+      existsSync(join(repoRoot, "docs")) ? "docs" : "",
-+    ].filter(Boolean),
-+    buildCmds,
-+    testCmds,
-+    preLandChecks: Object.values(buildCmds),
-+    postLandChecks: Object.values(testCmds),
-+    codeStyle: "Follow existing project conventions and keep changes minimal and test-driven.",
-+    reviewChecklist: [
-+      "Spec compliance",
-+      "Tests cover behavior changes",
-+      "No regression risk in existing flows",
-+      "Error handling and observability",
-+    ],
-+    maxConcurrency,
-+  };
-+}
-diff --git a/src/components/ticket-gates.ts b/src/components/ticket-gates.ts
-new file mode 100644
-index 0000000..9388c2c
---- /dev/null
-+++ b/src/components/ticket-gates.ts
-@@ -0,0 +1,140 @@
-+export type ResolveTicketGateSelectionParams = {
-+  ticketCategory: string;
-+  buildCmds: Record<string, string>;
-+  testCmds: Record<string, string>;
-+  preLandChecks: string[];
-+};
-+
-+export type TicketGateSelection = {
-+  verifyCommands: string[];
-+  validationCommands: string[];
-+  testSuites: Array<{
-+    name: string;
-+    command: string;
-+    description: string;
-+  }>;
-+};
-+
-+const NON_RUNNABLE_GATE_PATTERNS = [/No .* configured yet/i, /\|\|\s*echo\b/i, /^echo\b/i];
-+
-+function normalizeCategory(ticketCategory: string): string {
-+  const normalized = ticketCategory.trim().toLowerCase();
-+  if (!normalized) return "default";
-+
-+  if (normalized.includes("workflow")) return "workflow";
-+  if (normalized.includes("api")) return "api";
-+  if (normalized.includes("db") || normalized.includes("data")) return "db";
-+  if (normalized.includes("core")) return "core";
-+  return normalized;
-+}
-+
-+function toRunnableCommand(command: string | undefined): string | null {
-+  if (typeof command !== "string") return null;
-+  const normalized = command.trim();
-+  if (!normalized) return null;
-+
-+  for (const pattern of NON_RUNNABLE_GATE_PATTERNS) {
-+    if (pattern.test(normalized)) {
-+      return null;
-+    }
-+  }
-+
-+  return normalized;
-+}
-+
-+function uniqueCommands(commands: string[]): string[] {
-+  const seen = new Set<string>();
-+  const unique: string[] = [];
-+
-+  for (const command of commands) {
-+    const normalized = command.trim();
-+    if (!normalized || seen.has(normalized)) continue;
-+    if (!toRunnableCommand(normalized)) {
-+      throw new Error(`Resolved non-runnable gate command: ${normalized}`);
-+    }
-+    seen.add(normalized);
-+    unique.push(normalized);
-+  }
-+
-+  if (unique.length === 0) {
-+    throw new Error("Resolved non-runnable gate command: no runnable commands found");
-+  }
-+
-+  return unique;
-+}
-+
-+function defaultTestCommand(testCmds: Record<string, string>): string {
-+  const preferred = toRunnableCommand(testCmds.test);
-+  if (preferred) return preferred;
-+
-+  for (const command of Object.values(testCmds)) {
-+    const runnable = toRunnableCommand(command);
-+    if (runnable) return runnable;
-+  }
-+
-+  throw new Error("No runnable test command configured for ticket gates");
-+}
-+
-+export const resolveCategoryTestCommand = (
-+  ticketCategory: string,
-+  testCmds: Record<string, string>,
-+): string => {
-+  const normalizedCategory = normalizeCategory(ticketCategory);
-+
-+  const categoryCommand = normalizedCategory === "core"
-+    ? testCmds.core
-+    : normalizedCategory === "api"
-+      ? testCmds.api
-+      : normalizedCategory === "workflow"
-+        ? testCmds.workflow
-+        : normalizedCategory === "db"
-+          ? testCmds.db
-+          : undefined;
-+
-+  const runnableCategoryCommand = toRunnableCommand(categoryCommand);
-+  if (runnableCategoryCommand) return runnableCategoryCommand;
-+
-+  return defaultTestCommand(testCmds);
-+};
-+
-+export const resolveVerifyCommands = (params: ResolveTicketGateSelectionParams): string[] => {
-+  const { ticketCategory, buildCmds, testCmds, preLandChecks } = params;
-+  const categoryTestCommand = resolveCategoryTestCommand(ticketCategory, testCmds);
-+
-+  const candidateChecks = preLandChecks.length > 0
-+    ? [...preLandChecks]
-+    : [buildCmds.typecheck ?? Object.values(buildCmds)[0] ?? ""];
-+
-+  if (buildCmds.typecheck && !candidateChecks.includes(buildCmds.typecheck)) {
-+    candidateChecks.unshift(buildCmds.typecheck);
-+  }
-+
-+  candidateChecks.push(categoryTestCommand);
-+  const verifyCommands = uniqueCommands(candidateChecks);
-+  if (verifyCommands.length === 0) {
-+    throw new Error("Resolved non-runnable gate command: no verify commands");
-+  }
-+
-+  return verifyCommands;
-+};
-+
-+export const resolveTicketGateSelection = (
-+  params: ResolveTicketGateSelectionParams,
-+): TicketGateSelection => {
-+  const normalizedCategory = normalizeCategory(params.ticketCategory);
-+  const testCommand = resolveCategoryTestCommand(params.ticketCategory, params.testCmds);
-+  const verifyCommands = resolveVerifyCommands(params);
-+  const validationCommands = uniqueCommands([...verifyCommands]);
-+
-+  return {
-+    verifyCommands,
-+    validationCommands,
-+    testSuites: [
-+      {
-+        name: `${normalizedCategory} tests`,
-+        command: testCommand,
-+        description: `Run ${normalizedCategory} tests`,
-+      },
-+    ],
-+  };
-+};
+@@ -527,7 +560,16 @@ export function SuperRalph({
+               {/* Phase 2: Landing (stateful speculative merge queue coordinator) */}
+               <MergeQueue id={mergeQueueId} maxConcurrency={Math.max(1, maxSpeculativeDepth)}>
+                 {customLand || (
+-                  <Task id={`${ticket.id}:land`} output={outputs.land} agent={mergeQueueAgent} retries={taskRetries}>
++                  <Task
++                    id={`${ticket.id}:land`}
++                    output={outputs.land}
++                    agent={mergeQueueAgent}
++                    retries={taskRetries}
++                    needsApproval={requiresApprovalForPhase(
++                      "land",
++                      agentSafetyPolicy,
++                    )}
++                  >
+                     {buildSpeculativeMergeQueuePrompt(mergeQueueRequest)}
+                   </Task>
+                 )}
+diff --git a/src/components/index.ts b/src/components/index.ts
+index f39fc15..1de282d 100644
+--- a/src/components/index.ts
++++ b/src/components/index.ts
+@@ -1,5 +1,10 @@
+ export { SuperRalph } from "./SuperRalph";
+ export type { SuperRalphProps } from "./SuperRalph";
++export {
++  normalizeAgentSafetyPolicy,
++  requiresApprovalForPhase,
++} from "./agent-safety-policy";
++export type { AgentSafetyPolicy } from "./agent-safety-policy";
+ 
+ export { ClarifyingQuestions, clarifyingQuestionsOutputSchema, generateQuestionsOutputSchema } from "./ClarifyingQuestions";
+ export type { ClarifyingQuestionsOutput, ClarifyingQuestionsProps } from "./ClarifyingQuestions";

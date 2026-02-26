@@ -6,6 +6,10 @@ import { join, resolve } from "node:path";
 import { buildFallbackConfig } from "super-ralph/cli/fallback-config";
 import { buildGateCommandConfig } from "super-ralph/gate-config";
 import { resolveTicketGateSelection } from "super-ralph/ticket-gates";
+import {
+  loadResolveAgentSafetyPolicy,
+  withEnv,
+} from "../helpers/generated-workflow";
 
 function readPackageScripts() {
   const packageJsonPath = resolve(process.cwd(), "package.json");
@@ -14,6 +18,14 @@ function readPackageScripts() {
   };
 
   return packageJson.scripts ?? {};
+}
+
+function readGeneratedWorkflowSource() {
+  const workflowPath = resolve(
+    process.cwd(),
+    ".super-ralph/generated/workflow.tsx",
+  );
+  return readFileSync(workflowPath, "utf8");
 }
 
 function assertNoNoopPatterns(commands: string[], context: string) {
@@ -35,7 +47,10 @@ describe("workflow gate policy integration", () => {
     const repoRoot = mkdtempSync(join(tmpdir(), "workflow-gates-polyglot-"));
 
     try {
-      writeFileSync(join(repoRoot, "go.mod"), "module example.com/polyglot\n\ngo 1.22.0\n");
+      writeFileSync(
+        join(repoRoot, "go.mod"),
+        "module example.com/polyglot\n\ngo 1.22.0\n",
+      );
       writeFileSync(
         join(repoRoot, "Cargo.toml"),
         '[package]\nname = "polyglot"\nversion = "0.1.0"\nedition = "2021"\n',
@@ -89,6 +104,10 @@ describe("workflow gate policy integration", () => {
     expect(fallbackConfig.postLandChecks).toEqual(
       Object.values(fallbackConfig.testCmds),
     );
+    expect(fallbackConfig.agentSafetyPolicy).toEqual({
+      riskyModeEnabled: false,
+      approvalRequiredPhases: [],
+    });
   });
 
   test("maps this repo's scripts to runnable gate commands", () => {
@@ -226,5 +245,47 @@ describe("workflow gate policy integration", () => {
       expect(typeof script).toBe("string");
       expect(script?.trim().length).toBeGreaterThan(0);
     }
+  });
+
+  test("generated workflow resolves safety policy behavior from env overrides at runtime", () => {
+    const resolveAgentSafetyPolicy = loadResolveAgentSafetyPolicy(
+      readGeneratedWorkflowSource(),
+    );
+
+    withEnv(
+      {
+        SUPER_RALPH_RISKY_MODE: "1",
+        SUPER_RALPH_APPROVAL_REQUIRED_PHASES: "review-fix",
+      },
+      () => {
+        expect(
+          resolveAgentSafetyPolicy({
+            riskyModeEnabled: true,
+            approvalRequiredPhases: ["land"],
+          }),
+        ).toEqual({
+          riskyModeEnabled: true,
+          approvalRequiredPhases: ["review-fix"],
+        });
+      },
+    );
+
+    withEnv(
+      {
+        SUPER_RALPH_RISKY_MODE: undefined,
+        SUPER_RALPH_APPROVAL_REQUIRED_PHASES: "implement",
+      },
+      () => {
+        expect(
+          resolveAgentSafetyPolicy({
+            riskyModeEnabled: true,
+            approvalRequiredPhases: ["land"],
+          }),
+        ).toEqual({
+          riskyModeEnabled: true,
+          approvalRequiredPhases: ["land"],
+        });
+      },
+    );
   });
 });

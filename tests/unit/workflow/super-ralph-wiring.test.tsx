@@ -3,6 +3,7 @@ import React from "react";
 
 import { SuperRalph } from "super-ralph/components";
 import { ralphOutputSchemas } from "super-ralph";
+import type { AgentSafetyPolicy } from "super-ralph/components";
 
 type RenderOptions = {
   specReviewSeverity?: "none" | "minor" | "major" | "critical";
@@ -11,6 +12,7 @@ type RenderOptions = {
     command: string;
     description: string;
   }>;
+  agentSafetyPolicy?: AgentSafetyPolicy;
 };
 
 function createCtx(
@@ -93,6 +95,31 @@ function findTaskPromptProps(
   throw new Error(`Task not found: ${taskId}`);
 }
 
+function findTaskProps(tree: unknown, taskId: string): Record<string, unknown> {
+  const queue = [...asArray(tree)];
+
+  while (queue.length > 0) {
+    const node = queue.shift();
+    if (Array.isArray(node)) {
+      queue.push(...node);
+      continue;
+    }
+    if (!node || typeof node !== "object") continue;
+
+    const maybeElement = node as { props?: Record<string, unknown> };
+    const props = maybeElement.props;
+    if (!props) continue;
+
+    if (props.id === taskId) {
+      return props;
+    }
+
+    queue.push(...asArray(props.children));
+  }
+
+  throw new Error(`Task not found: ${taskId}`);
+}
+
 function renderSuperRalph(options: RenderOptions = {}) {
   return SuperRalph({
     ctx: createCtx(options.specReviewSeverity),
@@ -126,6 +153,7 @@ function renderSuperRalph(options: RenderOptions = {}) {
     preLandChecks: [],
     postLandChecks: [],
     testSuites: options.testSuites ?? [],
+    agentSafetyPolicy: options.agentSafetyPolicy,
   });
 }
 
@@ -180,5 +208,50 @@ describe("SuperRalph ticket-gate wiring", () => {
       "bun run typecheck",
       "bun run test:core",
     ]);
+  });
+
+  test("sets explicit no-approval defaults on risky phases when risky mode is off", () => {
+    const tree = renderSuperRalph({ specReviewSeverity: "major" });
+    const implementTaskProps = findTaskProps(tree, "CORE-REV-004:implement");
+    const reviewFixTaskProps = findTaskProps(tree, "CORE-REV-004:review-fix");
+    const landTaskProps = findTaskProps(tree, "CORE-REV-004:land");
+
+    expect(implementTaskProps.needsApproval).toBe(false);
+    expect(reviewFixTaskProps.needsApproval).toBe(false);
+    expect(landTaskProps.needsApproval).toBe(false);
+  });
+
+  test("gates risky phases when risky mode is enabled", () => {
+    const tree = renderSuperRalph({
+      specReviewSeverity: "major",
+      agentSafetyPolicy: {
+        riskyModeEnabled: true,
+        approvalRequiredPhases: [],
+      },
+    });
+    const implementTaskProps = findTaskProps(tree, "CORE-REV-004:implement");
+    const reviewFixTaskProps = findTaskProps(tree, "CORE-REV-004:review-fix");
+    const landTaskProps = findTaskProps(tree, "CORE-REV-004:land");
+
+    expect(implementTaskProps.needsApproval).toBe(true);
+    expect(reviewFixTaskProps.needsApproval).toBe(true);
+    expect(landTaskProps.needsApproval).toBe(true);
+  });
+
+  test("only gates allowlisted risky phases", () => {
+    const tree = renderSuperRalph({
+      specReviewSeverity: "major",
+      agentSafetyPolicy: {
+        riskyModeEnabled: true,
+        approvalRequiredPhases: ["land"],
+      },
+    });
+    const implementTaskProps = findTaskProps(tree, "CORE-REV-004:implement");
+    const reviewFixTaskProps = findTaskProps(tree, "CORE-REV-004:review-fix");
+    const landTaskProps = findTaskProps(tree, "CORE-REV-004:land");
+
+    expect(implementTaskProps.needsApproval).toBe(false);
+    expect(reviewFixTaskProps.needsApproval).toBe(false);
+    expect(landTaskProps.needsApproval).toBe(true);
   });
 });

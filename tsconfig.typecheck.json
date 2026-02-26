@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "super-ralph": ["src/types/super-ralph/index.d.ts"],
+      "super-ralph/components": ["src/types/super-ralph/components.d.ts"],
+      "super-ralph/schemas": ["src/types/super-ralph/schemas.d.ts"],
+      "super-ralph/gate-config": ["src/types/super-ralph/gate-config.d.ts"],
+      "super-ralph/ticket-gates": ["src/types/super-ralph/ticket-gates.d.ts"],
+      "super-ralph/cli/fallback-config": [
+        "src/types/super-ralph/cli-fallback-config.d.ts"
+      ]
+    }
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["node_modules"]
+}

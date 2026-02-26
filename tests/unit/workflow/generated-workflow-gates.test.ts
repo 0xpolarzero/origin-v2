@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { buildGateCommandConfig } from "super-ralph/gate-config";
-
-const workflowPath = resolve(process.cwd(), ".super-ralph/generated/workflow.tsx");
+import {
+  loadResolveAgentSafetyPolicy,
+  readGeneratedWorkflowSource,
+  withEnv,
+} from "../../helpers/generated-workflow";
 
 type WorkflowConfig = {
   buildCmds: Record<string, string>;
@@ -13,11 +14,10 @@ type WorkflowConfig = {
   postLandChecks: string[];
 };
 
-function readWorkflowSource(): string {
-  return readFileSync(workflowPath, "utf8");
-}
-
-export function extractConstJson<T = unknown>(source: string, constName: string): T {
+export function extractConstJson<T = unknown>(
+  source: string,
+  constName: string,
+): T {
   const marker = `const ${constName} =`;
   const markerIndex = source.indexOf(marker);
   if (markerIndex < 0) {
@@ -38,8 +38,15 @@ export function extractConstJson<T = unknown>(source: string, constName: string)
   throw new Error(`Could not parse const value as JSON: ${constName}`);
 }
 
-export function assertNoPlaceholderCommands(commands: string[], context: string): void {
-  const blockedPatterns = [/No .* configured yet/i, /\|\|\s*echo\b/i, /^echo\b/i];
+export function assertNoPlaceholderCommands(
+  commands: string[],
+  context: string,
+): void {
+  const blockedPatterns = [
+    /No .* configured yet/i,
+    /\|\|\s*echo\b/i,
+    /^echo\b/i,
+  ];
 
   for (const command of commands) {
     for (const pattern of blockedPatterns) {
@@ -53,7 +60,7 @@ export function assertNoPlaceholderCommands(commands: string[], context: string)
 
 describe("generated workflow gates", () => {
   test("workflow artifact contains script-derived gate command maps with no placeholders", () => {
-    const source = readWorkflowSource();
+    const source = readGeneratedWorkflowSource();
     const packageScripts = extractConstJson<Record<string, string>>(
       source,
       "PACKAGE_SCRIPTS",
@@ -67,7 +74,9 @@ describe("generated workflow gates", () => {
     expect(packageScripts.typecheck?.trim().length).toBeGreaterThan(0);
 
     const expectedGateConfig = buildGateCommandConfig("bun", packageScripts);
-    expect(fallbackConfig.buildCmds).toMatchObject(expectedGateConfig.buildCmds);
+    expect(fallbackConfig.buildCmds).toMatchObject(
+      expectedGateConfig.buildCmds,
+    );
     expect(fallbackConfig.testCmds).toMatchObject(expectedGateConfig.testCmds);
 
     const buildCommands = Object.values(fallbackConfig.buildCmds);
@@ -90,17 +99,19 @@ describe("generated workflow gates", () => {
   });
 
   test("workflow artifact wires runtime command-map merge into SuperRalph and Monitor", () => {
-    const source = readWorkflowSource();
+    const source = readGeneratedWorkflowSource();
 
     expect(source).toContain("function mergeCommandMap(");
     expect(source).toContain("function resolveRuntimeConfig(ctx: any)");
-    expect(source).toContain(
-      "const buildCmds = mergeCommandMap(FALLBACK_CONFIG.buildCmds, interpreted.buildCmds);",
+    expect(source).toMatch(
+      /const\s+buildCmds\s*=\s*mergeCommandMap\(\s*FALLBACK_CONFIG\.buildCmds,\s*interpreted\.buildCmds\s*\);/,
+    );
+    expect(source).toMatch(
+      /const\s+testCmds\s*=\s*mergeCommandMap\(\s*FALLBACK_CONFIG\.testCmds,\s*interpreted\.testCmds\s*\);/,
     );
     expect(source).toContain(
-      "const testCmds = mergeCommandMap(FALLBACK_CONFIG.testCmds, interpreted.testCmds);",
+      "const runtimeConfig = resolveRuntimeConfig(ctx);",
     );
-    expect(source).toContain("const runtimeConfig = resolveRuntimeConfig(ctx);");
     expect(source).toContain("{...runtimeConfig}");
     expect(source).toContain("config={runtimeConfig}");
     expect(source).not.toContain(
@@ -108,6 +119,76 @@ describe("generated workflow gates", () => {
     );
     expect(source).not.toContain(
       'config={(ctx.outputMaybe("interpret-config", outputs.interpret_config) as any) || FALLBACK_CONFIG}',
+    );
+  });
+
+  test("workflow artifact bans hardcoded permissive agent flags and wires safety policy", () => {
+    const source = readGeneratedWorkflowSource();
+
+    expect(source).not.toContain("dangerouslySkipPermissions: true");
+    expect(source).not.toContain("yolo: true");
+    expect(source).toContain(
+      "const agentSafetyPolicy = resolveAgentSafetyPolicy(runtimeConfig.agentSafetyPolicy);",
+    );
+    expect(source).toContain("agentSafetyPolicy={agentSafetyPolicy}");
+  });
+
+  test("workflow artifact resolves policy behavior with env precedence and fail-closed normalization", () => {
+    const source = readGeneratedWorkflowSource();
+    const resolveAgentSafetyPolicy = loadResolveAgentSafetyPolicy(source);
+
+    withEnv(
+      {
+        SUPER_RALPH_RISKY_MODE: undefined,
+        SUPER_RALPH_APPROVAL_REQUIRED_PHASES: undefined,
+      },
+      () => {
+        expect(resolveAgentSafetyPolicy(undefined)).toEqual({
+          riskyModeEnabled: false,
+          approvalRequiredPhases: [],
+        });
+        expect(
+          resolveAgentSafetyPolicy({
+            riskyModeEnabled: true,
+            approvalRequiredPhases: ["land", "unknown", " LAND "],
+          }),
+        ).toEqual({
+          riskyModeEnabled: true,
+          approvalRequiredPhases: ["land"],
+        });
+      },
+    );
+
+    withEnv(
+      {
+        SUPER_RALPH_RISKY_MODE: "1",
+        SUPER_RALPH_APPROVAL_REQUIRED_PHASES: undefined,
+      },
+      () => {
+        expect(resolveAgentSafetyPolicy(undefined)).toEqual({
+          riskyModeEnabled: true,
+          approvalRequiredPhases: ["implement", "review-fix", "land"],
+        });
+      },
+    );
+
+    withEnv(
+      {
+        SUPER_RALPH_RISKY_MODE: "1",
+        SUPER_RALPH_APPROVAL_REQUIRED_PHASES:
+          " land,unknown,IMPLEMENT,land ",
+      },
+      () => {
+        expect(
+          resolveAgentSafetyPolicy({
+            riskyModeEnabled: true,
+            approvalRequiredPhases: ["review-fix"],
+          }),
+        ).toEqual({
+          riskyModeEnabled: true,
+          approvalRequiredPhases: ["land", "implement"],
+        });
+      },
     );
   });
 });
