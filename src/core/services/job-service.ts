@@ -7,6 +7,7 @@ import { CoreRepository } from "../repositories/core-repository";
 
 export class JobServiceError extends Data.TaggedError("JobServiceError")<{
   message: string;
+  code?: "not_found" | "invalid_request";
 }> {}
 
 export interface RecordJobRunInput {
@@ -134,7 +135,10 @@ const loadJob = (
 
     if (!job) {
       return yield* Effect.fail(
-        new JobServiceError({ message: `job ${jobId} was not found` }),
+        new JobServiceError({
+          message: `job ${jobId} was not found`,
+          code: "not_found",
+        }),
       );
     }
 
@@ -283,6 +287,7 @@ export const listJobRunHistory = (
       return yield* Effect.fail(
         new JobServiceError({
           message: "limit must be a positive integer",
+          code: "invalid_request",
         }),
       );
     }

@@ -92,7 +92,7 @@ const SIGNAL_CONVERSION_TARGETS = [
 const OUTBOUND_ACTION_TYPES = ["event_sync", "outbound_draft"] as const;
 const JOB_RUN_OUTCOMES = ["succeeded", "failed"] as const;
 const ISO_8601_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})?$/;
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 const valid = <Input>(value: Input): RouteValidation<Input> => ({
   ok: true,
@@ -388,6 +388,13 @@ const parseEntityReferencesField = (
       return invalid(route, `${field}[${index}].entityId must be a string`);
     }
 
+    if (entityIdValue.trim().length === 0) {
+      return invalid(
+        route,
+        `${field}[${index}].entityId must be a non-empty string`,
+      );
+    }
+
     parsed.push({
       entityType,
       entityId: entityIdValue,
@@ -411,7 +418,7 @@ const validateCaptureEntryRequest: RouteValidator<CaptureEntryRequest> = (
     return entryId;
   }
 
-  const content = parseStringField(route, sourceResult.value, "content");
+  const content = parseNonEmptyStringField(route, sourceResult.value, "content");
   if (!content.ok) {
     return content;
   }
@@ -615,12 +622,12 @@ const validateIngestSignalRequest: RouteValidator<IngestSignalRequest> = (
     return signalId;
   }
 
-  const source = parseStringField(route, sourceResult.value, "source");
+  const source = parseNonEmptyStringField(route, sourceResult.value, "source");
   if (!source.ok) {
     return source;
   }
 
-  const payload = parseStringField(route, sourceResult.value, "payload");
+  const payload = parseNonEmptyStringField(route, sourceResult.value, "payload");
   if (!payload.ok) {
     return payload;
   }
@@ -977,7 +984,7 @@ const validateCreateJobRequest: RouteValidator<CreateJobRequest> = (input) => {
     return jobId;
   }
 
-  const name = parseStringField(route, sourceResult.value, "name");
+  const name = parseNonEmptyStringField(route, sourceResult.value, "name");
   if (!name.ok) {
     return name;
   }
@@ -1009,7 +1016,7 @@ const validateRecordJobRunRequest: RouteValidator<RecordJobRunRequest> = (
     return sourceResult;
   }
 
-  const jobId = parseStringField(route, sourceResult.value, "jobId");
+  const jobId = parseNonEmptyStringField(route, sourceResult.value, "jobId");
   if (!jobId.ok) {
     return jobId;
   }
@@ -1061,7 +1068,7 @@ const validateInspectJobRunRequest: RouteValidator<InspectJobRunRequest> = (
     return sourceResult;
   }
 
-  const jobId = parseStringField(route, sourceResult.value, "jobId");
+  const jobId = parseNonEmptyStringField(route, sourceResult.value, "jobId");
   if (!jobId.ok) {
     return jobId;
   }
@@ -1114,7 +1121,7 @@ const validateRetryJobRequest: RouteValidator<RetryJobRequest> = (input) => {
     return sourceResult;
   }
 
-  const jobId = parseStringField(route, sourceResult.value, "jobId");
+  const jobId = parseNonEmptyStringField(route, sourceResult.value, "jobId");
   if (!jobId.ok) {
     return jobId;
   }
@@ -1145,7 +1152,7 @@ const validateCreateWorkflowCheckpointRequest: RouteValidator<
     return sourceResult;
   }
 
-  const checkpointId = parseStringField(
+  const checkpointId = parseNonEmptyStringField(
     route,
     sourceResult.value,
     "checkpointId",
@@ -1217,7 +1224,7 @@ const validateKeepCheckpointRequest: RouteValidator<KeepCheckpointRequest> = (
     return sourceResult;
   }
 
-  const checkpointId = parseStringField(
+  const checkpointId = parseNonEmptyStringField(
     route,
     sourceResult.value,
     "checkpointId",
@@ -1252,7 +1259,7 @@ const validateRecoverCheckpointRequest: RouteValidator<
     return sourceResult;
   }
 
-  const checkpointId = parseStringField(
+  const checkpointId = parseNonEmptyStringField(
     route,
     sourceResult.value,
     "checkpointId",

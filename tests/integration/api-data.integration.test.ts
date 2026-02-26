@@ -151,6 +151,81 @@ describe("API and Data integration scaffold", () => {
     expect(persistedEvent?.syncState).toBe("synced");
   });
 
+  test("duplicate event approval conflicts without extra execution or terminal transitions", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const event = await Effect.runPromise(
+      createEvent({
+        id: "event-api-duplicate-approval-1",
+        title: "Duplicate approval event",
+        startAt: new Date("2026-02-24T12:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("event", event.id, event));
+
+    let executeCount = 0;
+    const platform = await Effect.runPromise(
+      buildCorePlatform({
+        repository,
+        outboundActionPort: {
+          execute: (action) =>
+            Effect.sync(() => {
+              executeCount += 1;
+              return { executionId: `exec-${action.entityId}` };
+            }),
+        },
+      }),
+    );
+
+    await Effect.runPromise(
+      platform.requestEventSync(
+        event.id,
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T09:15:00.000Z"),
+      ),
+    );
+    await Effect.runPromise(
+      platform.approveOutboundAction({
+        actionType: "event_sync",
+        entityType: "event",
+        entityId: event.id,
+        approved: true,
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T09:16:00.000Z"),
+      }),
+    );
+
+    const duplicateApproval = await Effect.runPromise(
+      Effect.either(
+        platform.approveOutboundAction({
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: event.id,
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T09:17:00.000Z"),
+        }),
+      ),
+    );
+    const auditTrail = await Effect.runPromise(
+      platform.listAuditTrail({
+        entityType: "event",
+        entityId: event.id,
+      }),
+    );
+
+    expect(Either.isLeft(duplicateApproval)).toBe(true);
+    if (Either.isLeft(duplicateApproval)) {
+      expect(duplicateApproval.left).toMatchObject({
+        _tag: "ApprovalServiceError",
+        code: "conflict",
+      });
+    }
+    expect(executeCount).toBe(1);
+    expect(
+      auditTrail.filter((transition) => transition.toState === "synced"),
+    ).toHaveLength(1);
+  });
+
   test("signal ingestion -> triage -> outbound draft request -> explicit approval executes once", async () => {
     let executeCount = 0;
     const platform = await Effect.runPromise(
@@ -263,6 +338,96 @@ describe("API and Data integration scaffold", () => {
       "executing",
       "executed",
     ]);
+  });
+
+  test("duplicate outbound-draft approval conflicts without extra execution or transitions", async () => {
+    let executeCount = 0;
+    const platform = await Effect.runPromise(
+      buildCorePlatform({
+        outboundActionPort: {
+          execute: (action) =>
+            Effect.sync(() => {
+              executeCount += 1;
+              return { executionId: `exec-${action.entityId}` };
+            }),
+        },
+      }),
+    );
+
+    await Effect.runPromise(
+      platform.ingestSignal({
+        signalId: "signal-api-duplicate-draft-1",
+        source: "chat",
+        payload: "Send duplicate outbound draft approval",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T09:50:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      platform.triageSignal(
+        "signal-api-duplicate-draft-1",
+        "requires_outbound",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T09:51:00.000Z"),
+      ),
+    );
+    const converted = await Effect.runPromise(
+      platform.convertSignal({
+        signalId: "signal-api-duplicate-draft-1",
+        targetType: "outbound_draft",
+        targetId: "outbound-draft-api-duplicate-1",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T09:52:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      platform.requestOutboundDraftExecution(
+        converted.entityId,
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T09:53:00.000Z"),
+      ),
+    );
+    await Effect.runPromise(
+      platform.approveOutboundAction({
+        actionType: "outbound_draft",
+        entityType: "outbound_draft",
+        entityId: converted.entityId,
+        approved: true,
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T09:54:00.000Z"),
+      }),
+    );
+
+    const duplicateApproval = await Effect.runPromise(
+      Effect.either(
+        platform.approveOutboundAction({
+          actionType: "outbound_draft",
+          entityType: "outbound_draft",
+          entityId: converted.entityId,
+          approved: true,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T09:55:00.000Z"),
+        }),
+      ),
+    );
+    const draftAuditTrail = await Effect.runPromise(
+      platform.listAuditTrail({
+        entityType: "outbound_draft",
+        entityId: converted.entityId,
+      }),
+    );
+
+    expect(Either.isLeft(duplicateApproval)).toBe(true);
+    if (Either.isLeft(duplicateApproval)) {
+      expect(duplicateApproval.left).toMatchObject({
+        _tag: "ApprovalServiceError",
+        code: "conflict",
+      });
+    }
+    expect(executeCount).toBe(1);
+    expect(
+      draftAuditTrail.filter((transition) => transition.toState === "executed"),
+    ).toHaveLength(1);
   });
 
   test("repeated approval-request operations do not duplicate pending transitions", async () => {

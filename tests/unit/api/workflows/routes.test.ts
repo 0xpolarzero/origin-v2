@@ -415,6 +415,89 @@ describe("api/workflows/routes", () => {
     }
   });
 
+  test("capture.entry rejects whitespace-only content", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const captureRoute = byKey.get("capture.entry");
+
+    expect(captureRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        captureRoute!.handle({
+          entryId: "entry-route-1",
+          content: "   ",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "capture.entry",
+      });
+      expect(result.left.message).toContain("content");
+    }
+  });
+
+  test("signal.ingest rejects whitespace-only source", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const ingestRoute = byKey.get("signal.ingest");
+
+    expect(ingestRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        ingestRoute!.handle({
+          signalId: "signal-route-1",
+          source: "   ",
+          payload: "payload",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "signal.ingest",
+      });
+      expect(result.left.message).toContain("source");
+    }
+  });
+
+  test("signal.ingest rejects whitespace-only payload", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const ingestRoute = byKey.get("signal.ingest");
+
+    expect(ingestRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        ingestRoute!.handle({
+          signalId: "signal-route-1",
+          source: "email",
+          payload: "   ",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "signal.ingest",
+      });
+      expect(result.left.message).toContain("payload");
+    }
+  });
+
   test("approval.approveOutboundAction rejects whitespace-only entityId", async () => {
     const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
     const byKey = new Map(routes.map((route) => [route.key, route]));
@@ -556,6 +639,142 @@ describe("api/workflows/routes", () => {
         route: "checkpoint.create",
       });
       expect(result.left.message).toContain("rollbackTarget");
+    }
+  });
+
+  test("checkpoint.create rejects blank snapshotEntityRefs entityId", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const checkpointCreateRoute = byKey.get("checkpoint.create");
+
+    expect(checkpointCreateRoute).toBeDefined();
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        checkpointCreateRoute!.handle({
+          checkpointId: "checkpoint-route-1",
+          name: "Before conversion",
+          snapshotEntityRefs: [{ entityType: "task", entityId: "   " }],
+          auditCursor: 1,
+          rollbackTarget: "audit-1",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "checkpoint.create",
+      });
+      expect(result.left.message).toContain("snapshotEntityRefs[0].entityId");
+    }
+  });
+
+  test("job.create rejects whitespace-only name", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const createRoute = byKey.get("job.create");
+
+    expect(createRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        createRoute!.handle({
+          jobId: "job-route-1",
+          name: "   ",
+          actor: { id: "system-1", kind: "system" },
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "job.create",
+      });
+      expect(result.left.message).toContain("name");
+    }
+  });
+
+  test("job.retry rejects whitespace-only jobId", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const retryRoute = byKey.get("job.retry");
+
+    expect(retryRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        retryRoute!.handle({
+          jobId: "   ",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "job.retry",
+      });
+      expect(result.left.message).toContain("jobId");
+    }
+  });
+
+  test("checkpoint.keep rejects whitespace-only checkpointId", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const keepRoute = byKey.get("checkpoint.keep");
+
+    expect(keepRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        keepRoute!.handle({
+          checkpointId: "   ",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "checkpoint.keep",
+      });
+      expect(result.left.message).toContain("checkpointId");
+    }
+  });
+
+  test("checkpoint.recover rejects whitespace-only checkpointId", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const recoverRoute = byKey.get("checkpoint.recover");
+
+    expect(recoverRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        recoverRoute!.handle({
+          checkpointId: "   ",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "checkpoint.recover",
+      });
+      expect(result.left.message).toContain("checkpointId");
     }
   });
 
@@ -716,7 +935,7 @@ describe("api/workflows/routes", () => {
     );
   });
 
-  test("route handlers accept broader ISO-8601 variants for timestamp fields", async () => {
+  test("route handlers reject timezone-less ISO timestamps in payload date fields", async () => {
     const calls: Array<{ route: WorkflowRouteKey; input: unknown }> = [];
     const routes = makeWorkflowRoutes(
       makeApiSpy((route, input) => {
@@ -739,22 +958,29 @@ describe("api/workflows/routes", () => {
       }),
     );
 
-    await Effect.runPromise(
-      historyRoute!.handle({
-        jobId: "job-route-iso-variant-1",
-        beforeAt: "2026-02-23T10:00:00",
-        limit: 5,
-      }),
+    const timezoneLessTimestamp = await Effect.runPromise(
+      Effect.either(
+        historyRoute!.handle({
+          jobId: "job-route-iso-variant-1",
+          beforeAt: "2026-02-23T10:00:00",
+          limit: 5,
+        }),
+      ),
     );
 
     const captureCall = calls.find((entry) => entry.route === "capture.entry");
     const historyCall = calls.find((entry) => entry.route === "job.listHistory");
 
     expect(captureCall).toBeDefined();
-    expect(historyCall).toBeDefined();
     expect((captureCall!.input as { at: Date }).at).toBeInstanceOf(Date);
-    expect((historyCall!.input as { beforeAt: Date }).beforeAt).toBeInstanceOf(
-      Date,
-    );
+    expect(historyCall).toBeUndefined();
+    expect(Either.isLeft(timezoneLessTimestamp)).toBe(true);
+    if (Either.isLeft(timezoneLessTimestamp)) {
+      expect(timezoneLessTimestamp.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "job.listHistory",
+      });
+      expect(timezoneLessTimestamp.left.message).toContain("beforeAt");
+    }
   });
 });
