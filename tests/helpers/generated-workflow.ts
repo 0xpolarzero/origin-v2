@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import * as ts from "typescript";
 
 import {
   normalizeAgentSafetyPolicy,
@@ -11,36 +12,39 @@ const generatedWorkflowPath = resolve(
   ".super-ralph/generated/workflow.tsx",
 );
 
-const resolverFunctionSignature = "function resolveAgentSafetyPolicy(";
-
 export function readGeneratedWorkflowSource(): string {
   return readFileSync(generatedWorkflowPath, "utf8");
 }
 
-function extractFunctionSource(source: string, signature: string): string {
-  const signatureIndex = source.indexOf(signature);
-  if (signatureIndex < 0) {
-    throw new Error(`Missing function signature: ${signature}`);
+function extractNamedFunctionSource(source: string, name: string): string {
+  const sourceFile = ts.createSourceFile(
+    "generated-workflow.tsx",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+
+  const declaration = sourceFile.statements.find(
+    (statement): statement is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(statement) && statement.name?.text === name,
+  );
+
+  if (!declaration) {
+    throw new Error(`Missing function declaration: ${name}`);
   }
 
-  const bodyStart = source.indexOf("{", signatureIndex);
-  if (bodyStart < 0) {
-    throw new Error(`Missing function body for: ${signature}`);
-  }
+  const start = declaration.getStart(sourceFile);
+  return source.slice(start, declaration.end);
+}
 
-  let depth = 0;
-  for (let index = bodyStart; index < source.length; index += 1) {
-    const char = source[index];
-    if (char === "{") depth += 1;
-    if (char === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return source.slice(signatureIndex, index + 1);
-      }
-    }
-  }
-
-  throw new Error(`Unterminated function body for: ${signature}`);
+function transpileToCommonJs(source: string): string {
+  return ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+    },
+  }).outputText;
 }
 
 function toRunnableResolver(functionSource: string): string {
@@ -63,13 +67,17 @@ function toRunnableResolver(functionSource: string): string {
 export function loadResolveAgentSafetyPolicy(
   source: string = readGeneratedWorkflowSource(),
 ): (input: unknown) => AgentSafetyPolicy {
-  const typedResolver = extractFunctionSource(source, resolverFunctionSignature);
+  const typedResolver = extractNamedFunctionSource(
+    source,
+    "resolveAgentSafetyPolicy",
+  );
   const runnableResolver = toRunnableResolver(typedResolver);
+  const compiledResolver = transpileToCommonJs(runnableResolver);
 
   const resolvePolicy = new Function(
     "normalizeAgentSafetyPolicy",
-    `${runnableResolver}
-return resolveAgentSafetyPolicy;`,
+    `${compiledResolver}
+	return resolveAgentSafetyPolicy;`,
   )(normalizeAgentSafetyPolicy) as unknown;
 
   if (typeof resolvePolicy !== "function") {
@@ -77,6 +85,96 @@ return resolveAgentSafetyPolicy;`,
   }
 
   return resolvePolicy as (input: unknown) => AgentSafetyPolicy;
+}
+
+function extractConstJson<T = unknown>(source: string, constName: string): T {
+  const marker = `const ${constName} =`;
+  const markerIndex = source.indexOf(marker);
+  if (markerIndex < 0) {
+    throw new Error(`Missing const declaration: ${constName}`);
+  }
+
+  const valueStart = source.indexOf("=", markerIndex) + 1;
+  let semicolonIndex = source.indexOf(";", valueStart);
+  while (semicolonIndex >= 0) {
+    const candidate = source.slice(valueStart, semicolonIndex).trim();
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      semicolonIndex = source.indexOf(";", semicolonIndex + 1);
+    }
+  }
+
+  throw new Error(`Could not parse const value as JSON: ${constName}`);
+}
+
+export type RuntimeConfigHelpers = {
+  mergeCommandMap: (
+    fallback: Record<string, string>,
+    candidate: unknown,
+  ) => Record<string, string>;
+  resolveRuntimeConfig: (ctx: {
+    outputMaybe: (schema: string, outputKey: unknown) => unknown;
+  }) => {
+    buildCmds: Record<string, string>;
+    testCmds: Record<string, string>;
+    preLandChecks: string[];
+    postLandChecks: string[];
+  };
+  fallbackConfig: {
+    buildCmds: Record<string, string>;
+    testCmds: Record<string, string>;
+    preLandChecks: string[];
+    postLandChecks: string[];
+  };
+};
+
+export function loadRuntimeConfigHelpers(
+  source: string = readGeneratedWorkflowSource(),
+): RuntimeConfigHelpers {
+  const mergeSource = extractNamedFunctionSource(source, "mergeCommandMap");
+  const resolveSource = extractNamedFunctionSource(source, "resolveRuntimeConfig");
+  const fallbackConfig = extractConstJson<RuntimeConfigHelpers["fallbackConfig"]>(
+    source,
+    "FALLBACK_CONFIG",
+  );
+
+  const executableSource = transpileToCommonJs(
+    `
+${mergeSource}
+
+${resolveSource}
+
+module.exports = { mergeCommandMap, resolveRuntimeConfig };
+`,
+  );
+
+  const module = { exports: {} as Record<string, unknown> };
+  const outputs = { interpret_config: "interpret-config" };
+  new Function(
+    "module",
+    "exports",
+    "FALLBACK_CONFIG",
+    "outputs",
+    executableSource,
+  )(module, module.exports, fallbackConfig, outputs);
+
+  const mergeCommandMap = module.exports.mergeCommandMap;
+  const resolveRuntimeConfig = module.exports.resolveRuntimeConfig;
+  if (
+    typeof mergeCommandMap !== "function" ||
+    typeof resolveRuntimeConfig !== "function"
+  ) {
+    throw new Error("Failed to load generated runtime config helpers");
+  }
+
+  return {
+    mergeCommandMap:
+      mergeCommandMap as RuntimeConfigHelpers["mergeCommandMap"],
+    resolveRuntimeConfig:
+      resolveRuntimeConfig as RuntimeConfigHelpers["resolveRuntimeConfig"],
+    fallbackConfig,
+  };
 }
 
 export function withEnv(
