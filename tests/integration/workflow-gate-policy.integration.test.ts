@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 import { buildFallbackConfig } from "super-ralph/cli/fallback-config";
 import { buildGateCommandConfig } from "super-ralph/gate-config";
@@ -15,7 +16,58 @@ function readPackageScripts() {
   return packageJson.scripts ?? {};
 }
 
+function assertNoNoopPatterns(commands: string[], context: string) {
+  const noOpPatterns = [/No .* configured yet/i, /\|\|\s*echo\b/i];
+
+  for (const command of commands) {
+    for (const pattern of noOpPatterns) {
+      expect(command).not.toMatch(pattern);
+    }
+    expect(command.startsWith("bun run ")).toBe(true);
+  }
+
+  expect(commands.length).toBeGreaterThan(0);
+  expect(context.length).toBeGreaterThan(0);
+}
+
 describe("workflow gate policy integration", () => {
+  test("CLI fallback config keeps Go/Rust gates runnable when node scripts are missing", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "workflow-gates-polyglot-"));
+
+    try {
+      writeFileSync(join(repoRoot, "go.mod"), "module example.com/polyglot\n\ngo 1.22.0\n");
+      writeFileSync(
+        join(repoRoot, "Cargo.toml"),
+        '[package]\nname = "polyglot"\nversion = "0.1.0"\nedition = "2021"\n',
+      );
+
+      const fallbackConfig = buildFallbackConfig(
+        repoRoot,
+        "docs/plans/CORE-REV-004.md",
+        {},
+      );
+
+      expect(fallbackConfig.buildCmds).toEqual({
+        go: "go build ./...",
+        rust: "cargo build",
+      });
+      expect(fallbackConfig.testCmds).toEqual({
+        go: "go test ./...",
+        rust: "cargo test",
+      });
+      expect(fallbackConfig.preLandChecks).toEqual([
+        "go build ./...",
+        "cargo build",
+      ]);
+      expect(fallbackConfig.postLandChecks).toEqual([
+        "go test ./...",
+        "cargo test",
+      ]);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
   test("CLI fallback config uses deterministic gate command wiring for this repo", () => {
     const scripts = readPackageScripts();
     const fallbackConfig = buildFallbackConfig(
@@ -131,5 +183,48 @@ describe("workflow gate policy integration", () => {
 
     expect(workflowScript).toBeDefined();
     expect(workflowScript).toContain("workflow-surfaces.integration.test.ts");
+  });
+
+  test("resolved gate commands never include placeholder/no-op patterns", () => {
+    const scripts = readPackageScripts();
+    const config = buildGateCommandConfig("bun", scripts);
+    const categories = ["core", "api", "workflow", "db", "unknown"];
+
+    for (const category of categories) {
+      const selection = resolveTicketGateSelection({
+        ticketCategory: category,
+        buildCmds: config.buildCmds,
+        testCmds: config.testCmds,
+        preLandChecks: config.preLandChecks,
+      });
+
+      assertNoNoopPatterns(selection.verifyCommands, `${category}:verify`);
+      assertNoNoopPatterns(
+        selection.validationCommands,
+        `${category}:validation`,
+      );
+      assertNoNoopPatterns(
+        selection.testSuites.map((suite) => suite.command),
+        `${category}:suite`,
+      );
+    }
+  });
+
+  test("package scripts required by workflow gates remain defined and non-empty", () => {
+    const scripts = readPackageScripts();
+    const requiredScriptNames = [
+      "test",
+      "typecheck",
+      "test:core",
+      "test:integration:api",
+      "test:integration:workflow",
+      "test:integration:db",
+    ];
+
+    for (const scriptName of requiredScriptNames) {
+      const script = scripts[scriptName];
+      expect(typeof script).toBe("string");
+      expect(script?.trim().length).toBeGreaterThan(0);
+    }
   });
 });

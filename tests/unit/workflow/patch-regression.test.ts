@@ -42,12 +42,19 @@ describe("super-ralph patch regression", () => {
     const cliSection = sections.get("src/cli/index.ts") ?? "";
     const fallbackSection = sections.get("src/cli/fallback-config.ts") ?? "";
 
+    expect(cliSection).not.toContain("old mode 100644");
+    expect(cliSection).not.toContain("new mode 100755");
     expect(cliSection).toContain('import { buildFallbackConfig } from "./fallback-config"');
     expect(cliSection).toContain("-function buildFallbackConfig(");
     expect(cliSection).toContain("-function detectScriptRunner(");
     expect(fallbackSection).toContain("buildGateCommandConfig");
     expect(fallbackSection).toContain("preLandChecks: Object.values(buildCmds)");
     expect(fallbackSection).toContain("postLandChecks: Object.values(testCmds)");
+    expect(cliSection).toContain("function mergeCommandMap(");
+    expect(cliSection).toContain("function resolveRuntimeConfig(ctx: any)");
+    expect(cliSection).toContain("const runtimeConfig = resolveRuntimeConfig(ctx);");
+    expect(cliSection).toContain("+            {...runtimeConfig}");
+    expect(cliSection).toContain("+            config={runtimeConfig}");
   });
 
   test("component wiring hunks preserve ticket-scoped gate contracts", () => {
@@ -67,5 +74,18 @@ describe("super-ralph patch regression", () => {
     expect(interpretSection).toContain("testCmds: z.object({}).catchall(z.string())");
     expect(interpretSection).toContain("preLandChecks: z.array(z.string()).min(1)");
     expect(interpretSection).toContain("postLandChecks: z.array(z.string()).min(1)");
+  });
+
+  test("ticket gate patch hunks enforce strict no-placeholder behavior", () => {
+    const patch = readFileSync(patchPath, "utf8");
+    const sections = parsePatchSections(patch);
+    const ticketGatesSection = sections.get("src/components/ticket-gates.ts") ?? "";
+
+    expect(ticketGatesSection).not.toContain(
+      'return "echo \\"No test command configured yet\\"";',
+    );
+    expect(ticketGatesSection).toContain("throw new Error(");
+    expect(ticketGatesSection).toContain("resolveVerifyCommands");
+    expect(ticketGatesSection).toContain("resolveTicketGateSelection");
   });
 });

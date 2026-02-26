@@ -16,8 +16,6 @@ index 2368a78..093cbea 100644
    "files": [
      "src/",
 diff --git a/src/cli/index.ts b/src/cli/index.ts
-old mode 100644
-new mode 100755
 index 633e857..c60186d
 --- a/src/cli/index.ts
 +++ b/src/cli/index.ts
@@ -483,7 +481,7 @@ new file mode 100644
 index 0000000..965dccd
 --- /dev/null
 +++ b/src/cli/fallback-config.ts
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,102 @@
 +import { existsSync } from "node:fs";
 +import { basename, join } from "node:path";
 +
@@ -491,6 +489,11 @@ index 0000000..965dccd
 +  buildGateCommandConfig,
 +  type ScriptRunner,
 +} from "./gate-config";
++
++function hasScript(packageScripts: Record<string, string>, scriptName: string): boolean {
++  const command = packageScripts[scriptName];
++  return typeof command === "string" && command.trim().length > 0;
++}
 +
 +export function detectScriptRunner(repoRoot: string): ScriptRunner {
 +  if (existsSync(join(repoRoot, "bun.lock")) || existsSync(join(repoRoot, "bun.lockb"))) return "bun";
@@ -512,9 +515,15 @@ index 0000000..965dccd
 +  packageScripts: Record<string, string>,
 +) {
 +  const runner = detectScriptRunner(repoRoot);
-+  const gateConfig = buildGateCommandConfig(runner, packageScripts);
-+  const buildCmds: Record<string, string> = { ...gateConfig.buildCmds };
-+  const testCmds: Record<string, string> = { ...gateConfig.testCmds };
++  const hasNodeGateScripts = hasScript(packageScripts, "test") && hasScript(packageScripts, "typecheck");
++  const buildCmds: Record<string, string> = {};
++  const testCmds: Record<string, string> = {};
++
++  if (hasNodeGateScripts) {
++    const gateConfig = buildGateCommandConfig(runner, packageScripts);
++    Object.assign(buildCmds, gateConfig.buildCmds);
++    Object.assign(testCmds, gateConfig.testCmds);
++  }
 +
 +  if (existsSync(join(repoRoot, "go.mod"))) {
 +    buildCmds.go = buildCmds.go ?? "go build ./...";
@@ -524,6 +533,12 @@ index 0000000..965dccd
 +  if (existsSync(join(repoRoot, "Cargo.toml"))) {
 +    buildCmds.rust = buildCmds.rust ?? "cargo build";
 +    testCmds.rust = testCmds.rust ?? "cargo test";
++  }
++
++  if (Object.keys(buildCmds).length === 0 || Object.keys(testCmds).length === 0) {
++    throw new Error(
++      "Unable to derive runnable gate commands. Configure package.json test/typecheck scripts or provide Go/Rust project files.",
++    );
 +  }
 +
 +  const specsPathCandidates = [
@@ -571,10 +586,10 @@ index 0000000..965dccd
 +}
 diff --git a/src/components/ticket-gates.ts b/src/components/ticket-gates.ts
 new file mode 100644
-index 0000000..eb92c44
+index 0000000..9388c2c
 --- /dev/null
 +++ b/src/components/ticket-gates.ts
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,140 @@
 +export type ResolveTicketGateSelectionParams = {
 +  ticketCategory: string;
 +  buildCmds: Record<string, string>;
@@ -592,6 +607,8 @@ index 0000000..eb92c44
 +  }>;
 +};
 +
++const NON_RUNNABLE_GATE_PATTERNS = [/No .* configured yet/i, /\|\|\s*echo\b/i, /^echo\b/i];
++
 +function normalizeCategory(ticketCategory: string): string {
 +  const normalized = ticketCategory.trim().toLowerCase();
 +  if (!normalized) return "default";
@@ -603,6 +620,20 @@ index 0000000..eb92c44
 +  return normalized;
 +}
 +
++function toRunnableCommand(command: string | undefined): string | null {
++  if (typeof command !== "string") return null;
++  const normalized = command.trim();
++  if (!normalized) return null;
++
++  for (const pattern of NON_RUNNABLE_GATE_PATTERNS) {
++    if (pattern.test(normalized)) {
++      return null;
++    }
++  }
++
++  return normalized;
++}
++
 +function uniqueCommands(commands: string[]): string[] {
 +  const seen = new Set<string>();
 +  const unique: string[] = [];
@@ -610,18 +641,30 @@ index 0000000..eb92c44
 +  for (const command of commands) {
 +    const normalized = command.trim();
 +    if (!normalized || seen.has(normalized)) continue;
++    if (!toRunnableCommand(normalized)) {
++      throw new Error(`Resolved non-runnable gate command: ${normalized}`);
++    }
 +    seen.add(normalized);
 +    unique.push(normalized);
++  }
++
++  if (unique.length === 0) {
++    throw new Error("Resolved non-runnable gate command: no runnable commands found");
 +  }
 +
 +  return unique;
 +}
 +
 +function defaultTestCommand(testCmds: Record<string, string>): string {
-+  if (testCmds.test) return testCmds.test;
-+  const firstTestCommand = Object.values(testCmds).find((command) => command.trim().length > 0);
-+  if (firstTestCommand) return firstTestCommand;
-+  return "echo \"No test command configured yet\"";
++  const preferred = toRunnableCommand(testCmds.test);
++  if (preferred) return preferred;
++
++  for (const command of Object.values(testCmds)) {
++    const runnable = toRunnableCommand(command);
++    if (runnable) return runnable;
++  }
++
++  throw new Error("No runnable test command configured for ticket gates");
 +}
 +
 +export const resolveCategoryTestCommand = (
@@ -630,10 +673,18 @@ index 0000000..eb92c44
 +): string => {
 +  const normalizedCategory = normalizeCategory(ticketCategory);
 +
-+  if (normalizedCategory === "core" && testCmds.core) return testCmds.core;
-+  if (normalizedCategory === "api" && testCmds.api) return testCmds.api;
-+  if (normalizedCategory === "workflow" && testCmds.workflow) return testCmds.workflow;
-+  if (normalizedCategory === "db" && testCmds.db) return testCmds.db;
++  const categoryCommand = normalizedCategory === "core"
++    ? testCmds.core
++    : normalizedCategory === "api"
++      ? testCmds.api
++      : normalizedCategory === "workflow"
++        ? testCmds.workflow
++        : normalizedCategory === "db"
++          ? testCmds.db
++          : undefined;
++
++  const runnableCategoryCommand = toRunnableCommand(categoryCommand);
++  if (runnableCategoryCommand) return runnableCategoryCommand;
 +
 +  return defaultTestCommand(testCmds);
 +};
@@ -651,7 +702,12 @@ index 0000000..eb92c44
 +  }
 +
 +  candidateChecks.push(categoryTestCommand);
-+  return uniqueCommands(candidateChecks);
++  const verifyCommands = uniqueCommands(candidateChecks);
++  if (verifyCommands.length === 0) {
++    throw new Error("Resolved non-runnable gate command: no verify commands");
++  }
++
++  return verifyCommands;
 +};
 +
 +export const resolveTicketGateSelection = (
@@ -660,10 +716,11 @@ index 0000000..eb92c44
 +  const normalizedCategory = normalizeCategory(params.ticketCategory);
 +  const testCommand = resolveCategoryTestCommand(params.ticketCategory, params.testCmds);
 +  const verifyCommands = resolveVerifyCommands(params);
++  const validationCommands = uniqueCommands([...verifyCommands]);
 +
 +  return {
 +    verifyCommands,
-+    validationCommands: [...verifyCommands],
++    validationCommands,
 +    testSuites: [
 +      {
 +        name: `${normalizedCategory} tests`,
