@@ -62,6 +62,159 @@ describe("approval-service", () => {
     expect(execute).toHaveBeenCalledTimes(0);
   });
 
+  test("approveOutboundAction denial is side-effect free for event_sync and outbound_draft", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const event = await Effect.runPromise(
+      createEvent({
+        id: "event-denied-1",
+        title: "Denied event sync candidate",
+        startAt: new Date("2026-02-25T12:10:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("event", event.id, event));
+
+    await Effect.runPromise(
+      requestEventSync(
+        repository,
+        event.id,
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T13:40:00.000Z"),
+      ),
+    );
+
+    const outboundDraft: OutboundDraft = {
+      id: "outbound-draft-denied-1",
+      payload: "Denied outbound payload",
+      sourceSignalId: "signal-denied-1",
+      status: "pending_approval",
+      createdAt: "2026-02-23T14:00:00.000Z",
+      updatedAt: "2026-02-23T14:00:00.000Z",
+    };
+    await Effect.runPromise(
+      repository.saveEntity("outbound_draft", outboundDraft.id, outboundDraft),
+    );
+
+    const execute = mock(async (_action: unknown) => ({
+      executionId: "exec-denied-1",
+    }));
+    const outboundPort: OutboundActionPort = {
+      execute: (action) => Effect.promise(() => execute(action)),
+    };
+
+    const deniedEvent = await Effect.runPromise(
+      Effect.either(
+        approveOutboundAction(repository, outboundPort, {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: event.id,
+          approved: false,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T13:41:00.000Z"),
+        }),
+      ),
+    );
+    const deniedDraft = await Effect.runPromise(
+      Effect.either(
+        approveOutboundAction(repository, outboundPort, {
+          actionType: "outbound_draft",
+          entityType: "outbound_draft",
+          entityId: outboundDraft.id,
+          approved: false,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T13:42:00.000Z"),
+        }),
+      ),
+    );
+
+    const persistedEvent = await Effect.runPromise(
+      repository.getEntity<{ syncState: string }>("event", event.id),
+    );
+    const persistedDraft = await Effect.runPromise(
+      repository.getEntity<OutboundDraft>("outbound_draft", outboundDraft.id),
+    );
+    const eventAudit = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "event",
+        entityId: event.id,
+      }),
+    );
+    const draftAudit = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "outbound_draft",
+        entityId: outboundDraft.id,
+      }),
+    );
+
+    expect(Either.isLeft(deniedEvent)).toBe(true);
+    expect(Either.isLeft(deniedDraft)).toBe(true);
+    if (Either.isLeft(deniedEvent)) {
+      expect(deniedEvent.left.code).toBe("invalid_request");
+    }
+    if (Either.isLeft(deniedDraft)) {
+      expect(deniedDraft.left.code).toBe("invalid_request");
+    }
+    expect(execute).toHaveBeenCalledTimes(0);
+    expect(persistedEvent?.syncState).toBe("pending_approval");
+    expect(persistedDraft?.status).toBe("pending_approval");
+    expect(persistedDraft?.executionId).toBeUndefined();
+    expect(eventAudit).toHaveLength(1);
+    expect(draftAudit).toHaveLength(0);
+  });
+
+  test("approveOutboundAction rejects non-user outbound_draft approvals without state mutation", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const draft: OutboundDraft = {
+      id: "outbound-draft-forbidden-1",
+      payload: "Forbidden outbound payload",
+      sourceSignalId: "signal-forbidden-1",
+      status: "pending_approval",
+      createdAt: "2026-02-23T14:10:00.000Z",
+      updatedAt: "2026-02-23T14:10:00.000Z",
+    };
+    await Effect.runPromise(
+      repository.saveEntity("outbound_draft", draft.id, draft),
+    );
+
+    const execute = mock(async (_action: unknown) => ({
+      executionId: "exec-forbidden-outbound-1",
+    }));
+    const outboundPort: OutboundActionPort = {
+      execute: (action) => Effect.promise(() => execute(action)),
+    };
+
+    const forbidden = await Effect.runPromise(
+      Effect.either(
+        approveOutboundAction(repository, outboundPort, {
+          actionType: "outbound_draft",
+          entityType: "outbound_draft",
+          entityId: draft.id,
+          approved: true,
+          actor: { id: "system-1", kind: "system" },
+          at: new Date("2026-02-23T14:11:00.000Z"),
+        }),
+      ),
+    );
+
+    const persistedDraft = await Effect.runPromise(
+      repository.getEntity<OutboundDraft>("outbound_draft", draft.id),
+    );
+    const draftAudit = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "outbound_draft",
+        entityId: draft.id,
+      }),
+    );
+
+    expect(Either.isLeft(forbidden)).toBe(true);
+    if (Either.isLeft(forbidden)) {
+      expect(forbidden.left.code).toBe("forbidden");
+    }
+    expect(execute).toHaveBeenCalledTimes(0);
+    expect(persistedDraft?.status).toBe("pending_approval");
+    expect(persistedDraft?.executionId).toBeUndefined();
+    expect(draftAudit).toHaveLength(0);
+  });
+
   test("approveOutboundAction enforces explicit approval before execute", async () => {
     const repository = makeInMemoryCoreRepository();
     const event = await Effect.runPromise(
@@ -369,7 +522,9 @@ describe("approval-service", () => {
       expect(result.left).toMatchObject({
         _tag: "ApprovalServiceError",
       });
-      expect(result.left.message).toContain("approval audit append unavailable");
+      expect(result.left.message).toContain(
+        "approval audit append unavailable",
+      );
     }
     expect(execute).toHaveBeenCalledTimes(1);
 
