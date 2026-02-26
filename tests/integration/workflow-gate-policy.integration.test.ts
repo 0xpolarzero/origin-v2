@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { buildFallbackConfig } from "super-ralph/cli/fallback-config";
@@ -157,6 +157,39 @@ describe("workflow gate policy integration", () => {
       riskyModeEnabled: false,
       approvalRequiredPhases: [],
     });
+  });
+
+  test("fallback config path fields are portable in real repo wiring", () => {
+    const scripts = readPackageScripts();
+    const repoRoot = process.cwd();
+    const absolutePromptSpecPath = resolve(
+      repoRoot,
+      ".super-ralph/generated/PROMPT.md",
+    );
+    const relativePromptSpecPath = ".super-ralph/generated/PROMPT.md";
+
+    const fromAbsolute = buildFallbackConfig(
+      repoRoot,
+      absolutePromptSpecPath,
+      scripts,
+    );
+    const fromRelative = buildFallbackConfig(
+      repoRoot,
+      relativePromptSpecPath,
+      scripts,
+    );
+
+    expect(isAbsolute(fromAbsolute.specsPath)).toBe(false);
+    expect(isAbsolute(fromRelative.specsPath)).toBe(false);
+    expect(fromAbsolute.specsPath).toBe(fromRelative.specsPath);
+
+    for (const pathValue of fromAbsolute.referenceFiles) {
+      expect(isAbsolute(pathValue)).toBe(false);
+    }
+    for (const pathValue of fromRelative.referenceFiles) {
+      expect(isAbsolute(pathValue)).toBe(false);
+    }
+    expect(fromAbsolute.referenceFiles).toEqual(fromRelative.referenceFiles);
   });
 
   test("maps this repo's scripts to runnable gate commands", () => {

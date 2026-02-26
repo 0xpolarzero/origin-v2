@@ -31,14 +31,6 @@ function parsePatchSections(patch: string): Map<string, string> {
   return sections;
 }
 
-function extractAddedLines(section: string): string {
-  return section
-    .split("\n")
-    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
-    .map((line) => line.slice(1))
-    .join("\n");
-}
-
 describe("super-ralph patch regression", () => {
   test("patch keeps required gate helper and wiring sections", () => {
     const patch = readFileSync(patchPath, "utf8");
@@ -60,7 +52,6 @@ describe("super-ralph patch regression", () => {
     const patch = readFileSync(patchPath, "utf8");
     const sections = parsePatchSections(patch);
     const cliSection = sections.get("src/cli/index.ts") ?? "";
-    const cliAddedLines = extractAddedLines(cliSection);
 
     expect(cliSection).not.toContain("old mode 100644");
     expect(cliSection).not.toContain("new mode 100755");
@@ -89,9 +80,46 @@ describe("super-ralph patch regression", () => {
     expect(cliSection).toContain(
       "const agentSafetyPolicy = resolveAgentSafetyPolicy(runtimeConfig.agentSafetyPolicy);",
     );
-    expect(cliAddedLines).toMatch(/\{\s*\.\.\.runtimeConfig\s*\}/);
-    expect(cliAddedLines).toMatch(/config=\{runtimeConfig\}/);
-    expect(cliAddedLines).toMatch(/agentSafetyPolicy=\{agentSafetyPolicy\}/);
+    expect(cliSection).toContain("+            {...runtimeConfig}");
+    expect(cliSection).toContain("+            config={runtimeConfig}");
+    expect(cliSection).toContain(
+      "+            agentSafetyPolicy={agentSafetyPolicy}",
+    );
+    expect(cliSection).toContain("function resolveWorkflowImportPrefix(");
+    expect(cliSection).toContain("function resolveRepoRootFromWorkflowFile()");
+    expect(cliSection).toContain("function resolveRepoPath(pathFromRepoRoot");
+    expect(cliSection).toContain(
+      "const REPO_ROOT = resolveRepoRootFromWorkflowFile();",
+    );
+    expect(cliSection).not.toMatch(
+      /^\+const REPO_ROOT = \$\{JSON\.stringify\(repoRoot\)\};/m,
+    );
+    expect(cliSection).not.toContain(
+      `+function resolveRepoPath(pathFromRepoRoot: string): string {
++  return resolve(REPO_ROOT, pathFromRepoRoot);
++}
+function findSmithersCliPath(repoRoot: string): string | null {`,
+    );
+    expect(cliSection).not.toMatch(/^\+.*superRalphSourceRoot \+ '\/src'/m);
+  });
+
+  test("fallback-config patch hunks retain portable path normalization helpers", () => {
+    const patch = readFileSync(patchPath, "utf8");
+    const sections = parsePatchSections(patch);
+    const fallbackSection = sections.get("src/cli/fallback-config.ts") ?? "";
+
+    expect(fallbackSection).toContain(
+      "export function toRepoRelativePath(repoRoot: string, pathValue: string): string",
+    );
+    expect(fallbackSection).toContain('.replaceAll("\\\\", "/")');
+    expect(fallbackSection).toContain("const specsPathCandidates = [");
+    expect(fallbackSection).toContain('"docs/specs/engineering.md"');
+    expect(fallbackSection).toContain(
+      "toRepoRelativePath(repoRoot, promptSpecPath)",
+    );
+    expect(fallbackSection).not.toContain(
+      'join(repoRoot, "docs/specs/engineering.md")',
+    );
   });
 
   test("component wiring hunks preserve ticket gates and approval gating markers", () => {
@@ -104,7 +132,6 @@ describe("super-ralph patch regression", () => {
     const interpretSection =
       sections.get("src/components/InterpretConfig.tsx") ?? "";
     const indexSection = sections.get("src/components/index.ts") ?? "";
-    const superRalphAddedLines = extractAddedLines(superRalphSection);
 
     expect(superRalphSection).toContain("resolveTicketGateSelection");
     expect(superRalphSection).toContain("ticketId: ticket.id");
@@ -116,14 +143,14 @@ describe("super-ralph patch regression", () => {
     expect(superRalphSection).toContain(
       "validationCommands={ticketGateSelection.validationCommands}",
     );
-    expect(superRalphAddedLines).toMatch(
-      /needsApproval=\{requiresApprovalForPhase\(\s*"implement",\s*agentSafetyPolicy,\s*\)\}/s,
+    expect(superRalphSection).toContain(
+      'needsApproval={requiresApprovalForPhase(\n+                                "implement",',
     );
-    expect(superRalphAddedLines).toMatch(
-      /needsApproval=\{requiresApprovalForPhase\(\s*"review-fix",\s*agentSafetyPolicy,\s*\)\}/s,
+    expect(superRalphSection).toContain(
+      'needsApproval={requiresApprovalForPhase(\n+                                "review-fix",',
     );
-    expect(superRalphAddedLines).toMatch(
-      /needsApproval=\{requiresApprovalForPhase\(\s*"land",\s*agentSafetyPolicy,\s*\)\}/s,
+    expect(superRalphSection).toContain(
+      'needsApproval={requiresApprovalForPhase(\n+                      "land",',
     );
     expect(ticketGatesSection).toContain("function normalizeCategory(");
     expect(ticketGatesSection).toContain("ticketId?: string");

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 
 import { buildGateCommandConfig } from "super-ralph/gate-config";
 import {
@@ -60,25 +60,31 @@ export function assertNoPlaceholderCommands(
   expect(context.trim().length).toBeGreaterThan(0);
 }
 
-function normalizeWhitespace(value: string): string {
-  return value.replace(/\s+/g, "");
-}
-
-function matchesIgnoringWhitespace(source: string, snippet: string): boolean {
-  return normalizeWhitespace(source).includes(normalizeWhitespace(snippet));
-}
-
 describe("generated workflow gates", () => {
-  test("matches snippet content independent of whitespace formatting", () => {
-    expect(
-      matchesIgnoringWhitespace(
-        `const buildCmds = mergeCommandMap(
-          FALLBACK_CONFIG.buildCmds,
-          interpreted.buildCmds
-        );`,
-        "const buildCmds = mergeCommandMap(FALLBACK_CONFIG.buildCmds, interpreted.buildCmds);",
-      ),
-    ).toBe(true);
+  test("workflow artifact uses portable import specifiers", () => {
+    const source = readGeneratedWorkflowSource();
+
+    expect(source).toContain('import { SuperRalph } from "super-ralph";');
+    expect(source).toContain('} from "super-ralph/components";');
+    expect(source).toContain(
+      'import { ralphOutputSchemas } from "super-ralph";',
+    );
+    expect(source).not.toContain('from "/');
+    expect(source).not.toContain("node_modules/super-ralph/src");
+  });
+
+  test("workflow artifact resolves repo paths at runtime without hardcoded absolute constants", () => {
+    const source = readGeneratedWorkflowSource();
+
+    expect(source).toContain(
+      "function resolveRepoRootFromWorkflowFile(): string",
+    );
+    expect(source).toContain(
+      "function resolveRepoPath(pathFromRepoRoot: string): string",
+    );
+    expect(source).not.toMatch(/const REPO_ROOT = "\//);
+    expect(source).not.toMatch(/const DB_PATH = "\//);
+    expect(source).not.toMatch(/const PROMPT_SPEC_PATH = "\//);
   });
 
   test("workflow artifact contains script-derived gate command maps with no placeholders", () => {
@@ -123,28 +129,19 @@ describe("generated workflow gates", () => {
   test("workflow artifact wires runtime command-map merge into SuperRalph and Monitor", () => {
     const source = readGeneratedWorkflowSource();
 
-    expect(source).toMatch(/function\s+mergeCommandMap\s*\(/);
-    expect(source).toMatch(/function\s+resolveRuntimeConfig\s*\(\s*ctx:\s*any\s*\)/);
-    expect(
-      matchesIgnoringWhitespace(
-        source,
-        "const buildCmds = mergeCommandMap(FALLBACK_CONFIG.buildCmds, interpreted.buildCmds);",
-      ),
-    ).toBe(true);
-    expect(
-      matchesIgnoringWhitespace(
-        source,
-        "const testCmds = mergeCommandMap(FALLBACK_CONFIG.testCmds, interpreted.testCmds);",
-      ),
-    ).toBe(true);
-    expect(
-      matchesIgnoringWhitespace(
-        source,
-        "const runtimeConfig = resolveRuntimeConfig(ctx);",
-      ),
-    ).toBe(true);
-    expect(source).toMatch(/\{\s*\.\.\.\s*runtimeConfig\s*\}/);
-    expect(source).toMatch(/config=\{\s*runtimeConfig\s*\}/);
+    expect(source).toContain("function mergeCommandMap(");
+    expect(source).toContain("function resolveRuntimeConfig(ctx: any)");
+    expect(source).toContain(
+      "const buildCmds = mergeCommandMap(FALLBACK_CONFIG.buildCmds, interpreted.buildCmds);",
+    );
+    expect(source).toContain(
+      "const testCmds = mergeCommandMap(FALLBACK_CONFIG.testCmds, interpreted.testCmds);",
+    );
+    expect(source).toContain(
+      "const runtimeConfig = resolveRuntimeConfig(ctx);",
+    );
+    expect(source).toContain("{...runtimeConfig}");
+    expect(source).toContain("config={runtimeConfig}");
     expect(source).not.toContain(
       '{...((ctx.outputMaybe("interpret-config", outputs.interpret_config) as any) || FALLBACK_CONFIG)}',
     );
@@ -180,13 +177,10 @@ describe("generated workflow gates", () => {
 
     expect(source).not.toContain("dangerouslySkipPermissions: true");
     expect(source).not.toContain("yolo: true");
-    expect(
-      matchesIgnoringWhitespace(
-        source,
-        "const agentSafetyPolicy = resolveAgentSafetyPolicy(runtimeConfig.agentSafetyPolicy);",
-      ),
-    ).toBe(true);
-    expect(source).toMatch(/agentSafetyPolicy=\{\s*agentSafetyPolicy\s*\}/);
+    expect(source).toContain(
+      "const agentSafetyPolicy = resolveAgentSafetyPolicy(runtimeConfig.agentSafetyPolicy);",
+    );
+    expect(source).toContain("agentSafetyPolicy={agentSafetyPolicy}");
   });
 
   test("workflow artifact resolves policy behavior with env precedence and fail-closed normalization", () => {
@@ -245,5 +239,19 @@ describe("generated workflow gates", () => {
         });
       },
     );
+  });
+
+  test("serialized FALLBACK_CONFIG path fields are repo-relative in generated artifact", () => {
+    const source = readGeneratedWorkflowSource();
+    const fallbackConfig = extractConstJson<{
+      specsPath: string;
+      referenceFiles: string[];
+    }>(source, "FALLBACK_CONFIG");
+
+    expect(isAbsolute(fallbackConfig.specsPath)).toBe(false);
+
+    for (const referenceFile of fallbackConfig.referenceFiles) {
+      expect(isAbsolute(referenceFile)).toBe(false);
+    }
   });
 });
