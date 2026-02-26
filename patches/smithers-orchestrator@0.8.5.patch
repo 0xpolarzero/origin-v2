@@ -1,0 +1,33 @@
+diff --git a/src/db/output.ts b/src/db/output.ts
+index 97a8b5283b52ab13aedc9611f871f6f20dca71f3..27379725f8898d6abba4b577fabd21d278ade551 100644
+--- a/src/db/output.ts
++++ b/src/db/output.ts
+@@ -126,15 +126,24 @@ export function describeSchemaShape(tableOrSchema: Table | z.ZodObject<any>, zod
+   // Prefer the original Zod schema which has .describe() annotations
+   const schema = zodSchema ?? (isZodSchema(tableOrSchema) ? tableOrSchema : null);
+   if (schema && typeof (schema as any).toJSONSchema === "function") {
+-    const jsonSchema = (schema as any).toJSONSchema();
+-    return JSON.stringify(jsonSchema, null, 2);
++    try {
++      const jsonSchema = (schema as any).toJSONSchema();
++      return JSON.stringify(jsonSchema, null, 2);
++    } catch {
++      // Some schemas include constructs unsupported by z.toJSONSchema.
++      // Fall through to safer representations instead of failing task startup.
++    }
+   }
+   // Fallback: derive from Drizzle table
+   if (!isZodSchema(tableOrSchema)) {
+     const agentSchema = getAgentOutputSchema(tableOrSchema);
+     if (typeof (agentSchema as any).toJSONSchema === "function") {
+-      const jsonSchema = (agentSchema as any).toJSONSchema();
+-      return JSON.stringify(jsonSchema, null, 2);
++      try {
++        const jsonSchema = (agentSchema as any).toJSONSchema();
++        return JSON.stringify(jsonSchema, null, 2);
++      } catch {
++        // Fall through to manual description when JSON Schema conversion fails.
++      }
+     }
+   }
+   // Last resort: manual description

@@ -751,12 +751,9 @@ index 77be1f5..18272dd 100644
 +  preLandChecks: z.array(z.string()).min(1),
 +  postLandChecks: z.array(z.string()).min(1),
 +  commitPolicy: z.object({
-+    allowedTypes: z.tuple([
-+      z.literal("feat"),
-+      z.literal("fix"),
-+      z.literal("docs"),
-+      z.literal("chore"),
-+    ]),
++    allowedTypes: z.array(
++      z.enum(["feat", "fix", "docs", "chore"]),
++    ).min(1),
 +    requireAtomicChecks: z.literal(true),
 +  }),
    codeStyle: z.string().min(1),
