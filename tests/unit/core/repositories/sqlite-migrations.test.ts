@@ -10,6 +10,13 @@ interface LedgerRow {
   checksum: string;
 }
 
+const EXPECTED_CORE_MIGRATION_IDS = [
+  "001_core_schema",
+  "002_core_constraints_indexes",
+  "003_relation_integrity",
+  "004_audit_entity_versions",
+];
+
 const listLedgerRows = (db: Database): Array<LedgerRow> =>
   db
     .query("SELECT id, checksum FROM schema_migrations ORDER BY id ASC")
@@ -20,6 +27,7 @@ describe("sqlite migration runner", () => {
     expect(CORE_DB_MIGRATIONS.length).toBeGreaterThan(0);
 
     const ids = CORE_DB_MIGRATIONS.map((migration) => migration.id);
+    expect(ids).toEqual(EXPECTED_CORE_MIGRATION_IDS);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toEqual([...ids].sort((a, b) => a.localeCompare(b)));
 
@@ -85,6 +93,77 @@ describe("sqlite migration runner", () => {
         { id: "001_create_and_record_first", checksum: "checksum-001" },
         { id: "002_record_second", checksum: "checksum-002" },
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("runSqliteMigrations applies only pending core migrations when upgrading from 001/002", async () => {
+    const db = new Database(":memory:");
+    const baselineMigrations = CORE_DB_MIGRATIONS.filter(
+      (migration) =>
+        migration.id.startsWith("001_") || migration.id.startsWith("002_"),
+    );
+
+    try {
+      await Effect.runPromise(runSqliteMigrations(db, baselineMigrations));
+      expect(listLedgerRows(db).map((row) => row.id)).toEqual([
+        "001_core_schema",
+        "002_core_constraints_indexes",
+      ]);
+
+      await Effect.runPromise(runSqliteMigrations(db, CORE_DB_MIGRATIONS));
+
+      const fullLedger = listLedgerRows(db);
+      const checksumsById = new Map(
+        CORE_DB_MIGRATIONS.map((migration) => [
+          migration.id,
+          migration.checksum,
+        ]),
+      );
+      expect(fullLedger.map((row) => row.id)).toEqual(
+        EXPECTED_CORE_MIGRATION_IDS,
+      );
+      for (const row of fullLedger) {
+        const expectedChecksum = checksumsById.get(row.id);
+        if (expectedChecksum === undefined) {
+          throw new Error(`missing checksum for migration ${row.id}`);
+        }
+        expect(row.checksum).toBe(expectedChecksum);
+      }
+
+      await Effect.runPromise(runSqliteMigrations(db, CORE_DB_MIGRATIONS));
+      expect(listLedgerRows(db)).toEqual(fullLedger);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("runSqliteMigrations remains idempotent for the full core migration manifest", async () => {
+    const db = new Database(":memory:");
+
+    try {
+      await Effect.runPromise(runSqliteMigrations(db, CORE_DB_MIGRATIONS));
+      await Effect.runPromise(runSqliteMigrations(db, CORE_DB_MIGRATIONS));
+
+      const ledgerRows = listLedgerRows(db);
+      const checksumsById = new Map(
+        CORE_DB_MIGRATIONS.map((migration) => [
+          migration.id,
+          migration.checksum,
+        ]),
+      );
+
+      expect(ledgerRows.map((row) => row.id)).toEqual(
+        EXPECTED_CORE_MIGRATION_IDS,
+      );
+      for (const row of ledgerRows) {
+        const expectedChecksum = checksumsById.get(row.id);
+        if (expectedChecksum === undefined) {
+          throw new Error(`missing checksum for migration ${row.id}`);
+        }
+        expect(row.checksum).toBe(expectedChecksum);
+      }
     } finally {
       db.close();
     }
