@@ -604,6 +604,74 @@ describe("workflow-api http integration", () => {
     expect(persisted?.syncState).toBe("pending_approval");
   });
 
+  test("approval.approveOutboundAction accepts whitespace-padded payload actor id when trusted user context matches", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const event = await Effect.runPromise(
+      createEvent({
+        id: "event-http-whitespace-actor-1",
+        title: "HTTP whitespace actor approval event",
+        startAt: new Date("2026-02-24T16:15:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("event", event.id, event));
+
+    let executeCount = 0;
+    const platform = await Effect.runPromise(
+      buildCorePlatform({
+        repository,
+        outboundActionPort: {
+          execute: (action) =>
+            Effect.sync(() => {
+              executeCount += 1;
+              return { executionId: `exec-${action.entityId}` };
+            }),
+        },
+      }),
+    );
+    const dispatcher = makeWorkflowHttpDispatcher(
+      makeWorkflowRoutes(makeWorkflowApi({ platform })),
+    );
+
+    await expectOk(dispatcher, "approval.requestEventSync", {
+      eventId: event.id,
+      actor: ACTOR,
+      at: "2026-02-24T16:16:00.000Z",
+    });
+
+    const approved = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["approval.approveOutboundAction"],
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: event.id,
+          approved: true,
+          actor: {
+            id: " user-1 ",
+            kind: "user",
+          },
+          at: "2026-02-24T16:17:00.000Z",
+        },
+        auth: {
+          sessionActor: ACTOR,
+        },
+      }),
+    );
+
+    expect(approved.status).toBe(200);
+    expect(approved.body).toMatchObject({
+      approved: true,
+      executed: true,
+    });
+
+    const persisted = await Effect.runPromise(
+      repository.getEntity<{ syncState: string }>("event", event.id),
+    );
+    expect(executeCount).toBe(1);
+    expect(persisted?.syncState).toBe("synced");
+  });
+
   test("approval.approveOutboundAction accepts verified signed internal user context", async () => {
     const repository = makeInMemoryCoreRepository();
     const event = await Effect.runPromise(
