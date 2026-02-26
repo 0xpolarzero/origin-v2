@@ -365,7 +365,11 @@ describe("api contract docs", () => {
     expect(schemaDoc.toLowerCase()).toContain("version");
     expect(routeDoc.toLowerCase()).toContain("update");
     expect(schemaDoc.toLowerCase()).toContain("update");
-    expect(routeDoc).toContain("2026-02-26");
-    expect(schemaDoc).toContain("2026-02-26");
+    expect(routeDoc).toMatch(
+      /Current pointer verification date:\s*`\d{4}-\d{2}-\d{2}`/,
+    );
+    expect(schemaDoc).toMatch(
+      /Current pointer verification date:\s*`\d{4}-\d{2}-\d{2}`/,
+    );
   });
 });
