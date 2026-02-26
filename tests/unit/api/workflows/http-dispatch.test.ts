@@ -375,6 +375,49 @@ describe("api/workflows/http-dispatch", () => {
     expect(handled).toBe(0);
   });
 
+  test("accepts trusted payload actor when payload actor id has surrounding whitespace", async () => {
+    let handledInput: unknown;
+    const routes = [
+      {
+        key: "approval.approveOutboundAction",
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        actorSource: "trusted",
+        handle: (input) =>
+          Effect.sync(() => {
+            handledInput = input;
+            return { ok: true };
+          }),
+      },
+    ] as ReadonlyArray<WorkflowRouteDefinition>;
+    const dispatcher = makeWorkflowHttpDispatcher(routes);
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: "event-4a",
+          approved: true,
+          actor: {
+            id: " trusted-user-1 ",
+            kind: "user",
+          },
+        },
+        auth: {
+          sessionActor: TRUSTED_USER_ACTOR,
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(handledInput).toMatchObject({
+      actor: TRUSTED_USER_ACTOR,
+    });
+  });
+
   test("accepts signed internal actor context when verifier succeeds", async () => {
     let verifierCalls = 0;
     let handledInput: unknown;
