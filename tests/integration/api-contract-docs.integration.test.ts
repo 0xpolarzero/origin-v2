@@ -8,8 +8,11 @@ import { Effect } from "effect";
 
 import type {
   WorkflowApi,
-  WorkflowRouteKey,
 } from "../../src/api/workflows/contracts";
+import {
+  WORKFLOW_ROUTE_KEYS,
+  type WorkflowRouteKey,
+} from "../../src/contracts/workflow-route-keys";
 import {
   WORKFLOW_ROUTE_PATHS,
   makeWorkflowRoutes,
@@ -126,6 +129,22 @@ const makeApiStub = (): WorkflowApi => ({
 });
 
 describe("api contract docs", () => {
+  test("neutral route-key manifest matches runtime route paths and contract-doc route rows", () => {
+    const documentedRouteKeys = parseAuthoritativeWorkflowContract(
+      readAuthoritativeWorkflowContract(),
+    ).routes
+      .map((row) => row.key)
+      .sort() as WorkflowRouteKey[];
+
+    const neutralRouteKeys = [...WORKFLOW_ROUTE_KEYS].sort();
+    const runtimeRouteKeys = Object.keys(
+      WORKFLOW_ROUTE_PATHS,
+    ).sort() as WorkflowRouteKey[];
+
+    expect(neutralRouteKeys).toEqual(runtimeRouteKeys);
+    expect(documentedRouteKeys).toEqual(runtimeRouteKeys);
+  });
+
   test("authoritative workflow contract route matrix matches runtime route registry", () => {
     const documented = parseAuthoritativeWorkflowContract(
       readAuthoritativeWorkflowContract(),
@@ -145,7 +164,7 @@ describe("api contract docs", () => {
       }),
     ).toEqual([]);
 
-    expect(documented).toHaveLength(Object.keys(WORKFLOW_ROUTE_PATHS).length);
+    expect(documented).toHaveLength(WORKFLOW_ROUTE_KEYS.length);
   });
 
   test("authoritative workflow contract includes API validation, error mapping, and dispatcher sections", () => {
@@ -170,6 +189,8 @@ describe("api contract docs", () => {
     expect(validationSection).toMatch(/date fields/i);
     expect(validationSection).toMatch(/ISO-8601/i);
     expect(validationSection).toMatch(/non-empty strings?/i);
+    expect(validationSection).toMatch(/trusted actor/i);
+    expect(validationSection).toMatch(/approval\.approveOutboundAction/i);
 
     expect(markdown).toContain("## Service Error to API Status Mapping");
     expect(errorMappings.get("invalid_request")).toEqual({
@@ -195,6 +216,8 @@ describe("api contract docs", () => {
     expect(dispatcherSection).toMatch(/sanitized body shape/i);
     expect(dispatcherSection).toMatch(/error,\s*route,\s*message/i);
     expect(dispatcherSection).toMatch(/500/);
+    expect(dispatcherSection).toMatch(/trusted actor context/i);
+    expect(dispatcherSection).toMatch(/spoof/i);
   });
 
   test("authoritative workflow contract defines request/response payload schemas per route", () => {
@@ -207,7 +230,7 @@ describe("api contract docs", () => {
       payloadRows.map((row) => [(row["Route Key"] ?? "").trim(), row]),
     );
 
-    expect(payloadRows).toHaveLength(Object.keys(WORKFLOW_ROUTE_PATHS).length);
+    expect(payloadRows).toHaveLength(WORKFLOW_ROUTE_KEYS.length);
 
     for (const routeKey of Object.keys(WORKFLOW_ROUTE_PATHS).sort()) {
       const row = rowByKey.get(routeKey);
@@ -219,6 +242,12 @@ describe("api contract docs", () => {
         "",
       );
     }
+
+    const approvalRow = rowByKey.get("approval.approveOutboundAction");
+    expect(approvalRow).toBeDefined();
+    expect(
+      ((approvalRow?.["Request Required Fields"] ?? "") as string).toLowerCase(),
+    ).toContain("trusted");
   });
 
   test("authoritative workflow contract schema sections match migrated sqlite objects", async () => {
@@ -336,5 +365,7 @@ describe("api contract docs", () => {
     expect(schemaDoc.toLowerCase()).toContain("version");
     expect(routeDoc.toLowerCase()).toContain("update");
     expect(schemaDoc.toLowerCase()).toContain("update");
+    expect(routeDoc).toContain("2026-02-26");
+    expect(schemaDoc).toContain("2026-02-26");
   });
 });

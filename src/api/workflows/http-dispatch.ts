@@ -1,12 +1,25 @@
 import { Either, Effect } from "effect";
 
+import { ActorRef } from "../../core/domain/common";
 import { WorkflowRouteDefinition } from "./contracts";
 import { WorkflowApiError } from "./errors";
+
+export interface WorkflowSignedInternalActorContext {
+  actor: ActorRef;
+  issuedAt: string;
+  signature: string;
+}
+
+export interface WorkflowHttpAuthContext {
+  sessionActor?: ActorRef;
+  signedInternalActor?: WorkflowSignedInternalActorContext;
+}
 
 export interface WorkflowHttpRequest {
   method: string;
   path: string;
   body?: unknown;
+  auth?: WorkflowHttpAuthContext;
 }
 
 export interface WorkflowHttpResponse {
@@ -14,7 +27,138 @@ export interface WorkflowHttpResponse {
   body: unknown;
 }
 
+export interface MakeWorkflowHttpDispatcherOptions {
+  verifySignedInternalActorContext?: (
+    context: WorkflowSignedInternalActorContext,
+  ) => Effect.Effect<ActorRef, WorkflowApiError>;
+}
+
+const ACTOR_KINDS: ReadonlyArray<ActorRef["kind"]> = ["user", "system", "ai"];
+
 const normalizeMethod = (method: string): string => method.trim().toUpperCase();
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isActorKind = (value: unknown): value is ActorRef["kind"] =>
+  ACTOR_KINDS.some((candidate) => candidate === value);
+
+const toForbiddenRouteError = (
+  route: WorkflowRouteDefinition,
+  message: string,
+): WorkflowApiError =>
+  new WorkflowApiError({
+    route: route.key,
+    message,
+    code: "forbidden",
+    statusCode: 403,
+  });
+
+const toForbiddenRouteErrorFromUnknown = (
+  route: WorkflowRouteDefinition,
+  fallbackMessage: string,
+  error: unknown,
+): WorkflowApiError => {
+  if (error instanceof WorkflowApiError) {
+    return toForbiddenRouteError(route, error.message);
+  }
+
+  return toForbiddenRouteError(route, fallbackMessage);
+};
+
+const parsePayloadActor = (body: unknown): ActorRef | undefined => {
+  if (!isRecord(body) || !("actor" in body)) {
+    return undefined;
+  }
+
+  const actor = body.actor;
+  if (!isRecord(actor) || typeof actor.id !== "string" || !isActorKind(actor.kind)) {
+    return undefined;
+  }
+
+  return {
+    id: actor.id,
+    kind: actor.kind,
+  };
+};
+
+const resolveTrustedActor = (
+  request: WorkflowHttpRequest,
+  route: WorkflowRouteDefinition,
+  options: MakeWorkflowHttpDispatcherOptions,
+): Effect.Effect<ActorRef | undefined, WorkflowApiError> => {
+  if (route.actorSource !== "trusted") {
+    return Effect.succeed(undefined);
+  }
+
+  const sessionActor = request.auth?.sessionActor;
+  if (sessionActor) {
+    return Effect.succeed(sessionActor);
+  }
+
+  const signedInternalActor = request.auth?.signedInternalActor;
+  if (!signedInternalActor) {
+    return Effect.fail(
+      toForbiddenRouteError(route, "trusted actor context is required"),
+    );
+  }
+
+  if (!options.verifySignedInternalActorContext) {
+    return Effect.fail(
+      toForbiddenRouteError(
+        route,
+        "trusted actor context verification is required",
+      ),
+    );
+  }
+
+  return options.verifySignedInternalActorContext(signedInternalActor).pipe(
+    Effect.mapError((error) =>
+      toForbiddenRouteErrorFromUnknown(
+        route,
+        "trusted actor context verification failed",
+        error,
+      ),
+    ),
+  );
+};
+
+const assertPayloadActorNotSpoofed = (
+  route: WorkflowRouteDefinition,
+  body: unknown,
+  trustedActor: ActorRef,
+): Effect.Effect<void, WorkflowApiError> => {
+  if (route.actorSource !== "trusted") {
+    return Effect.void;
+  }
+
+  const payloadActor = parsePayloadActor(body);
+  if (!payloadActor) {
+    return Effect.void;
+  }
+
+  if (
+    payloadActor.id === trustedActor.id &&
+    payloadActor.kind === trustedActor.kind
+  ) {
+    return Effect.void;
+  }
+
+  return Effect.fail(
+    toForbiddenRouteError(
+      route,
+      "payload actor does not match trusted actor context (spoof attempt)",
+    ),
+  );
+};
+
+const withTrustedActor = (body: unknown, trustedActor: ActorRef): unknown =>
+  isRecord(body)
+    ? {
+        ...body,
+        actor: trustedActor,
+      }
+    : body;
 
 const toClientErrorBody = (
   error: WorkflowApiError,
@@ -52,7 +196,10 @@ const toHttpStatus = (error: WorkflowApiError): number => {
 };
 
 export const makeWorkflowHttpDispatcher =
-  (routes: ReadonlyArray<WorkflowRouteDefinition>) =>
+  (
+    routes: ReadonlyArray<WorkflowRouteDefinition>,
+    options: MakeWorkflowHttpDispatcherOptions = {},
+  ) =>
   (request: WorkflowHttpRequest): Effect.Effect<WorkflowHttpResponse, never> =>
     Effect.gen(function* () {
       const pathMatches = routes.filter((route) => route.path === request.path);
@@ -81,7 +228,20 @@ export const makeWorkflowHttpDispatcher =
         };
       }
 
-      const result = yield* Effect.either(route.handle(request.body));
+      const result = yield* Effect.either(
+        Effect.gen(function* () {
+          const trustedActor = yield* resolveTrustedActor(request, route, options);
+          if (trustedActor) {
+            yield* assertPayloadActorNotSpoofed(route, request.body, trustedActor);
+          }
+
+          const routedBody = trustedActor
+            ? withTrustedActor(request.body, trustedActor)
+            : request.body;
+
+          return yield* route.handle(routedBody);
+        }),
+      );
       if (Either.isLeft(result)) {
         return {
           status: toHttpStatus(result.left),

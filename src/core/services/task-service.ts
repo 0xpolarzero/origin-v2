@@ -9,6 +9,7 @@ export class TaskTransitionError extends Data.TaggedError(
   "TaskTransitionError",
 )<{
   message: string;
+  code?: "not_found";
 }> {}
 
 const loadTask = (
@@ -20,7 +21,10 @@ const loadTask = (
 
     if (!task) {
       return yield* Effect.fail(
-        new TaskTransitionError({ message: `task ${taskId} was not found` }),
+        new TaskTransitionError({
+          message: `task ${taskId} was not found`,
+          code: "not_found",
+        }),
       );
     }
 

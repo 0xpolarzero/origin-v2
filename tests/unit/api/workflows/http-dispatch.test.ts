@@ -8,6 +8,12 @@ import { WorkflowApiError } from "../../../../src/api/workflows/errors";
 import { makeWorkflowRoutes } from "../../../../src/api/workflows/routes";
 
 const ACTOR = { id: "user-1", kind: "user" } as const;
+const APPROVAL_ROUTE_PATH = "/api/workflows/approval/approve-outbound-action";
+const TRUSTED_USER_ACTOR = { id: "trusted-user-1", kind: "user" } as const;
+const TRUSTED_SYSTEM_ACTOR = {
+  id: "trusted-system-1",
+  kind: "system",
+} as const;
 
 type StubCall = {
   route:
@@ -192,12 +198,352 @@ describe("api/workflows/http-dispatch", () => {
     expect((captureCall!.input as { at: unknown }).at).toBeInstanceOf(Date);
   });
 
+  test("rejects trusted-actor routes when trusted actor context is missing", async () => {
+    let handled = 0;
+    const routes = [
+      {
+        key: "approval.approveOutboundAction",
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        actorSource: "trusted",
+        handle: () =>
+          Effect.sync(() => {
+            handled += 1;
+            return { ok: true };
+          }),
+      },
+    ] as ReadonlyArray<WorkflowRouteDefinition>;
+    const dispatcher = makeWorkflowHttpDispatcher(routes);
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: "event-1",
+          approved: true,
+          actor: ACTOR,
+        },
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        error: "workflow request failed",
+        route: "approval.approveOutboundAction",
+      }),
+    );
+    expect((response.body as { message: string }).message).toContain(
+      "trusted actor",
+    );
+    expect(handled).toBe(0);
+  });
+
+  test("injects trusted session actor into trusted-route payload before handler invocation", async () => {
+    let handledInput: unknown;
+    const routes = [
+      {
+        key: "approval.approveOutboundAction",
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        actorSource: "trusted",
+        handle: (input) =>
+          Effect.sync(() => {
+            handledInput = input;
+            return { ok: true };
+          }),
+      },
+    ] as ReadonlyArray<WorkflowRouteDefinition>;
+    const dispatcher = makeWorkflowHttpDispatcher(routes);
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: "event-2",
+          approved: true,
+        },
+        auth: {
+          sessionActor: TRUSTED_USER_ACTOR,
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(handledInput).toMatchObject({
+      actionType: "event_sync",
+      entityType: "event",
+      entityId: "event-2",
+      approved: true,
+      actor: TRUSTED_USER_ACTOR,
+    });
+  });
+
+  test("rejects spoofed payload actor when trusted context actor is non-user", async () => {
+    let handled = 0;
+    const routes = [
+      {
+        key: "approval.approveOutboundAction",
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        actorSource: "trusted",
+        handle: () =>
+          Effect.sync(() => {
+            handled += 1;
+            return { ok: true };
+          }),
+      },
+    ] as ReadonlyArray<WorkflowRouteDefinition>;
+    const dispatcher = makeWorkflowHttpDispatcher(routes);
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: "event-3",
+          approved: true,
+          actor: ACTOR,
+        },
+        auth: {
+          sessionActor: TRUSTED_SYSTEM_ACTOR,
+        },
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        error: "workflow request failed",
+        route: "approval.approveOutboundAction",
+      }),
+    );
+    expect((response.body as { message: string }).message).toContain("spoof");
+    expect(handled).toBe(0);
+  });
+
+  test("rejects spoofed payload actor when trusted user context actor id mismatches", async () => {
+    let handled = 0;
+    const routes = [
+      {
+        key: "approval.approveOutboundAction",
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        actorSource: "trusted",
+        handle: () =>
+          Effect.sync(() => {
+            handled += 1;
+            return { ok: true };
+          }),
+      },
+    ] as ReadonlyArray<WorkflowRouteDefinition>;
+    const dispatcher = makeWorkflowHttpDispatcher(routes);
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: "event-4",
+          approved: true,
+          actor: ACTOR,
+        },
+        auth: {
+          sessionActor: TRUSTED_USER_ACTOR,
+        },
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        error: "workflow request failed",
+        route: "approval.approveOutboundAction",
+      }),
+    );
+    expect((response.body as { message: string }).message).toContain("spoof");
+    expect(handled).toBe(0);
+  });
+
+  test("accepts signed internal actor context when verifier succeeds", async () => {
+    let verifierCalls = 0;
+    let handledInput: unknown;
+    const routes = [
+      {
+        key: "approval.approveOutboundAction",
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        actorSource: "trusted",
+        handle: (input) =>
+          Effect.sync(() => {
+            handledInput = input;
+            return { ok: true };
+          }),
+      },
+    ] as ReadonlyArray<WorkflowRouteDefinition>;
+    const dispatcher = makeWorkflowHttpDispatcher(routes, {
+      verifySignedInternalActorContext: (context) =>
+        Effect.sync(() => {
+          verifierCalls += 1;
+          expect(context.signature).toBe("sig-valid");
+          return TRUSTED_USER_ACTOR;
+        }),
+    });
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: "event-5",
+          approved: true,
+        },
+        auth: {
+          signedInternalActor: {
+            actor: TRUSTED_USER_ACTOR,
+            issuedAt: "2026-02-25T10:00:00.000Z",
+            signature: "sig-valid",
+          },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(verifierCalls).toBe(1);
+    expect(handledInput).toMatchObject({
+      actor: TRUSTED_USER_ACTOR,
+    });
+  });
+
+  test("rejects signed internal actor context when verifier fails", async () => {
+    let handled = 0;
+    const routes = [
+      {
+        key: "approval.approveOutboundAction",
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        actorSource: "trusted",
+        handle: () =>
+          Effect.sync(() => {
+            handled += 1;
+            return { ok: true };
+          }),
+      },
+    ] as ReadonlyArray<WorkflowRouteDefinition>;
+    const dispatcher = makeWorkflowHttpDispatcher(routes, {
+      verifySignedInternalActorContext: () =>
+        Effect.fail(
+          new WorkflowApiError({
+            route: "approval.approveOutboundAction",
+            message: "signed context verification failed",
+            code: "forbidden",
+            statusCode: 403,
+          }),
+        ),
+    });
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: "event-6",
+          approved: true,
+        },
+        auth: {
+          signedInternalActor: {
+            actor: TRUSTED_USER_ACTOR,
+            issuedAt: "2026-02-25T11:00:00.000Z",
+            signature: "sig-invalid",
+          },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        error: "workflow request failed",
+        route: "approval.approveOutboundAction",
+      }),
+    );
+    expect((response.body as { message: string }).message).toContain(
+      "verification",
+    );
+    expect(handled).toBe(0);
+  });
+
+  test("rejects signed internal actor context when verifier is not configured", async () => {
+    let handled = 0;
+    const routes = [
+      {
+        key: "approval.approveOutboundAction",
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        actorSource: "trusted",
+        handle: () =>
+          Effect.sync(() => {
+            handled += 1;
+            return { ok: true };
+          }),
+      },
+    ] as ReadonlyArray<WorkflowRouteDefinition>;
+    const dispatcher = makeWorkflowHttpDispatcher(routes);
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: "event-7",
+          approved: true,
+          actor: ACTOR,
+        },
+        auth: {
+          signedInternalActor: {
+            actor: TRUSTED_USER_ACTOR,
+            issuedAt: "2026-02-25T12:00:00.000Z",
+            signature: "sig-missing-verifier",
+          },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        error: "workflow request failed",
+        route: "approval.approveOutboundAction",
+      }),
+    );
+    expect((response.body as { message: string }).message).toContain(
+      "verification",
+    );
+    expect(handled).toBe(0);
+  });
+
   test("returns 403 when a route returns a forbidden WorkflowApiError", async () => {
     const routes: ReadonlyArray<WorkflowRouteDefinition> = [
       {
         key: "approval.approveOutboundAction",
         method: "POST",
-        path: "/api/workflows/approval/approve-outbound-action",
+        path: APPROVAL_ROUTE_PATH,
         handle: () =>
           Effect.fail(
             new WorkflowApiError({
@@ -214,7 +560,7 @@ describe("api/workflows/http-dispatch", () => {
     const response = await Effect.runPromise(
       dispatcher({
         method: "POST",
-        path: "/api/workflows/approval/approve-outbound-action",
+        path: APPROVAL_ROUTE_PATH,
         body: {},
       }),
     );
@@ -272,7 +618,7 @@ describe("api/workflows/http-dispatch", () => {
       {
         key: "approval.approveOutboundAction",
         method: "POST",
-        path: "/api/workflows/approval/approve-outbound-action",
+        path: APPROVAL_ROUTE_PATH,
         handle: () =>
           Effect.fail(
             new WorkflowApiError({
@@ -290,7 +636,7 @@ describe("api/workflows/http-dispatch", () => {
     const response = await Effect.runPromise(
       dispatcher({
         method: "POST",
-        path: "/api/workflows/approval/approve-outbound-action",
+        path: APPROVAL_ROUTE_PATH,
         body: {},
       }),
     );
@@ -359,6 +705,57 @@ describe("api/workflows/http-dispatch", () => {
     expect(
       (listCall!.input as { beforeUpdatedAt: unknown }).beforeUpdatedAt,
     ).toBeInstanceOf(Date);
+  });
+
+  test("dispatches bodyless POST to job.list with normalized empty filters", async () => {
+    const stub = makeApiStub();
+    const dispatcher = makeWorkflowHttpDispatcher(makeWorkflowRoutes(stub.api));
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: "/api/workflows/job/list",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual([]);
+
+    const listCall = stub.calls.find((call) => call.route === "job.list");
+    expect(listCall).toBeDefined();
+    expect(listCall?.input).toEqual({
+      runState: undefined,
+      limit: undefined,
+      beforeUpdatedAt: undefined,
+    });
+  });
+
+  test("dispatches bodyless POST to activity.list with normalized empty filters", async () => {
+    const stub = makeApiStub();
+    const dispatcher = makeWorkflowHttpDispatcher(makeWorkflowRoutes(stub.api));
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: "/api/workflows/activity/list",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual([]);
+
+    const activityCall = stub.calls.find(
+      (call) => call.route === "activity.list",
+    );
+    expect(activityCall).toBeDefined();
+    expect(activityCall?.input).toEqual({
+      entityType: undefined,
+      entityId: undefined,
+      actorKind: undefined,
+      aiOnly: undefined,
+      limit: undefined,
+      beforeAt: undefined,
+    });
   });
 
   test("dispatches checkpoint.inspect and activity.list routes with the API stub", async () => {

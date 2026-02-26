@@ -13,6 +13,11 @@ import { createEvent } from "../../src/core/domain/event";
 import { makeInMemoryCoreRepository } from "../../src/core/repositories/in-memory-core-repository";
 
 const ACTOR = { id: "user-1", kind: "user" } as const;
+const TRUSTED_SYSTEM_ACTOR = { id: "trusted-system-1", kind: "system" } as const;
+const TRUSTED_OTHER_USER_ACTOR = {
+  id: "trusted-user-2",
+  kind: "user",
+} as const;
 
 const expectOk = async (
   dispatch: ReturnType<typeof makeWorkflowHttpDispatcher>,
@@ -171,6 +176,9 @@ describe("workflow automation edge cases", () => {
           actor: ACTOR,
           at: "2026-02-24T13:02:00.000Z",
         },
+        auth: {
+          sessionActor: ACTOR,
+        },
       }),
     );
     const forbiddenEvent = await Effect.runPromise(
@@ -184,6 +192,26 @@ describe("workflow automation edge cases", () => {
           approved: true,
           actor: { id: "system-1", kind: "system" },
           at: "2026-02-24T13:03:00.000Z",
+        },
+        auth: {
+          sessionActor: { id: "system-1", kind: "system" },
+        },
+      }),
+    );
+    const spoofedEvent = await Effect.runPromise(
+      dispatch({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["approval.approveOutboundAction"],
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: event.id,
+          approved: true,
+          actor: ACTOR,
+          at: "2026-02-24T13:03:30.000Z",
+        },
+        auth: {
+          sessionActor: TRUSTED_SYSTEM_ACTOR,
         },
       }),
     );
@@ -226,6 +254,9 @@ describe("workflow automation edge cases", () => {
           actor: ACTOR,
           at: "2026-02-24T13:08:00.000Z",
         },
+        auth: {
+          sessionActor: ACTOR,
+        },
       }),
     );
     const forbiddenDraft = await Effect.runPromise(
@@ -240,6 +271,26 @@ describe("workflow automation edge cases", () => {
           actor: { id: "system-1", kind: "system" },
           at: "2026-02-24T13:09:00.000Z",
         },
+        auth: {
+          sessionActor: { id: "system-1", kind: "system" },
+        },
+      }),
+    );
+    const spoofedDraft = await Effect.runPromise(
+      dispatch({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["approval.approveOutboundAction"],
+        body: {
+          actionType: "outbound_draft",
+          entityType: "outbound_draft",
+          entityId: "outbound-draft-edge-approval-1",
+          approved: true,
+          actor: ACTOR,
+          at: "2026-02-24T13:09:30.000Z",
+        },
+        auth: {
+          sessionActor: TRUSTED_OTHER_USER_ACTOR,
+        },
       }),
     );
 
@@ -252,12 +303,20 @@ describe("workflow automation edge cases", () => {
       status: 403,
       route: "approval.approveOutboundAction",
     });
+    expectSanitizedError(spoofedEvent, {
+      status: 403,
+      route: "approval.approveOutboundAction",
+    });
     expectSanitizedError(deniedDraft, {
       status: 400,
       route: "approval.approveOutboundAction",
       messageIncludes: "explicit approval",
     });
     expectSanitizedError(forbiddenDraft, {
+      status: 403,
+      route: "approval.approveOutboundAction",
+    });
+    expectSanitizedError(spoofedDraft, {
       status: 403,
       route: "approval.approveOutboundAction",
     });
@@ -455,6 +514,9 @@ describe("workflow automation edge cases", () => {
           approved: false,
           actor: ACTOR,
           at: "2026-02-24T15:04:00.000Z",
+        },
+        auth: {
+          sessionActor: ACTOR,
         },
       }),
     );

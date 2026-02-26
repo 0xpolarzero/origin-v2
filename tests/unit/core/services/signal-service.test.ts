@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Either, Effect } from "effect";
 
 import { OutboundDraft } from "../../../../src/core/domain/outbound-draft";
 import { createSignal } from "../../../../src/core/domain/signal";
@@ -7,6 +7,7 @@ import { makeInMemoryCoreRepository } from "../../../../src/core/repositories/in
 import {
   convertSignal,
   ingestSignal,
+  SignalServiceError,
   triageSignal,
 } from "../../../../src/core/services/signal-service";
 
@@ -72,6 +73,31 @@ describe("signal-service", () => {
     expect(auditTrail).toHaveLength(1);
     expect(auditTrail[0]?.fromState).toBe("untriaged");
     expect(auditTrail[0]?.toState).toBe("triaged");
+  });
+
+  test("triageSignal returns not_found code when signal is missing", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        triageSignal(
+          repository,
+          "signal-missing-404",
+          "needs_follow_up",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T12:01:00.000Z"),
+        ),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(SignalServiceError);
+      expect(result.left).toMatchObject({
+        message: "signal signal-missing-404 was not found",
+        code: "not_found",
+      });
+    }
   });
 
   test("convertSignal creates target entity (Task/Event/Note/Project) and audit linkage", async () => {
@@ -218,8 +244,8 @@ describe("signal-service", () => {
 
     await Effect.runPromise(repository.saveEntity("signal", signal.id, signal));
 
-    await expect(
-      Effect.runPromise(
+    const result = await Effect.runPromise(
+      Effect.either(
         convertSignal(repository, {
           signalId: signal.id,
           targetType: "task",
@@ -228,7 +254,16 @@ describe("signal-service", () => {
           at: new Date("2026-02-23T12:30:00.000Z"),
         }),
       ),
-    ).rejects.toThrow("must be triaged before conversion");
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(SignalServiceError);
+      expect(result.left).toMatchObject({
+        message: "signal signal-untriaged must be triaged before conversion",
+        code: "conflict",
+      });
+    }
   });
 
   test("convertSignal fails gracefully on unknown conversion target", async () => {
