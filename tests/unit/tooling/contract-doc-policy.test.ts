@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  ScriptTarget,
+  createSourceFile,
+  isImportDeclaration,
+  isNamedImports,
+  isStringLiteral,
+  type SourceFile,
+} from "typescript";
 
 import type { WorkflowRouteKey } from "../../../src/contracts/workflow-route-keys";
 import {
@@ -15,17 +23,56 @@ import {
   type WorkflowRouteContractRow,
 } from "../../../src/core/tooling/contract-doc-policy";
 
+const readTypeScriptSource = (relativePath: string): SourceFile =>
+  createSourceFile(
+    relativePath,
+    readFileSync(resolve(import.meta.dir, relativePath), "utf8"),
+    ScriptTarget.Latest,
+    true,
+  );
+
+const collectImportedNamesByModule = (
+  source: SourceFile,
+): Map<string, Set<string>> => {
+  const namesByModule = new Map<string, Set<string>>();
+
+  for (const statement of source.statements) {
+    if (
+      !isImportDeclaration(statement) ||
+      !isStringLiteral(statement.moduleSpecifier)
+    ) {
+      continue;
+    }
+
+    const modulePath = statement.moduleSpecifier.text;
+    const namedBindings = statement.importClause?.namedBindings;
+    if (!namedBindings || !isNamedImports(namedBindings)) {
+      continue;
+    }
+
+    const importedNames = namesByModule.get(modulePath) ?? new Set<string>();
+    for (const element of namedBindings.elements) {
+      importedNames.add(element.propertyName?.text ?? element.name.text);
+    }
+    namesByModule.set(modulePath, importedNames);
+  }
+
+  return namesByModule;
+};
+
 describe("contract-doc-policy", () => {
   test("contract-doc-policy imports WorkflowRouteKey from neutral contracts, not api contracts", () => {
-    const policySource = readFileSync(
-      resolve(import.meta.dir, "../../../src/core/tooling/contract-doc-policy.ts"),
-      "utf8",
+    const policySource = readTypeScriptSource(
+      "../../../src/core/tooling/contract-doc-policy.ts",
     );
+    const importedNamesByModule = collectImportedNamesByModule(policySource);
 
-    expect(policySource).toContain(
-      'import type { WorkflowRouteKey } from "../../contracts/workflow-route-keys";',
-    );
-    expect(policySource).not.toContain("../../api/workflows/contracts");
+    expect(
+      importedNamesByModule.get("../../contracts/workflow-route-keys")?.has(
+        "WorkflowRouteKey",
+      ) ?? false,
+    ).toBe(true);
+    expect(importedNamesByModule.has("../../api/workflows/contracts")).toBe(false);
   });
 
   test("parseMarkdownTableRows extracts rows from the requested heading table", () => {
