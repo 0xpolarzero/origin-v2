@@ -8,6 +8,12 @@ export interface AuditTrailFilter {
   entityId?: string;
 }
 
+export interface JobRunHistoryQuery {
+  jobId: string;
+  limit?: number;
+  beforeAt?: Date;
+}
+
 export interface CoreRepository {
   saveEntity: <T>(
     entityType: EntityType | string,
@@ -25,6 +31,9 @@ export interface CoreRepository {
   listEntities: <T>(
     entityType: EntityType | string,
   ) => Effect.Effect<ReadonlyArray<T>>;
+  listJobRunHistory?: (
+    query: JobRunHistoryQuery,
+  ) => Effect.Effect<ReadonlyArray<unknown>>;
   appendAuditTransition: (transition: AuditTransition) => Effect.Effect<void>;
   listAuditTrail: (
     filter?: AuditTrailFilter,

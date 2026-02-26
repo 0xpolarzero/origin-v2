@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Effect } from "effect";
+import { Either, Effect } from "effect";
 
 import { createAuditTransition } from "../../../../src/core/domain/audit-transition";
 import { createEntry } from "../../../../src/core/domain/entry";
@@ -76,6 +76,193 @@ describe("makeSqliteCoreRepository", () => {
         content: "Persist to sqlite table",
         status: "captured",
       });
+
+      await Effect.runPromise(repository.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("saveEntity persists and listEntities returns job_run_history rows", async () => {
+    const { tempDir, databasePath } = makeTempDatabasePath();
+
+    try {
+      const repository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+
+      await Effect.runPromise(
+        repository.saveEntity("job", "job-history-sqlite-1", {
+          id: "job-history-sqlite-1",
+          name: "History job",
+          runState: "idle",
+          retryCount: 0,
+          createdAt: "2026-02-23T00:00:00.000Z",
+          updatedAt: "2026-02-23T00:00:00.000Z",
+        }),
+      );
+      await Effect.runPromise(
+        repository.saveEntity("job_run_history", "job-run-history-sqlite-1", {
+          id: "job-run-history-sqlite-1",
+          jobId: "job-history-sqlite-1",
+          outcome: "failed",
+          diagnostics: "timeout",
+          retryCount: 0,
+          actorId: "system-1",
+          actorKind: "system",
+          at: "2026-02-23T00:01:00.000Z",
+          createdAt: "2026-02-23T00:01:00.000Z",
+        }),
+      );
+
+      const fetched = await Effect.runPromise(
+        repository.getEntity<{
+          id: string;
+          jobId: string;
+          outcome: string;
+          diagnostics: string;
+          retryCount: number;
+          actorId: string;
+          actorKind: string;
+          at: string;
+          createdAt: string;
+        }>("job_run_history", "job-run-history-sqlite-1"),
+      );
+      const listed = await Effect.runPromise(
+        repository.listEntities<{ id: string; jobId: string }>(
+          "job_run_history",
+        ),
+      );
+
+      expect(fetched).toEqual({
+        id: "job-run-history-sqlite-1",
+        jobId: "job-history-sqlite-1",
+        outcome: "failed",
+        diagnostics: "timeout",
+        retryCount: 0,
+        actorId: "system-1",
+        actorKind: "system",
+        at: "2026-02-23T00:01:00.000Z",
+        createdAt: "2026-02-23T00:01:00.000Z",
+      });
+      expect(listed.map((row) => row.id)).toEqual(["job-run-history-sqlite-1"]);
+      expect(listed[0]?.jobId).toBe("job-history-sqlite-1");
+
+      await Effect.runPromise(repository.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("listJobRunHistory queries job-scoped rows with SQL filtering and ordering", async () => {
+    const { tempDir, databasePath } = makeTempDatabasePath();
+
+    try {
+      const repository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+
+      await Effect.runPromise(
+        repository.saveEntity("job", "job-history-query-1", {
+          id: "job-history-query-1",
+          name: "History query one",
+          runState: "idle",
+          retryCount: 0,
+          createdAt: "2026-02-23T00:00:00.000Z",
+          updatedAt: "2026-02-23T00:00:00.000Z",
+        }),
+      );
+      await Effect.runPromise(
+        repository.saveEntity("job", "job-history-query-2", {
+          id: "job-history-query-2",
+          name: "History query two",
+          runState: "idle",
+          retryCount: 0,
+          createdAt: "2026-02-23T00:00:00.000Z",
+          updatedAt: "2026-02-23T00:00:00.000Z",
+        }),
+      );
+
+      const rows = [
+        {
+          id: "job-run-history-query-1a",
+          jobId: "job-history-query-1",
+          outcome: "failed",
+          diagnostics: "oldest",
+          retryCount: 0,
+          actorId: "system-1",
+          actorKind: "system",
+          at: "2026-02-23T10:00:00.000Z",
+          createdAt: "2026-02-23T10:00:00.000Z",
+        },
+        {
+          id: "job-run-history-query-1b",
+          jobId: "job-history-query-1",
+          outcome: "failed",
+          diagnostics: "tie b",
+          retryCount: 1,
+          actorId: "system-1",
+          actorKind: "system",
+          at: "2026-02-23T11:00:00.000Z",
+          createdAt: "2026-02-23T11:00:00.000Z",
+        },
+        {
+          id: "job-run-history-query-1c",
+          jobId: "job-history-query-1",
+          outcome: "succeeded",
+          diagnostics: "tie c",
+          retryCount: 1,
+          actorId: "system-1",
+          actorKind: "system",
+          at: "2026-02-23T11:00:00.000Z",
+          createdAt: "2026-02-23T11:00:00.000Z",
+        },
+        {
+          id: "job-run-history-query-2a",
+          jobId: "job-history-query-2",
+          outcome: "failed",
+          diagnostics: "other job",
+          retryCount: 0,
+          actorId: "system-1",
+          actorKind: "system",
+          at: "2026-02-23T11:05:00.000Z",
+          createdAt: "2026-02-23T11:05:00.000Z",
+        },
+      ] as const;
+
+      for (const row of rows) {
+        await Effect.runPromise(repository.saveEntity("job_run_history", row.id, row));
+      }
+
+      const listJobRunHistory = (
+        repository as {
+          listJobRunHistory?: (input: {
+            jobId: string;
+            limit?: number;
+            beforeAt?: Date;
+          }) => Effect.Effect<
+            ReadonlyArray<{ id: string; jobId: string; at: string; createdAt: string }>
+          >;
+        }
+      ).listJobRunHistory;
+
+      expect(listJobRunHistory).toBeDefined();
+
+      const queried = await Effect.runPromise(
+        listJobRunHistory!({
+          jobId: "job-history-query-1",
+          beforeAt: new Date("2026-02-23T11:30:00.000Z"),
+          limit: 2,
+        }),
+      );
+
+      expect(queried.map((entry) => entry.id)).toEqual([
+        "job-run-history-query-1c",
+        "job-run-history-query-1b",
+      ]);
+      expect(queried.every((entry) => entry.jobId === "job-history-query-1")).toBe(
+        true,
+      );
 
       await Effect.runPromise(repository.close());
     } finally {
@@ -182,6 +369,83 @@ describe("makeSqliteCoreRepository", () => {
     }
   });
 
+  test("withTransaction isolates overlapping root transactions", async () => {
+    const { tempDir, databasePath } = makeTempDatabasePath();
+
+    try {
+      const repository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+      const rolledBackEntry = await Effect.runPromise(
+        createEntry({
+          id: "entry-sqlite-overlap-a",
+          content: "Outer transaction entry",
+        }),
+      );
+      const committedEntry = await Effect.runPromise(
+        createEntry({
+          id: "entry-sqlite-overlap-b",
+          content: "Concurrent transaction entry",
+        }),
+      );
+
+      let notifyOuterStarted: () => void = () => {};
+      const outerStarted = new Promise<void>((resolve) => {
+        notifyOuterStarted = resolve;
+      });
+      let releaseOuter: () => void = () => {};
+      const outerGate = new Promise<void>((resolve) => {
+        releaseOuter = resolve;
+      });
+
+      const txAPromise = Effect.runPromise(
+        Effect.either(
+          repository.withTransaction!(
+            Effect.gen(function* () {
+              yield* repository.saveEntity(
+                "entry",
+                rolledBackEntry.id,
+                rolledBackEntry,
+              );
+              yield* Effect.sync(() => notifyOuterStarted());
+              yield* Effect.promise(() => outerGate);
+              return yield* Effect.fail(new Error("force outer rollback"));
+            }),
+          ),
+        ),
+      );
+
+      await outerStarted;
+
+      const txBPromise = Effect.runPromise(
+        Effect.either(
+          repository.withTransaction!(
+            repository.saveEntity("entry", committedEntry.id, committedEntry),
+          ),
+        ),
+      );
+
+      releaseOuter();
+
+      const [txAResult, txBResult] = await Promise.all([txAPromise, txBPromise]);
+      expect(Either.isLeft(txAResult)).toBe(true);
+      expect(Either.isRight(txBResult)).toBe(true);
+
+      const rolledBack = await Effect.runPromise(
+        repository.getEntity("entry", rolledBackEntry.id),
+      );
+      const committed = await Effect.runPromise(
+        repository.getEntity("entry", committedEntry.id),
+      );
+
+      expect(rolledBack).toBeUndefined();
+      expect(committed).toEqual(committedEntry);
+
+      await Effect.runPromise(repository.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
   test("getEntity returns undefined for missing rows and parsed entity for existing rows", async () => {
     const { tempDir, databasePath } = makeTempDatabasePath();
 

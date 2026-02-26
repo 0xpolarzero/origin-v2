@@ -1,9 +1,13 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import { Data, Effect, Exit } from "effect";
+import { Data, Effect, Exit, FiberId } from "effect";
 
 import { AuditTransition } from "../../domain/audit-transition";
 import { EntityType } from "../../domain/common";
-import { AuditTrailFilter, CoreRepository } from "../core-repository";
+import {
+  AuditTrailFilter,
+  CoreRepository,
+  JobRunHistoryQuery,
+} from "../core-repository";
 import { runSqliteMigrations } from "./migration-runner";
 import { CORE_DB_MIGRATIONS, SqliteMigration } from "./migrations";
 
@@ -146,6 +150,20 @@ const TABLE_CONFIGS: Record<string, TableConfig> = {
       "diagnostics",
       "created_at",
       "updated_at",
+    ],
+  },
+  job_run_history: {
+    tableName: "job_run_history",
+    columns: [
+      "id",
+      "job_id",
+      "outcome",
+      "diagnostics",
+      "retry_count",
+      "actor_id",
+      "actor_kind",
+      "at",
+      "created_at",
     ],
   },
   notification: {
@@ -466,10 +484,9 @@ export const makeSqliteCoreRepository = (
                     LIMIT ? OFFSET ?
                   `,
                 )
-                .all(
-                  LIST_ENTITIES_PAGE_SIZE,
-                  offset,
-                ) as Array<Record<string, unknown>>,
+                .all(LIST_ENTITIES_PAGE_SIZE, offset) as Array<
+                Record<string, unknown>
+              >,
             catch: (cause) =>
               toRepositoryError(`failed to list ${entityType} entities`, cause),
           });
@@ -486,6 +503,51 @@ export const makeSqliteCoreRepository = (
         }
 
         return entities;
+      });
+
+    const listJobRunHistory = (
+      query: JobRunHistoryQuery,
+    ): Effect.Effect<ReadonlyArray<unknown>, SqliteCoreRepositoryError> =>
+      Effect.gen(function* () {
+        const historyConfig = TABLE_CONFIGS.job_run_history;
+        const beforeAtIso = query.beforeAt?.toISOString();
+
+        const sqlParts = [
+          `
+            SELECT ${historyConfig.columns.join(", ")}
+            FROM ${historyConfig.tableName}
+            WHERE job_id = ?
+          `,
+        ];
+        const params: Array<SqliteValue> = [query.jobId];
+
+        if (beforeAtIso !== undefined) {
+          sqlParts.push("AND at < ?");
+          params.push(beforeAtIso);
+        }
+
+        sqlParts.push("ORDER BY at DESC, created_at DESC, id DESC");
+
+        if (query.limit !== undefined) {
+          sqlParts.push("LIMIT ?");
+          params.push(query.limit);
+        }
+
+        const rows = yield* Effect.try({
+          try: () =>
+            db.query(sqlParts.join("\n")).all(...params) as Array<
+              Record<string, unknown>
+            >,
+          catch: (cause) =>
+            toRepositoryError("failed to list job_run_history rows", cause),
+        });
+
+        const records: Array<unknown> = [];
+        for (const row of rows) {
+          records.push(yield* decodeEntity(row, historyConfig));
+        }
+
+        return records;
       });
 
     const deleteEntity = (
@@ -635,14 +697,16 @@ export const makeSqliteCoreRepository = (
         catch: (cause) =>
           toRepositoryError("failed to close sqlite database", cause),
       });
+    const transactionMutex = yield* Effect.makeSemaphore(1);
     let transactionDepth = 0;
     let savepointCounter = 0;
+    let transactionOwnerThreadName: string | undefined = undefined;
 
-    const withTransaction = <A, E>(
+    const runTransaction = <A, E>(
       effect: Effect.Effect<A, E>,
+      isNested: boolean,
     ): Effect.Effect<A, E | SqliteCoreRepositoryError> =>
       Effect.gen(function* () {
-        const isNested = transactionDepth > 0;
         const savepointName = isNested
           ? `origin_savepoint_${++savepointCounter}`
           : undefined;
@@ -709,10 +773,37 @@ export const makeSqliteCoreRepository = (
         return yield* Effect.failCause(exit.cause);
       });
 
+    const withTransaction = <A, E>(
+      effect: Effect.Effect<A, E>,
+    ): Effect.Effect<A, E | SqliteCoreRepositoryError> =>
+      Effect.fiberIdWith((fiberId) => {
+        const threadName = FiberId.threadName(fiberId);
+        const isNested =
+          transactionDepth > 0 && transactionOwnerThreadName === threadName;
+
+        if (isNested) {
+          return runTransaction(effect, true);
+        }
+
+        return transactionMutex.withPermits(1)(
+          Effect.gen(function* () {
+            transactionOwnerThreadName = threadName;
+            return yield* runTransaction(effect, false);
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                transactionOwnerThreadName = undefined;
+              }),
+            ),
+          ),
+        );
+      });
+
     return {
       saveEntity,
       getEntity,
       listEntities,
+      listJobRunHistory,
       deleteEntity,
       appendAuditTransition,
       listAuditTrail,

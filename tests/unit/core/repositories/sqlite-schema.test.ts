@@ -573,7 +573,9 @@ describe("sqlite baseline schema migrations", () => {
         ISO_1,
       );
       expectAbort(() => {
-        db.query("DELETE FROM project WHERE id = ?").run("project-delete-task-ref");
+        db.query("DELETE FROM project WHERE id = ?").run(
+          "project-delete-task-ref",
+        );
       }, "project.id referenced by task.project_id");
 
       db.query(
@@ -651,7 +653,9 @@ describe("sqlite baseline schema migrations", () => {
         ISO_1,
       );
       expectAbort(() => {
-        db.query("DELETE FROM signal WHERE id = ?").run("signal-delete-outbound-ref");
+        db.query("DELETE FROM signal WHERE id = ?").run(
+          "signal-delete-outbound-ref",
+        );
       }, "signal.id referenced by outbound_draft.source_signal_id");
 
       db.query(
@@ -685,7 +689,9 @@ describe("sqlite baseline schema migrations", () => {
         ISO_1,
       );
       expectAbort(() => {
-        db.query("DELETE FROM project WHERE id = ?").run("project-delete-signal-ref");
+        db.query("DELETE FROM project WHERE id = ?").run(
+          "project-delete-signal-ref",
+        );
       }, "project.id referenced by signal.converted_entity");
 
       db.query(
@@ -719,7 +725,9 @@ describe("sqlite baseline schema migrations", () => {
         ISO_1,
       );
       expectAbort(() => {
-        db.query("DELETE FROM task WHERE id = ?").run("task-delete-notification-ref");
+        db.query("DELETE FROM task WHERE id = ?").run(
+          "task-delete-notification-ref",
+        );
       }, "task.id referenced by notification.related_entity");
 
       db.query(
@@ -761,7 +769,9 @@ describe("sqlite baseline schema migrations", () => {
         ISO_1,
       );
       expectAbort(() => {
-        db.query("DELETE FROM memory WHERE id = ?").run("memory-delete-index-ref");
+        db.query("DELETE FROM memory WHERE id = ?").run(
+          "memory-delete-index-ref",
+        );
       }, "memory.id referenced by memory_key_index.memory_id");
     } finally {
       db.close();
@@ -1620,6 +1630,311 @@ describe("sqlite baseline schema migrations", () => {
         latestVersion: 3,
         updatedAt: ISO_3,
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("schema includes job_run_history table and lookup indexes", async () => {
+    const db = new Database(":memory:");
+
+    try {
+      await applyCoreMigrations(db);
+
+      const columns = db
+        .query("PRAGMA table_info('job_run_history')")
+        .all() as Array<{ name: string }>;
+      expect(columns.map((column) => column.name)).toEqual([
+        "id",
+        "job_id",
+        "outcome",
+        "diagnostics",
+        "retry_count",
+        "actor_id",
+        "actor_kind",
+        "at",
+        "created_at",
+      ]);
+
+      expectIndex(db, "idx_job_run_history_job_id_at", ["job_id", "at"]);
+      expectIndex(db, "idx_job_run_history_created_at", ["created_at"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("job_run_history enforces valid job references and outcomes", async () => {
+    const db = new Database(":memory:");
+
+    try {
+      await applyCoreMigrations(db);
+
+      expectAbort(() => {
+        db.query(
+          `
+            INSERT INTO job_run_history (
+              id,
+              job_id,
+              outcome,
+              diagnostics,
+              retry_count,
+              actor_id,
+              actor_kind,
+              at,
+              created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+        ).run(
+          "job-run-history-missing-job",
+          "job-missing",
+          "failed",
+          "timeout",
+          0,
+          "system-1",
+          "system",
+          ISO_1,
+          ISO_1,
+        );
+      }, "invalid job_run_history.job_id");
+
+      db.query(
+        `
+          INSERT INTO job (
+            id,
+            name,
+            run_state,
+            retry_count,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+      ).run("job-history-1", "Job history", "idle", 0, ISO_1, ISO_1);
+
+      expectAbort(() => {
+        db.query(
+          `
+            INSERT INTO job_run_history (
+              id,
+              job_id,
+              outcome,
+              diagnostics,
+              retry_count,
+              actor_id,
+              actor_kind,
+              at,
+              created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+        ).run(
+          "job-run-history-invalid-outcome",
+          "job-history-1",
+          "unknown",
+          "timeout",
+          0,
+          "system-1",
+          "system",
+          ISO_2,
+          ISO_2,
+        );
+      }, "invalid job_run_history.outcome");
+
+      db.query(
+        `
+          INSERT INTO job_run_history (
+            id,
+            job_id,
+            outcome,
+            diagnostics,
+            retry_count,
+            actor_id,
+            actor_kind,
+            at,
+            created_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "job-run-history-valid",
+        "job-history-1",
+        "failed",
+        "timeout",
+        0,
+        "system-1",
+        "system",
+        ISO_2,
+        ISO_2,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  test("migration backfills job_run_history rows from historical audit_transitions", async () => {
+    const db = new Database(":memory:");
+    const baselineMigrations = CORE_DB_MIGRATIONS.filter(
+      (migration) => migration.id !== "005_job_run_history",
+    );
+    const historyMigration = CORE_DB_MIGRATIONS.filter(
+      (migration) => migration.id === "005_job_run_history",
+    );
+
+    try {
+      await Effect.runPromise(runSqliteMigrations(db, baselineMigrations));
+
+      db.query(
+        `
+          INSERT INTO job (
+            id,
+            name,
+            run_state,
+            retry_count,
+            last_run_at,
+            last_failure_at,
+            diagnostics,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "job-backfill-1",
+        "Backfill job",
+        "failed",
+        1,
+        ISO_3,
+        ISO_3,
+        "latest failure",
+        ISO_1,
+        ISO_3,
+      );
+
+      db.query(
+        `
+          INSERT INTO audit_transitions (
+            id,
+            entity_type,
+            entity_id,
+            from_state,
+            to_state,
+            actor_id,
+            actor_kind,
+            reason,
+            at,
+            metadata
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "audit-job-run-1",
+        "job",
+        "job-backfill-1",
+        "idle",
+        "failed",
+        "system-1",
+        "system",
+        "Job run recorded (failed)",
+        ISO_1,
+        JSON.stringify({ diagnostics: "first failure" }),
+      );
+
+      db.query(
+        `
+          INSERT INTO audit_transitions (
+            id,
+            entity_type,
+            entity_id,
+            from_state,
+            to_state,
+            actor_id,
+            actor_kind,
+            reason,
+            at,
+            metadata
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "audit-job-retry-1",
+        "job",
+        "job-backfill-1",
+        "failed",
+        "retrying",
+        "user-1",
+        "user",
+        "Job retry requested",
+        ISO_2,
+        JSON.stringify({ previousFailure: "first failure" }),
+      );
+
+      db.query(
+        `
+          INSERT INTO audit_transitions (
+            id,
+            entity_type,
+            entity_id,
+            from_state,
+            to_state,
+            actor_id,
+            actor_kind,
+            reason,
+            at,
+            metadata
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "audit-job-run-2",
+        "job",
+        "job-backfill-1",
+        "retrying",
+        "succeeded",
+        "system-1",
+        "system",
+        "Job run recorded (succeeded)",
+        ISO_3,
+        JSON.stringify({ diagnostics: "recovered" }),
+      );
+
+      await Effect.runPromise(runSqliteMigrations(db, historyMigration));
+
+      const rows = db
+        .query(
+          `
+            SELECT
+              job_id AS jobId,
+              outcome,
+              diagnostics,
+              retry_count AS retryCount,
+              actor_id AS actorId,
+              actor_kind AS actorKind,
+              at
+            FROM job_run_history
+            WHERE job_id = ?
+            ORDER BY at ASC
+          `,
+        )
+        .all("job-backfill-1") as Array<{
+        jobId: string;
+        outcome: string;
+        diagnostics: string;
+        retryCount: number;
+        actorId: string;
+        actorKind: string;
+        at: string;
+      }>;
+
+      expect(rows.map((row) => row.outcome)).toEqual(["failed", "succeeded"]);
+      expect(rows.map((row) => row.diagnostics)).toEqual([
+        "first failure",
+        "recovered",
+      ]);
+      expect(rows.map((row) => row.actorId)).toEqual(["system-1", "system-1"]);
+      expect(rows.map((row) => row.actorKind)).toEqual(["system", "system"]);
+      expect(rows.map((row) => row.at)).toEqual([ISO_1, ISO_3]);
+      expect(rows[1]!.retryCount).toBeGreaterThanOrEqual(rows[0]!.retryCount);
     } finally {
       db.close();
     }

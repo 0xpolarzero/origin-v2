@@ -15,6 +15,7 @@ const EXPECTED_CORE_MIGRATION_IDS = [
   "002_core_constraints_indexes",
   "003_relation_integrity",
   "004_audit_entity_versions",
+  "005_job_run_history",
 ];
 
 const listLedgerRows = (db: Database): Array<LedgerRow> =>

@@ -36,6 +36,7 @@ export type WorkflowRouteKey =
   | "job.create"
   | "job.recordRun"
   | "job.inspectRun"
+  | "job.listHistory"
   | "job.retry"
   | "checkpoint.create"
   | "checkpoint.keep"
@@ -88,6 +89,12 @@ export interface RetryJobRequest {
   jobId: string;
   actor: ActorRef;
   at?: Date;
+}
+
+export interface ListJobRunHistoryRequest {
+  jobId: string;
+  limit?: number;
+  beforeAt?: Date;
 }
 
 export interface KeepCheckpointRequest {
@@ -157,6 +164,9 @@ export interface WorkflowApi {
   inspectJobRun: (
     input: InspectJobRunRequest,
   ) => ApiOutput<CorePlatform["inspectJobRun"]>;
+  listJobRunHistory: (
+    input: ListJobRunHistoryRequest,
+  ) => ApiOutput<CorePlatform["listJobRunHistory"]>;
   retryJob: (input: RetryJobRequest) => ApiOutput<CorePlatform["retryJob"]>;
   createWorkflowCheckpoint: (
     input: CreateWorkflowCheckpointInput,

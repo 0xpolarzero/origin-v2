@@ -33,7 +33,9 @@ import {
 import { requestEventSync } from "../services/event-service";
 import {
   inspectJobRun,
+  JobRunHistoryRecord,
   JobRunInspection,
+  listJobRunHistory,
   recordJobRun,
   RecordJobRunInput,
   retryJobRun,
@@ -127,6 +129,10 @@ export interface CorePlatform {
   createJob: (input: CreateJobInPlatformInput) => Effect.Effect<Job, Error>;
   recordJobRun: (input: RecordJobRunInput) => ReturnType<typeof recordJobRun>;
   inspectJobRun: (jobId: string) => Effect.Effect<JobRunInspection, Error>;
+  listJobRunHistory: (
+    jobId: string,
+    options?: { limit?: number; beforeAt?: Date },
+  ) => Effect.Effect<ReadonlyArray<JobRunHistoryRecord>, Error>;
   retryJob: (
     jobId: string,
     actor: ActorRef,
@@ -358,12 +364,20 @@ export const buildCorePlatform = (
         inspectJobRun(repository, jobId).pipe(
           Effect.mapError((error) => new Error(error.message)),
         ),
+      listJobRunHistory: (jobId, options) =>
+        listJobRunHistory(repository, {
+          jobId,
+          limit: options?.limit,
+          beforeAt: options?.beforeAt,
+        }).pipe(Effect.mapError((error) => new Error(error.message))),
       retryJob: (jobId, actor, at) =>
         withMutationBoundary(retryJobRun(repository, jobId, actor, at)),
       createWorkflowCheckpoint: (input) =>
         withMutationBoundary(createWorkflowCheckpoint(repository, input)),
       keepCheckpoint: (checkpointId, actor, at) =>
-        withMutationBoundary(keepCheckpoint(repository, checkpointId, actor, at)),
+        withMutationBoundary(
+          keepCheckpoint(repository, checkpointId, actor, at),
+        ),
       recoverCheckpoint: (checkpointId, actor, at) =>
         withMutationBoundary(
           recoverCheckpoint(repository, checkpointId, actor, at),

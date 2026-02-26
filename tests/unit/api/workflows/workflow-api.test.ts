@@ -113,6 +113,11 @@ const recordJobRunInput = {
 const inspectJobRunInput = {
   jobId: "job-api-1",
 };
+const listJobRunHistoryInput = {
+  jobId: "job-api-1",
+  limit: 20,
+  beforeAt: new Date("2026-02-23T11:30:00.000Z"),
+};
 const retryJobInput = {
   jobId: "job-api-1",
   actor: ACTOR,
@@ -348,6 +353,24 @@ const HANDLER_CASES: ReadonlyArray<HandlerCase> = [
     }),
   },
   {
+    name: "listJobRunHistory",
+    route: "job.listHistory",
+    invoke: (api) => api.listJobRunHistory(listJobRunHistoryInput),
+    expectedArgs: [
+      listJobRunHistoryInput.jobId,
+      {
+        limit: listJobRunHistoryInput.limit,
+        beforeAt: listJobRunHistoryInput.beforeAt,
+      },
+    ],
+    setMethod: (impl) => ({
+      listJobRunHistory: (
+        jobId: string,
+        options: { limit?: number; beforeAt?: Date },
+      ) => impl(jobId, options),
+    }),
+  },
+  {
     name: "retryJob",
     route: "job.retry",
     invoke: (api) => api.retryJob(retryJobInput),
@@ -418,6 +441,7 @@ describe("api/workflows/workflow-api", () => {
       "ingestSignal",
       "inspectJobRun",
       "keepCheckpoint",
+      "listJobRunHistory",
       "recordJobRun",
       "recoverCheckpoint",
       "rejectEntrySuggestion",
