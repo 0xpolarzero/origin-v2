@@ -4,6 +4,7 @@ import { Either, Effect } from "effect";
 import {
   acceptEntryAsTask,
   captureEntry,
+  EntryServiceError,
   editEntrySuggestion,
   rejectEntrySuggestion,
   suggestEntryAsTask,
@@ -116,6 +117,30 @@ describe("entry-service", () => {
     expect(entryAuditTrail[1]?.toState).toBe("accepted_as_task");
     expect(taskAuditTrail).toHaveLength(1);
     expect(taskAuditTrail[0]?.metadata?.sourceEntryId).toBe("entry-2");
+  });
+
+  test("suggestEntryAsTask returns not_found code when entry is missing", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        suggestEntryAsTask(repository, {
+          entryId: "entry-missing-404",
+          suggestedTitle: "Missing entry suggestion",
+          actor: { id: "ai-1", kind: "ai" },
+          at: new Date("2026-02-23T11:00:00.000Z"),
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(EntryServiceError);
+      expect(result.left).toMatchObject({
+        message: "entry entry-missing-404 was not found",
+        code: "not_found",
+      });
+    }
   });
 
   test("supports AI suggestion creation, edit, and rejection for captured entries", async () => {

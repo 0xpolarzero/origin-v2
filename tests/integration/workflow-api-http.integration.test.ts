@@ -350,6 +350,87 @@ describe("workflow-api http integration", () => {
     });
   });
 
+  test("capture.acceptAsTask/planning.completeTask/signal.triage map missing resources to 404 and signal.convert precondition to 409", async () => {
+    const platform = await Effect.runPromise(buildCorePlatform());
+    const dispatcher = makeWorkflowHttpDispatcher(
+      makeWorkflowRoutes(makeWorkflowApi({ platform })),
+    );
+
+    const missingEntry = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["capture.acceptAsTask"],
+        body: {
+          entryId: "entry-http-missing-404",
+          taskId: "task-http-created-1",
+          actor: ACTOR,
+          at: "2026-02-23T09:35:00.000Z",
+        },
+      }),
+    );
+    const missingTask = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["planning.completeTask"],
+        body: {
+          taskId: "task-http-missing-404",
+          actor: ACTOR,
+          at: "2026-02-23T09:36:00.000Z",
+        },
+      }),
+    );
+    const missingSignal = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["signal.triage"],
+        body: {
+          signalId: "signal-http-missing-404",
+          decision: "ready_for_conversion",
+          actor: ACTOR,
+          at: "2026-02-23T09:37:00.000Z",
+        },
+      }),
+    );
+
+    await expectOk(dispatcher, "signal.ingest", {
+      signalId: "signal-http-untriaged-1",
+      source: "email",
+      payload: "needs conversion",
+      actor: ACTOR,
+      at: "2026-02-23T09:38:00.000Z",
+    });
+    const conflictSignalConvert = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["signal.convert"],
+        body: {
+          signalId: "signal-http-untriaged-1",
+          targetType: "task",
+          targetId: "task-http-from-signal-1",
+          actor: ACTOR,
+          at: "2026-02-23T09:39:00.000Z",
+        },
+      }),
+    );
+
+    expectSanitizedError(missingEntry, {
+      status: 404,
+      route: "capture.acceptAsTask",
+    });
+    expectSanitizedError(missingTask, {
+      status: 404,
+      route: "planning.completeTask",
+    });
+    expectSanitizedError(missingSignal, {
+      status: 404,
+      route: "signal.triage",
+    });
+    expectSanitizedError(conflictSignalConvert, {
+      status: 409,
+      route: "signal.convert",
+    });
+  });
+
   test("outbound-draft approval rejects non-user actors with sanitized 403", async () => {
     const platform = await Effect.runPromise(buildCorePlatform());
     const dispatcher = makeWorkflowHttpDispatcher(

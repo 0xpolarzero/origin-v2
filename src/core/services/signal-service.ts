@@ -12,6 +12,7 @@ import { CoreRepository } from "../repositories/core-repository";
 
 export class SignalServiceError extends Data.TaggedError("SignalServiceError")<{
   message: string;
+  code?: "not_found" | "conflict";
 }> {}
 
 export type SignalTriageDecision = string;
@@ -53,7 +54,10 @@ const loadSignal = (
 
     if (!signal) {
       return yield* Effect.fail(
-        new SignalServiceError({ message: `signal ${signalId} was not found` }),
+        new SignalServiceError({
+          message: `signal ${signalId} was not found`,
+          code: "not_found",
+        }),
       );
     }
 
@@ -159,6 +163,7 @@ export const convertSignal = (
       return yield* Effect.fail(
         new SignalServiceError({
           message: `signal ${signal.id} must be triaged before conversion`,
+          code: "conflict",
         }),
       );
     }

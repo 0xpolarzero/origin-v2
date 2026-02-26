@@ -9,8 +9,11 @@ import {
 import { WorkflowApiError } from "../../../../src/api/workflows/errors";
 import { ApprovalServiceError } from "../../../../src/core/services/approval-service";
 import { CheckpointServiceError } from "../../../../src/core/services/checkpoint-service";
+import { EntryServiceError } from "../../../../src/core/services/entry-service";
 import { EventServiceError } from "../../../../src/core/services/event-service";
 import { JobServiceError } from "../../../../src/core/services/job-service";
+import { SignalServiceError } from "../../../../src/core/services/signal-service";
+import { TaskTransitionError } from "../../../../src/core/services/task-service";
 import { makeWorkflowApi } from "../../../../src/api/workflows/workflow-api";
 
 const ACTOR = { id: "user-1", kind: "user" } as const;
@@ -706,6 +709,76 @@ describe("api/workflows/workflow-api", () => {
         code: "not_found",
         statusCode: 404,
         message: "job job-api-404 was not found",
+      });
+    }
+  });
+
+  test("capture.acceptAsTask, planning.completeTask, and signal.convert preserve mapped service metadata", async () => {
+    const platform = makePlatformStub({
+      acceptEntryAsTask: () =>
+        Effect.fail(
+          new EntryServiceError({
+            message: "entry entry-api-404 was not found",
+            code: "not_found",
+          }),
+        ),
+      completeTask: () =>
+        Effect.fail(
+          new TaskTransitionError({
+            message: "task task-api-404 was not found",
+            code: "not_found",
+          }),
+        ),
+      convertSignal: () =>
+        Effect.fail(
+          new SignalServiceError({
+            message: "signal signal-api-1 must be triaged before conversion",
+            code: "conflict",
+          }),
+        ),
+    });
+    const api = makeWorkflowApi({ platform });
+
+    const acceptResult = await Effect.runPromise(
+      Effect.either(api.acceptEntryAsTask(acceptAsTaskInput)),
+    );
+    const completeResult = await Effect.runPromise(
+      Effect.either(api.completeTask(completeTaskInput)),
+    );
+    const convertResult = await Effect.runPromise(
+      Effect.either(api.convertSignal(convertSignalInput)),
+    );
+
+    expect(Either.isLeft(acceptResult)).toBe(true);
+    if (Either.isLeft(acceptResult)) {
+      expect(acceptResult.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "capture.acceptAsTask",
+        code: "not_found",
+        statusCode: 404,
+        message: "entry entry-api-404 was not found",
+      });
+    }
+
+    expect(Either.isLeft(completeResult)).toBe(true);
+    if (Either.isLeft(completeResult)) {
+      expect(completeResult.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "planning.completeTask",
+        code: "not_found",
+        statusCode: 404,
+        message: "task task-api-404 was not found",
+      });
+    }
+
+    expect(Either.isLeft(convertResult)).toBe(true);
+    if (Either.isLeft(convertResult)) {
+      expect(convertResult.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "signal.convert",
+        code: "conflict",
+        statusCode: 409,
+        message: "signal signal-api-1 must be triaged before conversion",
       });
     }
   });
