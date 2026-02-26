@@ -9,7 +9,7 @@
     "test:core": "bun test tests/unit/core tests/integration/core-platform.integration.test.ts tests/integration/workflow-automation.integration.test.ts",
     "test:integration:core": "bun test tests/integration/core-platform.integration.test.ts",
     "test:integration:db": "bun test tests/integration/database-core-platform.integration.test.ts",
-    "test:integration:api": "bun test tests/integration/api-data.integration.test.ts",
+    "test:integration:api": "bun test tests/integration/api-data.integration.test.ts tests/integration/workflow-api.integration.test.ts",
     "test:integration:workflow": "bun test tests/integration/workflow-automation.integration.test.ts",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json"
   },
