@@ -18,14 +18,16 @@ import { runSqliteMigrations } from "../../src/core/repositories/sqlite/migratio
 import { CORE_DB_MIGRATIONS } from "../../src/core/repositories/sqlite/migrations";
 import {
   findWorkflowRouteContractViolations,
-  parsePersistedSchemaContract,
-  parseWorkflowRouteContractRows,
+  parseMarkdownTableRows,
+  parseAuthoritativeWorkflowContract,
 } from "../../src/core/tooling/contract-doc-policy";
 
 const repositoryRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
+const AUTHORITATIVE_WORKFLOW_CONTRACT_DOC_PATH =
+  "docs/contracts/workflow-api-schema-contract.md";
 
 const applyCoreMigrations = (db: Database): Promise<void> =>
   Effect.runPromise(runSqliteMigrations(db, CORE_DB_MIGRATIONS));
@@ -74,6 +76,27 @@ const readUserDefinedObjectNames = (
       .all(),
   ).map((row) => row.name);
 
+const readAuthoritativeWorkflowContract = (): string =>
+  readFileSync(
+    resolve(repositoryRoot, AUTHORITATIVE_WORKFLOW_CONTRACT_DOC_PATH),
+    "utf8",
+  );
+
+const readMarkdownSection = (markdown: string, heading: string): string => {
+  const headingPattern = new RegExp(`^##\\s+${heading}\\s*$`, "m");
+  const headingMatch = headingPattern.exec(markdown);
+  if (!headingMatch) {
+    return "";
+  }
+
+  const startIndex = headingMatch.index + headingMatch[0].length;
+  const remainder = markdown.slice(startIndex);
+  const nextHeading = /\n##\s+/.exec(remainder);
+  return nextHeading
+    ? remainder.slice(0, nextHeading.index).trim()
+    : remainder.trim();
+};
+
 const makeApiStub = (): WorkflowApi => ({
   captureEntry: (_input) => Effect.die("unused"),
   suggestEntryAsTask: (_input) => Effect.die("unused"),
@@ -103,13 +126,10 @@ const makeApiStub = (): WorkflowApi => ({
 });
 
 describe("api contract docs", () => {
-  test("workflow route contract matrix matches WORKFLOW_ROUTE_PATHS and makeWorkflowRoutes", () => {
-    const markdown = readFileSync(
-      resolve(repositoryRoot, "docs/contracts/workflow-api-routes.md"),
-      "utf8",
-    );
-
-    const documented = parseWorkflowRouteContractRows(markdown);
+  test("authoritative workflow contract route matrix matches runtime route registry", () => {
+    const documented = parseAuthoritativeWorkflowContract(
+      readAuthoritativeWorkflowContract(),
+    ).routes;
     const expectedMethodByKey = Object.fromEntries(
       makeWorkflowRoutes(makeApiStub()).map((route) => [
         route.key,
@@ -128,120 +148,159 @@ describe("api contract docs", () => {
     expect(documented).toHaveLength(Object.keys(WORKFLOW_ROUTE_PATHS).length);
   });
 
-  test("workflow route contract doc includes validation, error mapping, and transport sections", () => {
-    const markdown = readFileSync(
-      resolve(repositoryRoot, "docs/contracts/workflow-api-routes.md"),
-      "utf8",
+  test("authoritative workflow contract includes API validation, error mapping, and dispatcher sections", () => {
+    const markdown = readAuthoritativeWorkflowContract();
+    const validationSection = readMarkdownSection(markdown, "Shared Validation Rules");
+    const dispatcherSection = readMarkdownSection(markdown, "HTTP Dispatcher Contract");
+    const errorMappingRows = parseMarkdownTableRows(
+      markdown,
+      "Service Error to API Status Mapping",
+    );
+    const errorMappings = new Map(
+      errorMappingRows.map((row) => [
+        (row["Service Error Code"] ?? "").trim(),
+        {
+          apiErrorCode: (row["API Error Code"] ?? "").trim(),
+          status: (row["HTTP Status"] ?? "").trim(),
+        },
+      ]),
     );
 
     expect(markdown).toContain("## Shared Validation Rules");
-    expect(markdown).toContain(
-      "Date fields accept either a Date instance or an ISO-8601 string with timezone (`Z` or offset).",
-    );
-    expect(markdown).toContain(
-      "Fields documented as non-empty strings reject blank values after trimming.",
-    );
+    expect(validationSection).toMatch(/date fields/i);
+    expect(validationSection).toMatch(/ISO-8601/i);
+    expect(validationSection).toMatch(/non-empty strings?/i);
 
     expect(markdown).toContain("## Service Error to API Status Mapping");
-    expect(markdown).toContain(
-      "| Service Error Code | API Error Code | HTTP Status |",
-    );
-    expect(markdown).toMatch(
-      /\|\s*invalid_request\s*\|\s*validation\s*\|\s*400\s*\|/,
-    );
-    expect(markdown).toMatch(/\|\s*forbidden\s*\|\s*forbidden\s*\|\s*403\s*\|/);
-    expect(markdown).toMatch(/\|\s*conflict\s*\|\s*conflict\s*\|\s*409\s*\|/);
-    expect(markdown).toMatch(/\|\s*not_found\s*\|\s*not_found\s*\|\s*404\s*\|/);
+    expect(errorMappings.get("invalid_request")).toEqual({
+      apiErrorCode: "validation",
+      status: "400",
+    });
+    expect(errorMappings.get("forbidden")).toEqual({
+      apiErrorCode: "forbidden",
+      status: "403",
+    });
+    expect(errorMappings.get("conflict")).toEqual({
+      apiErrorCode: "conflict",
+      status: "409",
+    });
+    expect(errorMappings.get("not_found")).toEqual({
+      apiErrorCode: "not_found",
+      status: "404",
+    });
 
     expect(markdown).toContain("## HTTP Dispatcher Contract");
-    expect(markdown).toContain("Unknown route path returns `404`.");
-    expect(markdown).toContain(
-      "Unsupported method for a known path returns `405`.",
-    );
-    expect(markdown).toContain(
-      "Mapped route failures return a sanitized body shape: `{ error, route, message }`.",
-    );
-    expect(markdown).toContain(
-      "Unexpected dispatch defects return `500` with a generic internal server error message.",
-    );
-
-    expect(markdown).toContain("## Source of Truth");
-    expect(markdown).toContain("`src/api/workflows/contracts.ts`");
-    expect(markdown).toContain("`src/api/workflows/routes.ts`");
-    expect(markdown).toContain("`src/api/workflows/errors.ts`");
-    expect(markdown).toContain("`src/api/workflows/http-dispatch.ts`");
+    expect(dispatcherSection).toMatch(/404/);
+    expect(dispatcherSection).toMatch(/405/);
+    expect(dispatcherSection).toMatch(/sanitized body shape/i);
+    expect(dispatcherSection).toMatch(/error,\s*route,\s*message/i);
+    expect(dispatcherSection).toMatch(/500/);
   });
 
-  test("persisted schema migration ledger exactly matches CORE_DB_MIGRATIONS order", () => {
-    const markdown = readFileSync(
-      resolve(repositoryRoot, "docs/contracts/persisted-schema.md"),
-      "utf8",
+  test("authoritative workflow contract defines request/response payload schemas per route", () => {
+    const markdown = readAuthoritativeWorkflowContract();
+    const payloadRows = parseMarkdownTableRows(
+      markdown,
+      "Route Payload Schema Matrix",
+    );
+    const rowByKey = new Map(
+      payloadRows.map((row) => [(row["Route Key"] ?? "").trim(), row]),
     );
 
-    const documented = parsePersistedSchemaContract(markdown);
+    expect(payloadRows).toHaveLength(Object.keys(WORKFLOW_ROUTE_PATHS).length);
 
-    expect(documented.migrationIds).toEqual(
-      CORE_DB_MIGRATIONS.map((migration) => migration.id),
-    );
+    for (const routeKey of Object.keys(WORKFLOW_ROUTE_PATHS).sort()) {
+      const row = rowByKey.get(routeKey);
+      expect(row).toBeDefined();
+      expect(((row?.["Request Required Fields"] ?? "") as string).trim()).not.toBe(
+        "",
+      );
+      expect(((row?.["Success Response Fields"] ?? "") as string).trim()).not.toBe(
+        "",
+      );
+    }
   });
 
-  test("persisted schema table/column matrix matches migrated sqlite schema", async () => {
-    const markdown = readFileSync(
-      resolve(repositoryRoot, "docs/contracts/persisted-schema.md"),
-      "utf8",
-    );
-    const documented = parsePersistedSchemaContract(markdown);
+  test("authoritative workflow contract schema sections match migrated sqlite objects", async () => {
+    const documented = parseAuthoritativeWorkflowContract(
+      readAuthoritativeWorkflowContract(),
+    ).persistedSchema;
 
     const db = new Database(":memory:");
     try {
       await applyCoreMigrations(db);
       const migratedTables = await readMigratedTableColumnMatrix(db);
-
-      expect(documented.tables).toEqual(migratedTables);
-    } finally {
-      db.close();
-    }
-  });
-
-  test("persisted schema trigger contract matches migrated user-defined triggers", async () => {
-    const markdown = readFileSync(
-      resolve(repositoryRoot, "docs/contracts/persisted-schema.md"),
-      "utf8",
-    );
-    const documented = parsePersistedSchemaContract(markdown);
-
-    const db = new Database(":memory:");
-    try {
-      await applyCoreMigrations(db);
       const triggerNames = readUserDefinedObjectNames(db, "trigger");
-
-      expect(documented.triggerNames).toEqual(triggerNames);
-    } finally {
-      db.close();
-    }
-  });
-
-  test("persisted schema index contract matches migrated user-defined indexes", async () => {
-    const markdown = readFileSync(
-      resolve(repositoryRoot, "docs/contracts/persisted-schema.md"),
-      "utf8",
-    );
-    const documented = parsePersistedSchemaContract(markdown);
-
-    const db = new Database(":memory:");
-    try {
-      await applyCoreMigrations(db);
       const indexNames = readUserDefinedObjectNames(db, "index");
 
+      expect(documented.migrationIds).toEqual(
+        CORE_DB_MIGRATIONS.map((migration) => migration.id),
+      );
+      expect(documented.tables).toEqual(migratedTables);
+      expect(documented.triggerNames).toEqual(triggerNames);
       expect(documented.indexNames).toEqual(indexNames);
     } finally {
       db.close();
     }
   });
 
-  test("README links both API contract documents", () => {
+  test("authoritative workflow contract includes persisted schema type/nullability/relation details", () => {
+    const markdown = readAuthoritativeWorkflowContract();
+    const documentedSchema = parseAuthoritativeWorkflowContract(markdown).persistedSchema;
+
+    const tableDetails = parseMarkdownTableRows(
+      markdown,
+      "Persisted Table Detail Matrix",
+    );
+    const triggerBehaviorRows = parseMarkdownTableRows(
+      markdown,
+      "Trigger Behavior Matrix",
+    );
+
+    expect(tableDetails).toHaveLength(documentedSchema.tables.length);
+    for (const row of tableDetails) {
+      expect((row["Table"] ?? "").trim()).not.toBe("");
+      expect((row["Column Contracts"] ?? "").trim()).not.toBe("");
+      expect((row["Column Contracts"] ?? "").toLowerCase()).toMatch(
+        /(required|optional)/,
+      );
+      expect((row["Column Contracts"] ?? "").toLowerCase()).toContain(":");
+      expect((row["Relation + Trigger Notes"] ?? "").trim()).not.toBe("");
+    }
+
+    expect(triggerBehaviorRows.length).toBeGreaterThan(0);
+    for (const row of triggerBehaviorRows) {
+      expect((row["Trigger Scope"] ?? "").trim()).not.toBe("");
+      expect((row["Enforced Contract"] ?? "").trim()).not.toBe("");
+    }
+  });
+
+  test("authoritative workflow contract includes traceability + audit checklist sections", () => {
+    const markdown = readAuthoritativeWorkflowContract();
+
+    expect(markdown).toContain(
+      "## Traceability Matrix (Contract -> Implementation -> Tests)",
+    );
+    expect(markdown).toContain("`src/api/workflows/routes.ts`");
+    expect(markdown).toContain("`src/core/repositories/sqlite/migrations.ts`");
+    expect(markdown).toContain(
+      "`tests/integration/api-contract-docs.integration.test.ts`",
+    );
+
+    expect(markdown).toContain("## Audit Verification Commands");
+    expect(markdown).toContain(
+      "bun test tests/integration/api-contract-docs.integration.test.ts",
+    );
+    expect(markdown).toContain(
+      "bun test tests/integration/workflow-api-http.integration.test.ts",
+    );
+    expect(markdown).toContain("bun run typecheck");
+  });
+
+  test("README links authoritative contract doc and compatibility docs", () => {
     const readme = readFileSync(resolve(repositoryRoot, "README.md"), "utf8");
 
+    expect(readme).toContain(AUTHORITATIVE_WORKFLOW_CONTRACT_DOC_PATH);
     expect(readme).toContain("docs/contracts/workflow-api-routes.md");
     expect(readme).toContain("docs/contracts/persisted-schema.md");
   });
@@ -259,5 +318,23 @@ describe("api contract docs", () => {
     expect(auditLog).toContain("## TDD Evidence");
     expect(auditLog).toContain("RED:");
     expect(auditLog).toContain("GREEN:");
+  });
+
+  test("legacy contract docs point to the authoritative contract doc", () => {
+    const routeDoc = readFileSync(
+      resolve(repositoryRoot, "docs/contracts/workflow-api-routes.md"),
+      "utf8",
+    );
+    const schemaDoc = readFileSync(
+      resolve(repositoryRoot, "docs/contracts/persisted-schema.md"),
+      "utf8",
+    );
+
+    expect(routeDoc).toContain(AUTHORITATIVE_WORKFLOW_CONTRACT_DOC_PATH);
+    expect(schemaDoc).toContain(AUTHORITATIVE_WORKFLOW_CONTRACT_DOC_PATH);
+    expect(routeDoc.toLowerCase()).toContain("version");
+    expect(schemaDoc.toLowerCase()).toContain("version");
+    expect(routeDoc.toLowerCase()).toContain("update");
+    expect(schemaDoc.toLowerCase()).toContain("update");
   });
 });

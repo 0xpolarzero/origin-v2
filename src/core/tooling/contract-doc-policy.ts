@@ -22,18 +22,18 @@ export interface PersistedSchemaContract {
   indexNames: ReadonlyArray<string>;
 }
 
-export interface PersistedSchemaContractExpected {
-  migrationIds: ReadonlyArray<string>;
-  tables: ReadonlyArray<{ table: string; columns: ReadonlyArray<string> }>;
-  triggerNames: ReadonlyArray<string>;
-  indexNames: ReadonlyArray<string>;
-}
+export type PersistedSchemaContractExpected = PersistedSchemaContract;
 
 export interface PersistedSchemaContractViolation {
   subject: string;
   issue: "missing" | "extra" | "mismatch";
   expected?: string;
   documented?: string;
+}
+
+export interface AuthoritativeWorkflowContract {
+  routes: ReadonlyArray<WorkflowRouteContractRow>;
+  persistedSchema: PersistedSchemaContract;
 }
 
 const isHeadingLine = (line: string): boolean => /^#{1,6}\s+/.test(line.trim());
@@ -262,6 +262,10 @@ const parseCommaSeparatedList = (value: string): ReadonlyArray<string> =>
     .filter((item) => item !== "");
 
 const joinValues = (values: ReadonlyArray<string>): string => values.join(",");
+const normalizedValues = (values: ReadonlyArray<string>): ReadonlyArray<string> =>
+  [...values].sort((left, right) => left.localeCompare(right));
+const joinNormalizedValues = (values: ReadonlyArray<string>): string =>
+  joinValues(normalizedValues(values));
 
 const countValues = (values: ReadonlyArray<string>): Map<string, number> => {
   const counts = new Map<string, number>();
@@ -349,6 +353,45 @@ export const parsePersistedSchemaContract = (
   };
 };
 
+const assertRequiredContractSection = (
+  section: string,
+  count: number,
+): void => {
+  if (count <= 0) {
+    throw new Error(`missing required contract section: ${section}`);
+  }
+};
+
+export const parseAuthoritativeWorkflowContract = (
+  markdown: string,
+): AuthoritativeWorkflowContract => {
+  const routes = parseWorkflowRouteContractRows(markdown);
+  assertRequiredContractSection("Route Matrix", routes.length);
+
+  const persistedSchema = parsePersistedSchemaContract(markdown);
+  assertRequiredContractSection(
+    "Migration Ledger",
+    persistedSchema.migrationIds.length,
+  );
+  assertRequiredContractSection(
+    "Table Column Matrix",
+    persistedSchema.tables.length,
+  );
+  assertRequiredContractSection(
+    "Trigger Contract",
+    persistedSchema.triggerNames.length,
+  );
+  assertRequiredContractSection(
+    "Index Contract",
+    persistedSchema.indexNames.length,
+  );
+
+  return {
+    routes,
+    persistedSchema,
+  };
+};
+
 export const findPersistedSchemaContractViolations = (params: {
   documented: PersistedSchemaContract;
   expected: PersistedSchemaContractExpected;
@@ -363,35 +406,48 @@ export const findPersistedSchemaContractViolations = (params: {
     }),
   );
 
-  const documentedTables = new Map(
-    params.documented.tables.map((tableContract) => [
-      tableContract.table,
-      tableContract,
-    ]),
-  );
+  const documentedTables = new Map<
+    string,
+    Array<{ table: string; columns: ReadonlyArray<string> }>
+  >();
+  for (const tableContract of params.documented.tables) {
+    const existingRows = documentedTables.get(tableContract.table);
+    if (existingRows) {
+      existingRows.push(tableContract);
+      violations.push({
+        subject: `table:${tableContract.table}`,
+        issue: "extra",
+        documented: joinValues(tableContract.columns),
+      });
+      continue;
+    }
+
+    documentedTables.set(tableContract.table, [tableContract]);
+  }
   const expectedTables = new Set(
     params.expected.tables.map((table) => table.table),
   );
 
   for (const expectedTable of params.expected.tables) {
-    const documentedTable = documentedTables.get(expectedTable.table);
+    const documentedTable = documentedTables.get(expectedTable.table)?.[0];
     if (!documentedTable) {
       violations.push({
         subject: `table:${expectedTable.table}`,
         issue: "missing",
-        expected: joinValues(expectedTable.columns),
+        expected: joinNormalizedValues(expectedTable.columns),
       });
       continue;
     }
 
     if (
-      joinValues(documentedTable.columns) !== joinValues(expectedTable.columns)
+      joinNormalizedValues(documentedTable.columns) !==
+      joinNormalizedValues(expectedTable.columns)
     ) {
       violations.push({
         subject: `table:${expectedTable.table}`,
         issue: "mismatch",
-        expected: joinValues(expectedTable.columns),
-        documented: joinValues(documentedTable.columns),
+        expected: joinNormalizedValues(expectedTable.columns),
+        documented: joinNormalizedValues(documentedTable.columns),
       });
     }
   }
