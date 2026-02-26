@@ -4,6 +4,7 @@ import * as ts from "typescript";
 
 import {
   normalizeAgentSafetyPolicy,
+  normalizeCommitPolicy,
   type AgentSafetyPolicy,
 } from "super-ralph/components";
 
@@ -118,12 +119,20 @@ export type RuntimeConfigHelpers = {
   }) => {
     buildCmds: Record<string, string>;
     testCmds: Record<string, string>;
+    commitPolicy: {
+      allowedTypes: string[];
+      requireAtomicChecks: boolean;
+    };
     preLandChecks: string[];
     postLandChecks: string[];
   };
   fallbackConfig: {
     buildCmds: Record<string, string>;
     testCmds: Record<string, string>;
+    commitPolicy: {
+      allowedTypes: string[];
+      requireAtomicChecks: boolean;
+    };
     preLandChecks: string[];
     postLandChecks: string[];
   };
@@ -133,6 +142,10 @@ export function loadRuntimeConfigHelpers(
   source: string = readGeneratedWorkflowSource(),
 ): RuntimeConfigHelpers {
   const mergeSource = extractNamedFunctionSource(source, "mergeCommandMap");
+  const commitPolicySource = extractNamedFunctionSource(
+    source,
+    "resolveCommitPolicy",
+  );
   const resolveSource = extractNamedFunctionSource(source, "resolveRuntimeConfig");
   const fallbackConfig = extractConstJson<RuntimeConfigHelpers["fallbackConfig"]>(
     source,
@@ -142,6 +155,8 @@ export function loadRuntimeConfigHelpers(
   const executableSource = transpileToCommonJs(
     `
 ${mergeSource}
+
+${commitPolicySource}
 
 ${resolveSource}
 
@@ -156,8 +171,9 @@ module.exports = { mergeCommandMap, resolveRuntimeConfig };
     "exports",
     "FALLBACK_CONFIG",
     "outputs",
+    "normalizeCommitPolicy",
     executableSource,
-  )(module, module.exports, fallbackConfig, outputs);
+  )(module, module.exports, fallbackConfig, outputs, normalizeCommitPolicy);
 
   const mergeCommandMap = module.exports.mergeCommandMap;
   const resolveRuntimeConfig = module.exports.resolveRuntimeConfig;

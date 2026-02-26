@@ -20,6 +20,10 @@ type RenderOptions = {
   ticket?: TicketFixture;
   agentSafetyPolicy?: AgentSafetyPolicy;
   progressBookmark?: string;
+  commitConfig?: {
+    prefix?: string;
+    allowedTypes?: string[];
+  };
 };
 
 type TicketFixture = {
@@ -170,6 +174,7 @@ function renderSuperRalph(options: RenderOptions = {}) {
     postLandChecks: [],
     testSuites: options.testSuites ?? [],
     progressBookmark: options.progressBookmark,
+    commitConfig: options.commitConfig,
     agentSafetyPolicy: options.agentSafetyPolicy,
   });
 }
@@ -229,6 +234,65 @@ describe("SuperRalph ticket-gate wiring", () => {
     expect(reviewFixProps.validationCommands).toEqual([
       "bun run typecheck",
       "bun run test:core",
+    ]);
+  });
+
+  test("passes commit policy + atomic check commands to implement/review-fix prompts", () => {
+    const tree = renderSuperRalph({ specReviewSeverity: "major" });
+    const implementProps = findTaskPromptProps(tree, "CORE-REV-004:implement");
+    const reviewFixProps = findTaskPromptProps(tree, "CORE-REV-004:review-fix");
+
+    expect(implementProps.allowedCommitTypes).toEqual([
+      "feat",
+      "fix",
+      "docs",
+      "chore",
+    ]);
+    expect(implementProps.atomicCheckCommands).toEqual([
+      "bun run typecheck",
+      "bun run test:core",
+    ]);
+    expect(reviewFixProps.allowedCommitTypes).toEqual([
+      "feat",
+      "fix",
+      "docs",
+      "chore",
+    ]);
+    expect(reviewFixProps.atomicCheckCommands).toEqual([
+      "bun run typecheck",
+      "bun run test:core",
+    ]);
+  });
+
+  test("does not pass legacy commit prefix props into prompts", () => {
+    const tree = renderSuperRalph({ specReviewSeverity: "major" });
+
+    const planProps = findTaskPromptProps(tree, "CORE-REV-004:plan");
+    const implementProps = findTaskPromptProps(tree, "CORE-REV-004:implement");
+    const testProps = findTaskPromptProps(tree, "CORE-REV-004:test");
+    const reviewFixProps = findTaskPromptProps(tree, "CORE-REV-004:review-fix");
+
+    expect(planProps.commitPrefix).toBeUndefined();
+    expect(planProps.mainBranch).toBeUndefined();
+    expect(implementProps.commitPrefix).toBeUndefined();
+    expect(implementProps.mainBranch).toBeUndefined();
+    expect(implementProps.emojiPrefixes).toBeUndefined();
+    expect(testProps.fixCommitPrefix).toBeUndefined();
+    expect(testProps.mainBranch).toBeUndefined();
+    expect(reviewFixProps.commitPrefix).toBeUndefined();
+    expect(reviewFixProps.mainBranch).toBeUndefined();
+    expect(reviewFixProps.emojiPrefixes).toBeUndefined();
+  });
+
+  test("uses deterministic default allowed commit types when commitConfig is omitted", () => {
+    const tree = renderSuperRalph({ specReviewSeverity: "major" });
+    const implementProps = findTaskPromptProps(tree, "CORE-REV-004:implement");
+
+    expect(implementProps.allowedCommitTypes).toEqual([
+      "feat",
+      "fix",
+      "docs",
+      "chore",
     ]);
   });
 
@@ -301,6 +365,15 @@ describe("SuperRalph ticket-gate wiring", () => {
     );
   });
 
+  test("uses a conventional docs commit message for update-progress checkpoints", () => {
+    const tree = renderSuperRalph();
+    const updateProgressPromptProps = findTaskPromptProps(tree, "update-progress");
+
+    expect(updateProgressPromptProps.commitMessage).toBe(
+      "docs: update progress report",
+    );
+  });
+
   test("routes API testing tickets to API integration gates", () => {
     const tree = renderSuperRalph({
       ticket: {
@@ -340,5 +413,11 @@ describe("SuperRalph ticket-gate wiring", () => {
     const source = readFileSync(resolveSuperRalphSourcePath(), "utf8");
 
     expect(source).toContain("ticketId: ticket.id");
+  });
+
+  test("invokes runtime commit-policy assertion before emitting commit messages", () => {
+    const source = readFileSync(resolveSuperRalphSourcePath(), "utf8");
+
+    expect(source).toContain("assertCommitMessageAllowed(");
   });
 });

@@ -4,6 +4,7 @@ import { isAbsolute, resolve } from "node:path";
 
 import { buildGateCommandConfig } from "super-ralph/gate-config";
 import {
+  loadRuntimeConfigHelpers,
   loadResolveAgentSafetyPolicy,
   readGeneratedWorkflowSource,
   withEnv,
@@ -14,6 +15,10 @@ type WorkflowConfig = {
   testCmds: Record<string, string>;
   preLandChecks: string[];
   postLandChecks: string[];
+  commitPolicy: {
+    allowedTypes: string[];
+    requireAtomicChecks: boolean;
+  };
 };
 
 export function extractConstJson<T = unknown>(
@@ -124,6 +129,45 @@ describe("generated workflow gates", () => {
       fallbackConfig.postLandChecks,
       "post-land checks",
     );
+  });
+
+  test("generated workflow embeds normalized commit policy in FALLBACK_CONFIG/runtime config", () => {
+    const source = readGeneratedWorkflowSource();
+    const fallbackConfig = extractConstJson<WorkflowConfig>(
+      source,
+      "FALLBACK_CONFIG",
+    );
+
+    expect(fallbackConfig.commitPolicy).toEqual({
+      allowedTypes: ["feat", "fix", "docs", "chore"],
+      requireAtomicChecks: true,
+    });
+    expect(source).toContain("function resolveCommitPolicy(");
+    expect(source).toContain(
+      "const commitPolicy = resolveCommitPolicy(FALLBACK_CONFIG.commitPolicy, interpreted.commitPolicy);",
+    );
+    expect(source).toContain("commitPolicy,");
+  });
+
+  test("generated workflow runtime commit policy fails closed to strict defaults", () => {
+    const source = readGeneratedWorkflowSource();
+    const { resolveRuntimeConfig, fallbackConfig } = loadRuntimeConfigHelpers(
+      source,
+    );
+
+    const resolved = resolveRuntimeConfig({
+      outputMaybe(schema) {
+        if (schema !== "interpret-config") return undefined;
+        return {
+          commitPolicy: {
+            allowedTypes: ["feat", "refactor", "docs", "chore"],
+            requireAtomicChecks: false,
+          },
+        };
+      },
+    });
+
+    expect(resolved.commitPolicy).toEqual(fallbackConfig.commitPolicy);
   });
 
   test("workflow artifact wires runtime command-map merge into SuperRalph and Monitor", () => {

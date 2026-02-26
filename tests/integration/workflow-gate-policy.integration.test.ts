@@ -157,6 +157,10 @@ describe("workflow gate policy integration", () => {
       riskyModeEnabled: false,
       approvalRequiredPhases: [],
     });
+    expect(fallbackConfig.commitPolicy).toEqual({
+      allowedTypes: ["feat", "fix", "docs", "chore"],
+      requireAtomicChecks: true,
+    });
   });
 
   test("fallback config path fields are portable in real repo wiring", () => {
@@ -454,7 +458,7 @@ describe("workflow gate policy integration", () => {
 
       const describe = runCommand(
         "jj",
-        ["describe", "-m", "📝 docs: update progress report"],
+        ["describe", "-m", "docs: update progress report"],
         repoRoot,
       );
       expect(describe.status).toBe(0);

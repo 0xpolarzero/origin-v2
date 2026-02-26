@@ -41,8 +41,15 @@ describe("super-ralph patch regression", () => {
     expect(sections.has("src/cli/gate-config.ts")).toBe(true);
     expect(sections.has("src/components/SuperRalph.tsx")).toBe(true);
     expect(sections.has("src/components/ticket-gates.ts")).toBe(true);
+    expect(sections.has("src/components/commit-policy.ts")).toBe(true);
     expect(sections.has("src/components/index.ts")).toBe(true);
     expect(sections.has("src/components/InterpretConfig.tsx")).toBe(true);
+    expect(sections.has("src/prompts/Implement.mdx")).toBe(true);
+    expect(sections.has("src/prompts/ReviewFix.mdx")).toBe(true);
+    expect(sections.has("src/prompts/Test.mdx")).toBe(true);
+    expect(sections.has("src/prompts/BuildVerify.mdx")).toBe(true);
+    expect(sections.has("src/prompts/Plan.mdx")).toBe(true);
+    expect(sections.has("src/prompts/Research.mdx")).toBe(true);
     expect(sections.has("src/prompts/Land.mdx")).toBe(true);
     expect(sections.has("src/prompts/UpdateProgress.mdx")).toBe(true);
     expect(sections.has("src/mergeQueue/coordinator.ts")).toBe(true);
@@ -132,16 +139,28 @@ function findSmithersCliPath(repoRoot: string): string | null {`,
     const interpretSection =
       sections.get("src/components/InterpretConfig.tsx") ?? "";
     const indexSection = sections.get("src/components/index.ts") ?? "";
+    const commitPolicySection =
+      sections.get("src/components/commit-policy.ts") ?? "";
 
     expect(superRalphSection).toContain("resolveTicketGateSelection");
+    expect(superRalphSection).toContain("normalizeCommitPolicy");
     expect(superRalphSection).toContain("ticketId: ticket.id");
     expect(superRalphSection).toContain(
       "verifyCommands={ticketGateSelection.verifyCommands}",
+    );
+    expect(superRalphSection).toContain(
+      "allowedCommitTypes={commitPolicy.allowedTypes}",
+    );
+    expect(superRalphSection).toContain(
+      "atomicCheckCommands={ticketGateSelection.verifyCommands}",
     );
     expect(superRalphSection).toContain("testSuites.length > 0");
     expect(superRalphSection).toContain("ticketGateSelection.testSuites");
     expect(superRalphSection).toContain(
       "validationCommands={ticketGateSelection.validationCommands}",
+    );
+    expect(superRalphSection).toContain(
+      "atomicCheckCommands={ticketGateSelection.validationCommands}",
     );
     expect(superRalphSection).toContain(
       'needsApproval={requiresApprovalForPhase(\n+                                "implement",',
@@ -153,13 +172,25 @@ function findSmithersCliPath(repoRoot: string): string | null {`,
       'needsApproval={requiresApprovalForPhase(\n+                      "land",',
     );
     expect(ticketGatesSection).toContain("function normalizeCategory(");
+    expect(ticketGatesSection).toContain(
+      "function assertAtomicCheckDiscipline(commands: string[]): void",
+    );
     expect(ticketGatesSection).toContain("ticketId?: string");
     expect(ticketGatesSection).toContain(
       'if (normalizedId.startsWith("API-")) return "api"',
     );
     expect(indexSection).toContain("normalizeAgentSafetyPolicy");
+    expect(indexSection).toContain("assertCommitMessageAllowed");
+    expect(indexSection).toContain("parseCommitType");
     expect(indexSection).toContain("requiresApprovalForPhase");
     expect(indexSection).toContain("AgentSafetyPolicy");
+    expect(commitPolicySection).toContain(
+      "export const DEFAULT_ALLOWED_COMMIT_TYPES",
+    );
+    expect(commitPolicySection).toContain("export function normalizeCommitPolicy");
+    expect(commitPolicySection).toContain(
+      "export function assertCommitMessageAllowed",
+    );
     expect(interpretSection).toContain(
       "buildCmds: z.object({}).catchall(z.string())",
     );
@@ -172,6 +203,34 @@ function findSmithersCliPath(repoRoot: string): string | null {`,
     expect(interpretSection).toContain(
       "postLandChecks: z.array(z.string()).min(1)",
     );
+    expect(interpretSection).toContain("commitPolicy: z.object({");
+  });
+
+  test("prompt patch hunks preserve commit-policy allowlist and no-emoji templates", () => {
+    const patch = readFileSync(patchPath, "utf8");
+    const sections = parsePatchSections(patch);
+    const implementSection = sections.get("src/prompts/Implement.mdx") ?? "";
+    const reviewFixSection = sections.get("src/prompts/ReviewFix.mdx") ?? "";
+    const testSection = sections.get("src/prompts/Test.mdx") ?? "";
+    const buildVerifySection = sections.get("src/prompts/BuildVerify.mdx") ?? "";
+    const planSection = sections.get("src/prompts/Plan.mdx") ?? "";
+    const researchSection = sections.get("src/prompts/Research.mdx") ?? "";
+    const updateProgressSection = sections.get("src/prompts/UpdateProgress.mdx") ?? "";
+
+    expect(implementSection).toContain("allowed commit types: feat|fix|docs|chore");
+    expect(reviewFixSection).toContain("allowed commit types: feat|fix|docs|chore");
+    expect(testSection).toContain("allowed commit types: feat|fix|docs|chore");
+    expect(buildVerifySection).toContain(
+      "allowed commit types: feat|fix|docs|chore",
+    );
+    expect(planSection).toContain("allowed commit types: feat|fix|docs|chore");
+    expect(researchSection).toContain("allowed commit types: feat|fix|docs|chore");
+    expect(updateProgressSection).toContain(
+      "allowed commit types: feat|fix|docs|chore",
+    );
+    expect(patch).not.toMatch(/^\+.*EMOJI/m);
+    expect(patch).not.toMatch(/^\+.*🐛 fix/m);
+    expect(patch).not.toMatch(/^\+.*📝 docs/m);
   });
 
   test("smithers patch persists jj state reconciliation helpers", () => {

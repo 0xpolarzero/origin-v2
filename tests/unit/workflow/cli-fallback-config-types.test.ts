@@ -17,5 +17,8 @@ describe("cli fallback-config type declarations", () => {
     expect(declaration).toContain("codeStyle: string;");
     expect(declaration).toContain("reviewChecklist: string[];");
     expect(declaration).toContain("maxConcurrency: number;");
+    expect(declaration).toContain("commitPolicy: {");
+    expect(declaration).toContain("allowedTypes: CommitPolicyAllowedType[];");
+    expect(declaration).toContain("requireAtomicChecks: true;");
   });
 });

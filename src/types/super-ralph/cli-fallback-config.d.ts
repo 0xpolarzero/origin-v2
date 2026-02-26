@@ -5,6 +5,8 @@ export type FallbackFocus = {
   name: string;
 };
 
+export type CommitPolicyAllowedType = "feat" | "fix" | "docs" | "chore";
+
 export type FallbackConfig = {
   projectName: string;
   projectId: string;
@@ -13,6 +15,10 @@ export type FallbackConfig = {
   referenceFiles: string[];
   buildCmds: CommandMap;
   testCmds: CommandMap;
+  commitPolicy: {
+    allowedTypes: CommitPolicyAllowedType[];
+    requireAtomicChecks: true;
+  };
   preLandChecks: string[];
   postLandChecks: string[];
   codeStyle: string;

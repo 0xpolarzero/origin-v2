@@ -102,6 +102,29 @@ describe("ticket-gates", () => {
     ]);
   });
 
+  test("resolveVerifyCommands enforces atomic typecheck+test discipline", () => {
+    expect(() =>
+      resolveVerifyCommands({
+        ticketCategory: "core",
+        buildCmds: { lint: "bun run lint" },
+        testCmds,
+        preLandChecks: ["bun run lint"],
+      }),
+    ).toThrow(/typecheck/i);
+
+    expect(() =>
+      resolveVerifyCommands({
+        ticketCategory: "core",
+        buildCmds,
+        testCmds: {
+          core: "bun run lint",
+          test: "bun run lint",
+        },
+        preLandChecks: ["bun run typecheck"],
+      }),
+    ).toThrow(/test command/i);
+  });
+
   test("resolveVerifyCommands rejects placeholder and soft-fail command patterns", () => {
     expect(() =>
       resolveVerifyCommands({
