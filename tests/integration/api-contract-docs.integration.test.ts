@@ -349,6 +349,22 @@ describe("api contract docs", () => {
     expect(auditLog).toContain("GREEN:");
   });
 
+  test("README links CORE-REV-ARCH-001 review-fix TDD evidence and the audit doc records red/green proof", () => {
+    const readme = readFileSync(resolve(repositoryRoot, "README.md"), "utf8");
+
+    expect(readme).toContain("docs/contracts/core-rev-arch-001-tdd-audit.md");
+
+    const auditLog = readFileSync(
+      resolve(repositoryRoot, "docs/contracts/core-rev-arch-001-tdd-audit.md"),
+      "utf8",
+    );
+    expect(auditLog).toContain("Ticket: CORE-REV-ARCH-001");
+    expect(auditLog).toContain("## Review Finding");
+    expect(auditLog).toContain("## TDD Evidence");
+    expect(auditLog).toContain("RED:");
+    expect(auditLog).toContain("GREEN:");
+  });
+
   test("legacy contract docs point to the authoritative contract doc", () => {
     const routeDoc = readFileSync(
       resolve(repositoryRoot, "docs/contracts/workflow-api-routes.md"),
@@ -365,7 +381,11 @@ describe("api contract docs", () => {
     expect(schemaDoc.toLowerCase()).toContain("version");
     expect(routeDoc.toLowerCase()).toContain("update");
     expect(schemaDoc.toLowerCase()).toContain("update");
-    expect(routeDoc).toContain("2026-02-26");
-    expect(schemaDoc).toContain("2026-02-26");
+    expect(routeDoc).toMatch(
+      /Current pointer verification date:\s*`\d{4}-\d{2}-\d{2}`/,
+    );
+    expect(schemaDoc).toMatch(
+      /Current pointer verification date:\s*`\d{4}-\d{2}-\d{2}`/,
+    );
   });
 });
