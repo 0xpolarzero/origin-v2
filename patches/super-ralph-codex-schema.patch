@@ -15,9 +15,220 @@ index 2368a78..093cbea 100644
    },
    "files": [
      "src/",
-
+diff --git a/src/cli/fallback-config.ts b/src/cli/fallback-config.ts
+new file mode 100644
+index 0000000..69b666e
+--- /dev/null
++++ b/src/cli/fallback-config.ts
+@@ -0,0 +1,106 @@
++import { existsSync } from "node:fs";
++import { basename, join } from "node:path";
++
++import {
++  buildGateCommandConfig,
++  type ScriptRunner,
++} from "./gate-config";
++
++function hasScript(packageScripts: Record<string, string>, scriptName: string): boolean {
++  const command = packageScripts[scriptName];
++  return typeof command === "string" && command.trim().length > 0;
++}
++
++export function detectScriptRunner(repoRoot: string): ScriptRunner {
++  if (existsSync(join(repoRoot, "bun.lock")) || existsSync(join(repoRoot, "bun.lockb"))) return "bun";
++  if (existsSync(join(repoRoot, "pnpm-lock.yaml"))) return "pnpm";
++  if (existsSync(join(repoRoot, "yarn.lock"))) return "yarn";
++  return "npm";
++}
++
++function slugify(value: string): string {
++  return value
++    .toLowerCase()
++    .replace(/[^a-z0-9]+/g, "-")
++    .replace(/^-+|-+$/g, "") || "project";
++}
++
++export function buildFallbackConfig(
++  repoRoot: string,
++  promptSpecPath: string,
++  packageScripts: Record<string, string>,
++) {
++  const runner = detectScriptRunner(repoRoot);
++  const hasNodeGateScripts = hasScript(packageScripts, "test") && hasScript(packageScripts, "typecheck");
++  const buildCmds: Record<string, string> = {};
++  const testCmds: Record<string, string> = {};
++
++  if (hasNodeGateScripts) {
++    const gateConfig = buildGateCommandConfig(runner, packageScripts);
++    Object.assign(buildCmds, gateConfig.buildCmds);
++    Object.assign(testCmds, gateConfig.testCmds);
++  }
++
++  if (existsSync(join(repoRoot, "go.mod"))) {
++    buildCmds.go = buildCmds.go ?? "go build ./...";
++    testCmds.go = testCmds.go ?? "go test ./...";
++  }
++
++  if (existsSync(join(repoRoot, "Cargo.toml"))) {
++    buildCmds.rust = buildCmds.rust ?? "cargo build";
++    testCmds.rust = testCmds.rust ?? "cargo test";
++  }
++
++  if (Object.keys(buildCmds).length === 0 || Object.keys(testCmds).length === 0) {
++    throw new Error(
++      "Unable to derive runnable gate commands. Configure package.json test/typecheck scripts or provide Go/Rust project files.",
++    );
++  }
++
++  const specsPathCandidates = [
++    join(repoRoot, "docs/specs/engineering.md"),
++    join(repoRoot, "docs/specs"),
++    join(repoRoot, "specs"),
++    promptSpecPath,
++  ];
++
++  const chosenSpecs = specsPathCandidates.find((candidate) => existsSync(candidate)) ?? promptSpecPath;
++
++  const projectName = basename(repoRoot);
++  const maxConcurrency = Math.min(
++    Math.max(Number(process.env.WORKFLOW_MAX_CONCURRENCY ?? "6") || 6, 1),
++    32,
++  );
++
++  return {
++    projectName,
++    projectId: slugify(projectName),
++    focuses: [
++      { id: "core", name: "Core Platform" },
++      { id: "api", name: "API and Data" },
++      { id: "workflow", name: "Workflow and Automation" },
++    ],
++    specsPath: chosenSpecs,
++    referenceFiles: [
++      promptSpecPath,
++      existsSync(join(repoRoot, "README.md")) ? "README.md" : "",
++      existsSync(join(repoRoot, "docs")) ? "docs" : "",
++    ].filter(Boolean),
++    buildCmds,
++    testCmds,
++    agentSafetyPolicy: {
++      riskyModeEnabled: false,
++      approvalRequiredPhases: [],
++    },
++    preLandChecks: Object.values(buildCmds),
++    postLandChecks: Object.values(testCmds),
++    codeStyle: "Follow existing project conventions and keep changes minimal and test-driven.",
++    reviewChecklist: [
++      "Spec compliance",
++      "Tests cover behavior changes",
++      "No regression risk in existing flows",
++      "Error handling and observability",
++    ],
++    maxConcurrency,
++  };
++}
+diff --git a/src/cli/gate-config.ts b/src/cli/gate-config.ts
+new file mode 100644
+index 0000000..23febe5
+--- /dev/null
++++ b/src/cli/gate-config.ts
+@@ -0,0 +1,92 @@
++export type ScriptRunner = "bun" | "pnpm" | "yarn" | "npm";
++
++export type GateCommandConfig = {
++  buildCmds: Record<string, string>;
++  testCmds: Record<string, string>;
++  preLandChecks: string[];
++  postLandChecks: string[];
++};
++
++const REQUIRED_GATE_SCRIPTS = ["test", "typecheck"] as const;
++
++function hasScript(packageScripts: Record<string, string>, scriptName: string): boolean {
++  const command = packageScripts[scriptName];
++  return typeof command === "string" && command.trim().length > 0;
++}
++
++function scriptCommand(runner: ScriptRunner, scriptName: string): string {
++  if (runner === "bun") return `bun run ${scriptName}`;
++  if (runner === "pnpm") return `pnpm run ${scriptName}`;
++  if (runner === "yarn") return `yarn ${scriptName}`;
++  return `npm run ${scriptName}`;
++}
++
++function firstExistingScript(packageScripts: Record<string, string>, candidates: string[]): string | null {
++  for (const scriptName of candidates) {
++    if (hasScript(packageScripts, scriptName)) {
++      return scriptName;
++    }
++  }
++
++  return null;
++}
++
++export const assertRequiredGateScripts = (packageScripts: Record<string, string>): void => {
++  const missingScripts = REQUIRED_GATE_SCRIPTS.filter((scriptName) => !hasScript(packageScripts, scriptName));
++
++  if (missingScripts.length > 0) {
++    throw new Error(`Missing required package scripts: ${missingScripts.join(", ")}`);
++  }
++};
++
++export const resolveFocusTestCommands = (
++  runner: ScriptRunner,
++  packageScripts: Record<string, string>,
++): Record<string, string> => {
++  const testCmds: Record<string, string> = {
++    test: scriptCommand(runner, "test"),
++  };
++
++  const focusScriptCandidates: Record<string, string[]> = {
++    core: ["test:core", "test:unit:core", "test:integration:core"],
++    api: ["test:integration:api", "test:api"],
++    workflow: ["test:integration:workflow", "test:workflow"],
++    db: ["test:integration:db", "test:db"],
++  };
++
++  for (const [focus, candidates] of Object.entries(focusScriptCandidates)) {
++    const selectedScript = firstExistingScript(packageScripts, candidates);
++    if (selectedScript) {
++      testCmds[focus] = scriptCommand(runner, selectedScript);
++    }
++  }
++
++  return testCmds;
++};
++
++export const buildGateCommandConfig = (
++  runner: ScriptRunner,
++  packageScripts: Record<string, string>,
++): GateCommandConfig => {
++  assertRequiredGateScripts(packageScripts);
++
++  const buildCmds: Record<string, string> = {
++    typecheck: scriptCommand(runner, "typecheck"),
++  };
++
++  if (hasScript(packageScripts, "build")) {
++    buildCmds.build = scriptCommand(runner, "build");
++  }
++  if (hasScript(packageScripts, "lint")) {
++    buildCmds.lint = scriptCommand(runner, "lint");
++  }
++
++  const testCmds = resolveFocusTestCommands(runner, packageScripts);
++
++  return {
++    buildCmds,
++    testCmds,
++    preLandChecks: Object.values(buildCmds),
++    postLandChecks: Object.values(testCmds),
++  };
++};
 diff --git a/src/cli/index.ts b/src/cli/index.ts
-index 633e857..a41b660 100644
+old mode 100755
+new mode 100644
+index 633e857..a41b660
 --- a/src/cli/index.ts
 +++ b/src/cli/index.ts
 @@ -18,9 +18,10 @@
@@ -394,7 +605,6 @@ index 633e857..a41b660 100644
  `;
  }
  
-
 diff --git a/src/components/InterpretConfig.tsx b/src/components/InterpretConfig.tsx
 index 77be1f5..c25a2a8 100644
 --- a/src/components/InterpretConfig.tsx
@@ -432,9 +642,8 @@ index 77be1f5..c25a2a8 100644
      "- Never return null; omit fields instead.",
      clarificationSession
        ? "- CRITICAL: Interpret and apply the user's clarification answers to tailor the config."
-
 diff --git a/src/components/SuperRalph.tsx b/src/components/SuperRalph.tsx
-index 96d1c69..1fed85e 100644
+index 96d1c69..b90a16f 100644
 --- a/src/components/SuperRalph.tsx
 +++ b/src/components/SuperRalph.tsx
 @@ -16,6 +16,12 @@ import CodeReviewPrompt from "../prompts/CodeReview.mdx";
@@ -508,11 +717,12 @@ index 96d1c69..1fed85e 100644
                  commitMessage={`${prefix} docs: update progress`}
                  completedTickets={completedTicketIds}
                />
-@@ -308,6 +324,12 @@ export function SuperRalph({
+@@ -308,6 +324,13 @@ export function SuperRalph({
            const ticketImplementationAgent = roundRobinAgent(implementationAgent, ticketIndex);
            const ticketTestingAgent = roundRobinAgent(testingAgent, ticketIndex);
            const ticketReportingAgent = roundRobinAgent(reportingAgent, ticketIndex);
 +          const ticketGateSelection = resolveTicketGateSelection({
++            ticketId: ticket.id,
 +            ticketCategory: ticket.category,
 +            buildCmds,
 +            testCmds,
@@ -521,7 +731,7 @@ index 96d1c69..1fed85e 100644
  
            const mergeQueueRequest: MergeQueueRequest = {
              runId: ctx.runId,
-@@ -390,7 +412,16 @@ export function SuperRalph({
+@@ -390,7 +413,16 @@ export function SuperRalph({
                        return (
                          <>
                            {customImplement || (
@@ -539,7 +749,7 @@ index 96d1c69..1fed85e 100644
                                <ImplementPrompt
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
-@@ -405,7 +436,7 @@ export function SuperRalph({
+@@ -405,7 +437,7 @@ export function SuperRalph({
                                  testWritingGuidance={["Write unit tests AND integration tests"]}
                                  implementationGuidance={["Follow architecture patterns from specs"]}
                                  formatterCommands={Object.entries(buildCmds).map(([lang, cmd]) => `Format ${lang}`)}
@@ -548,7 +758,7 @@ index 96d1c69..1fed85e 100644
                                  architectureRules={[`Read ${specsPath} for patterns`]}
                                  commitPrefix={prefix}
                                  mainBranch={mainBranch}
-@@ -420,11 +451,11 @@ export function SuperRalph({
+@@ -420,11 +452,11 @@ export function SuperRalph({
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
                                  ticketCategory={ticket.category}
@@ -565,7 +775,7 @@ index 96d1c69..1fed85e 100644
                                  fixCommitPrefix={`🐛 fix`}
                                  mainBranch={mainBranch}
                                />
-@@ -480,7 +511,16 @@ export function SuperRalph({
+@@ -480,7 +512,16 @@ export function SuperRalph({
                            </Parallel>
  
                            {customReviewFix || (!noReviewIssues && (
@@ -583,7 +793,7 @@ index 96d1c69..1fed85e 100644
                                <ReviewFixPrompt
                                  ticketId={ticket.id}
                                  ticketTitle={ticket.title}
-@@ -491,7 +531,7 @@ export function SuperRalph({
+@@ -491,7 +532,7 @@ export function SuperRalph({
                                  codeSeverity={worstCodeSeverity}
                                  codeFeedback={mergedCodeFeedback}
                                  codeIssues={mergedCodeIssues.length > 0 ? mergedCodeIssues : null}
@@ -592,7 +802,7 @@ index 96d1c69..1fed85e 100644
                                  commitPrefix={`🐛 fix`}
                                  mainBranch={mainBranch}
                                  emojiPrefixes={emojiPrefixes}
-@@ -527,7 +567,16 @@ export function SuperRalph({
+@@ -527,7 +568,16 @@ export function SuperRalph({
                {/* Phase 2: Landing (stateful speculative merge queue coordinator) */}
                <MergeQueue id={mergeQueueId} maxConcurrency={Math.max(1, maxSpeculativeDepth)}>
                  {customLand || (
@@ -610,7 +820,83 @@ index 96d1c69..1fed85e 100644
                      {buildSpeculativeMergeQueuePrompt(mergeQueueRequest)}
                    </Task>
                  )}
-
+diff --git a/src/components/agent-safety-policy.ts b/src/components/agent-safety-policy.ts
+new file mode 100644
+index 0000000..063bbc4
+--- /dev/null
++++ b/src/components/agent-safety-policy.ts
+@@ -0,0 +1,71 @@
++const RISKY_PHASES = ["implement", "review-fix", "land"] as const;
++
++type RiskyPhase = (typeof RISKY_PHASES)[number];
++
++export type AgentSafetyPolicy = {
++  riskyModeEnabled: boolean;
++  approvalRequiredPhases: string[];
++};
++
++function toRiskyPhase(phase: unknown): RiskyPhase | null {
++  if (typeof phase !== "string") return null;
++
++  const normalized = phase.trim().toLowerCase();
++  if (normalized.length === 0) return null;
++
++  return RISKY_PHASES.includes(normalized as RiskyPhase)
++    ? (normalized as RiskyPhase)
++    : null;
++}
++
++export function normalizeAgentSafetyPolicy(input: unknown): AgentSafetyPolicy {
++  if (!input || typeof input !== "object") {
++    return {
++      riskyModeEnabled: false,
++      approvalRequiredPhases: [],
++    };
++  }
++
++  const raw = input as {
++    riskyModeEnabled?: unknown;
++    approvalRequiredPhases?: unknown;
++  };
++
++  if (raw.riskyModeEnabled !== true) {
++    return {
++      riskyModeEnabled: false,
++      approvalRequiredPhases: [],
++    };
++  }
++
++  const requested = Array.isArray(raw.approvalRequiredPhases)
++    ? raw.approvalRequiredPhases
++    : [];
++  const approvalRequiredPhases: RiskyPhase[] = [];
++
++  for (const phase of requested) {
++    const normalized = toRiskyPhase(phase);
++    if (!normalized || approvalRequiredPhases.includes(normalized)) continue;
++    approvalRequiredPhases.push(normalized);
++  }
++
++  return {
++    riskyModeEnabled: true,
++    approvalRequiredPhases:
++      approvalRequiredPhases.length > 0
++        ? approvalRequiredPhases
++        : [...RISKY_PHASES],
++  };
++}
++
++export function requiresApprovalForPhase(
++  phase: string,
++  policy: AgentSafetyPolicy,
++): boolean {
++  if (policy.riskyModeEnabled !== true) return false;
++
++  const normalizedPhase = toRiskyPhase(phase);
++  if (!normalizedPhase) return false;
++
++  return policy.approvalRequiredPhases.includes(normalizedPhase);
++}
 diff --git a/src/components/index.ts b/src/components/index.ts
 index f39fc15..1de282d 100644
 --- a/src/components/index.ts
@@ -626,62 +912,162 @@ index f39fc15..1de282d 100644
  
  export { ClarifyingQuestions, clarifyingQuestionsOutputSchema, generateQuestionsOutputSchema } from "./ClarifyingQuestions";
  export type { ClarifyingQuestionsOutput, ClarifyingQuestionsProps } from "./ClarifyingQuestions";
-
-diff --git a/src/prompts/Land.mdx b/src/prompts/Land.mdx
-index e665f25..0401efa 100644
---- a/src/prompts/Land.mdx
-+++ b/src/prompts/Land.mdx
-@@ -19,8 +19,8 @@ jj git fetch
- Before rebasing, check what other tickets landed on main since this branch diverged. This helps you catch **semantic conflicts** (code that doesn't cause git conflicts but breaks at runtime — e.g. renamed functions, changed signatures, moved files, altered behavior your code depends on).
- 
- ```
--jj log -r 'main..bookmark("ticket/{props.ticketId}")' --reversed
--jj diff -r 'roots(main..bookmark("ticket/{props.ticketId}"))' --summary
-+jj log -r 'main..bookmarks("ticket/{props.ticketId}")' --reversed
-+jj diff -r 'roots(main..bookmarks("ticket/{props.ticketId}"))' --summary
- ```
- 
- Review the log and diff carefully. If other tickets modified files or APIs that your branch also touches, check for:
-@@ -33,7 +33,7 @@ Review the log and diff carefully. If other tickets modified files or APIs that
- ### Step 3: Rebase branch onto latest main
- 
- ```
--jj rebase -b 'bookmark("ticket/{props.ticketId}") ' -d main
-+jj rebase -b 'bookmarks("ticket/{props.ticketId}") ' -d main
- ```
- 
- If there are explicit conflicts, resolve them and describe the resolution.
-@@ -56,7 +56,7 @@ If CI fails, output `{ "merged": false, "mergeCommit": null, "ciPassed": false,
- 
- If CI passes:
- ```
--jj bookmark set main -r 'bookmark("ticket/{props.ticketId}")'
-+jj bookmark set main -r 'bookmarks("ticket/{props.ticketId}")'
- ```
- 
- ### Step 6: Push main
-
-diff --git a/src/prompts/UpdateProgress.mdx b/src/prompts/UpdateProgress.mdx
-index 7626ebb..9f99523 100644
---- a/src/prompts/UpdateProgress.mdx
-+++ b/src/prompts/UpdateProgress.mdx
-@@ -22,9 +22,13 @@ Do NOT run build commands, test commands, or compilation. Those are expensive an
- 
- ## Commit
- 
--After updating, commit your changes in this worktree:
-+After updating, create a bookmark-visible checkpoint in this worktree:
- ```
- jj describe -m "{props.commitMessage || '📝 docs: update progress report'}"
-+jj bookmark set {props.progressBookmark || 'progress/update-progress'} -r @
-+jj new
-+jj git push --bookmark {props.progressBookmark || 'progress/update-progress'}
-+jj log -r 'ancestors(bookmarks("{props.progressBookmark || 'progress/update-progress'}")) & @-' --no-graph -T commit_id
- ```
- 
--Do NOT run `jj bookmark set main` or `jj git push` — landing is handled separately.
-+Do NOT update `main` in this phase. Only update and push the progress bookmark so checkpoints stay auditable.
-
+diff --git a/src/components/ticket-gates.ts b/src/components/ticket-gates.ts
+new file mode 100644
+index 0000000..ceac40d
+--- /dev/null
++++ b/src/components/ticket-gates.ts
+@@ -0,0 +1,150 @@
++export type ResolveTicketGateSelectionParams = {
++  ticketId?: string;
++  ticketCategory: string;
++  buildCmds: Record<string, string>;
++  testCmds: Record<string, string>;
++  preLandChecks: string[];
++};
++
++export type TicketGateSelection = {
++  verifyCommands: string[];
++  validationCommands: string[];
++  testSuites: Array<{
++    name: string;
++    command: string;
++    description: string;
++  }>;
++};
++
++const NON_RUNNABLE_GATE_PATTERNS = [/No .* configured yet/i, /\|\|\s*echo\b/i, /^echo\b/i];
++
++function normalizeCategory(ticketCategory: string, ticketId?: string): string {
++  const normalized = ticketCategory.trim().toLowerCase();
++  const normalizedId = (ticketId ?? "").trim().toUpperCase();
++  if (!normalized) return "default";
++
++  if (normalized.includes("workflow")) return "workflow";
++  if (normalized.includes("api")) return "api";
++  if (normalized.includes("db") || normalized.includes("data")) return "db";
++  if (normalized.includes("core")) return "core";
++  if (normalized.includes("test")) {
++    if (normalizedId.startsWith("API-")) return "api";
++    if (normalizedId.startsWith("DB-") || normalizedId.startsWith("DATA-")) return "db";
++  }
++  return normalized;
++}
++
++function toRunnableCommand(command: string | undefined): string | null {
++  if (typeof command !== "string") return null;
++  const normalized = command.trim();
++  if (!normalized) return null;
++
++  for (const pattern of NON_RUNNABLE_GATE_PATTERNS) {
++    if (pattern.test(normalized)) {
++      return null;
++    }
++  }
++
++  return normalized;
++}
++
++function uniqueCommands(commands: string[]): string[] {
++  const seen = new Set<string>();
++  const unique: string[] = [];
++
++  for (const command of commands) {
++    const normalized = command.trim();
++    if (!normalized || seen.has(normalized)) continue;
++    if (!toRunnableCommand(normalized)) {
++      throw new Error(`Resolved non-runnable gate command: ${normalized}`);
++    }
++    seen.add(normalized);
++    unique.push(normalized);
++  }
++
++  if (unique.length === 0) {
++    throw new Error("Resolved non-runnable gate command: no runnable commands found");
++  }
++
++  return unique;
++}
++
++function defaultTestCommand(testCmds: Record<string, string>): string {
++  const preferred = toRunnableCommand(testCmds.test);
++  if (preferred) return preferred;
++
++  throw new Error("No runnable test command configured for ticket gates");
++}
++
++export const resolveCategoryTestCommand = (
++  ticketCategory: string,
++  testCmds: Record<string, string>,
++  ticketId?: string,
++): string => {
++  const normalizedCategory = normalizeCategory(ticketCategory, ticketId);
++
++  const categoryCommand = normalizedCategory === "core"
++    ? testCmds.core
++    : normalizedCategory === "api"
++      ? testCmds.api
++      : normalizedCategory === "workflow"
++        ? testCmds.workflow
++        : normalizedCategory === "db"
++          ? testCmds.db
++          : undefined;
++
++  const runnableCategoryCommand = toRunnableCommand(categoryCommand);
++  if (runnableCategoryCommand) return runnableCategoryCommand;
++
++  return defaultTestCommand(testCmds);
++};
++
++export const resolveVerifyCommands = (params: ResolveTicketGateSelectionParams): string[] => {
++  const { ticketId, ticketCategory, buildCmds, testCmds, preLandChecks } = params;
++  const categoryTestCommand = resolveCategoryTestCommand(
++    ticketCategory,
++    testCmds,
++    ticketId,
++  );
++
++  const candidateChecks = preLandChecks.length > 0
++    ? [...preLandChecks]
++    : [buildCmds.typecheck ?? Object.values(buildCmds)[0] ?? ""];
++
++  if (buildCmds.typecheck && !candidateChecks.includes(buildCmds.typecheck)) {
++    candidateChecks.unshift(buildCmds.typecheck);
++  }
++
++  candidateChecks.push(categoryTestCommand);
++  const verifyCommands = uniqueCommands(candidateChecks);
++  if (verifyCommands.length === 0) {
++    throw new Error("Resolved non-runnable gate command: no verify commands");
++  }
++
++  return verifyCommands;
++};
++
++export const resolveTicketGateSelection = (
++  params: ResolveTicketGateSelectionParams,
++): TicketGateSelection => {
++  const normalizedCategory = normalizeCategory(params.ticketCategory, params.ticketId);
++  const testCommand = resolveCategoryTestCommand(
++    params.ticketCategory,
++    params.testCmds,
++    params.ticketId,
++  );
++  const verifyCommands = resolveVerifyCommands(params);
++  const validationCommands = uniqueCommands([...verifyCommands]);
++
++  return {
++    verifyCommands,
++    validationCommands,
++    testSuites: [
++      {
++        name: `${normalizedCategory} tests`,
++        command: testCommand,
++        description: `Run ${normalizedCategory} tests`,
++      },
++    ],
++  };
++};
 diff --git a/src/mergeQueue/coordinator.ts b/src/mergeQueue/coordinator.ts
 index 4a8450a..bab6f27 100644
 --- a/src/mergeQueue/coordinator.ts
@@ -761,4 +1147,56 @@ index 4a8450a..bab6f27 100644
        );
        const retestNote =
          entry.invalidatedCount > 0
-
+diff --git a/src/prompts/Land.mdx b/src/prompts/Land.mdx
+index e665f25..0401efa 100644
+--- a/src/prompts/Land.mdx
++++ b/src/prompts/Land.mdx
+@@ -19,8 +19,8 @@ jj git fetch
+ Before rebasing, check what other tickets landed on main since this branch diverged. This helps you catch **semantic conflicts** (code that doesn't cause git conflicts but breaks at runtime — e.g. renamed functions, changed signatures, moved files, altered behavior your code depends on).
+ 
+ ```
+-jj log -r 'main..bookmark("ticket/{props.ticketId}")' --reversed
+-jj diff -r 'roots(main..bookmark("ticket/{props.ticketId}"))' --summary
++jj log -r 'main..bookmarks("ticket/{props.ticketId}")' --reversed
++jj diff -r 'roots(main..bookmarks("ticket/{props.ticketId}"))' --summary
+ ```
+ 
+ Review the log and diff carefully. If other tickets modified files or APIs that your branch also touches, check for:
+@@ -33,7 +33,7 @@ Review the log and diff carefully. If other tickets modified files or APIs that
+ ### Step 3: Rebase branch onto latest main
+ 
+ ```
+-jj rebase -b 'bookmark("ticket/{props.ticketId}") ' -d main
++jj rebase -b 'bookmarks("ticket/{props.ticketId}") ' -d main
+ ```
+ 
+ If there are explicit conflicts, resolve them and describe the resolution.
+@@ -56,7 +56,7 @@ If CI fails, output `{ "merged": false, "mergeCommit": null, "ciPassed": false,
+ 
+ If CI passes:
+ ```
+-jj bookmark set main -r 'bookmark("ticket/{props.ticketId}")'
++jj bookmark set main -r 'bookmarks("ticket/{props.ticketId}")'
+ ```
+ 
+ ### Step 6: Push main
+diff --git a/src/prompts/UpdateProgress.mdx b/src/prompts/UpdateProgress.mdx
+index 7626ebb..9f99523 100644
+--- a/src/prompts/UpdateProgress.mdx
++++ b/src/prompts/UpdateProgress.mdx
+@@ -22,9 +22,13 @@ Do NOT run build commands, test commands, or compilation. Those are expensive an
+ 
+ ## Commit
+ 
+-After updating, commit your changes in this worktree:
++After updating, create a bookmark-visible checkpoint in this worktree:
+ ```
+ jj describe -m "{props.commitMessage || '📝 docs: update progress report'}"
++jj bookmark set {props.progressBookmark || 'progress/update-progress'} -r @
++jj new
++jj git push --bookmark {props.progressBookmark || 'progress/update-progress'}
++jj log -r 'ancestors(bookmarks("{props.progressBookmark || 'progress/update-progress'}")) & @-' --no-graph -T commit_id
+ ```
+ 
+-Do NOT run `jj bookmark set main` or `jj git push` — landing is handled separately.
++Do NOT update `main` in this phase. Only update and push the progress bookmark so checkpoints stay auditable.

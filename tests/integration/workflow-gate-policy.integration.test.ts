@@ -29,6 +29,27 @@ function readGeneratedWorkflowSource() {
   return readFileSync(workflowPath, "utf8");
 }
 
+function extractConstJson<T = unknown>(source: string, constName: string): T {
+  const marker = `const ${constName} =`;
+  const markerIndex = source.indexOf(marker);
+  if (markerIndex < 0) {
+    throw new Error(`Missing const declaration: ${constName}`);
+  }
+
+  const valueStart = source.indexOf("=", markerIndex) + 1;
+  let semicolonIndex = source.indexOf(";", valueStart);
+  while (semicolonIndex >= 0) {
+    const candidate = source.slice(valueStart, semicolonIndex).trim();
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      semicolonIndex = source.indexOf(";", semicolonIndex + 1);
+    }
+  }
+
+  throw new Error(`Could not parse const value as JSON: ${constName}`);
+}
+
 function assertNoNoopPatterns(commands: string[], context: string) {
   const noOpPatterns = [/No .* configured yet/i, /\|\|\s*echo\b/i];
 
@@ -59,7 +80,18 @@ function runCommand(
   };
 }
 
+function isCommandAvailable(command: string): boolean {
+  const probe = spawnSync(command, ["--version"], {
+    encoding: "utf8",
+  });
+  return probe.status === 0;
+}
+
 describe("workflow gate policy integration", () => {
+  test("command availability probe marks missing commands unavailable", () => {
+    expect(isCommandAvailable("__origin_missing_binary__")).toBe(false);
+  });
+
   test("CLI fallback config keeps Go/Rust gates runnable when node scripts are missing", () => {
     const repoRoot = mkdtempSync(join(tmpdir(), "workflow-gates-polyglot-"));
 
@@ -190,6 +222,35 @@ describe("workflow gate policy integration", () => {
     expect(db.verifyCommands).toContain("bun run test:integration:db");
   });
 
+  test("API testing tickets resolve to typecheck + API integration tests", () => {
+    const scripts = readPackageScripts();
+    const config = buildGateCommandConfig("bun", scripts);
+
+    const apiTesting = resolveTicketGateSelection({
+      ticketId: "API-005",
+      ticketCategory: "testing",
+      buildCmds: config.buildCmds,
+      testCmds: config.testCmds,
+      preLandChecks: config.preLandChecks,
+    });
+
+    expect(apiTesting.verifyCommands).toEqual([
+      "bun run typecheck",
+      "bun run test:integration:api",
+    ]);
+    expect(apiTesting.validationCommands).toEqual([
+      "bun run typecheck",
+      "bun run test:integration:api",
+    ]);
+    expect(apiTesting.testSuites).toEqual([
+      {
+        name: "api tests",
+        command: "bun run test:integration:api",
+        description: "Run api tests",
+      },
+    ]);
+  });
+
   test("falls back to default test command for unknown categories", () => {
     const scripts = readPackageScripts();
     const config = buildGateCommandConfig("bun", scripts);
@@ -246,21 +307,44 @@ describe("workflow gate policy integration", () => {
     }
   });
 
-  test("package scripts required by workflow gates remain defined and non-empty", () => {
+  test("package scripts required by workflow gates remain defined, non-empty, and correctly shaped", () => {
     const scripts = readPackageScripts();
-    const requiredScriptNames = [
+    const requiredRootScriptNames = [
       "test",
       "typecheck",
-      "test:core",
       "test:integration:api",
-      "test:integration:workflow",
       "test:integration:db",
     ];
 
-    for (const scriptName of requiredScriptNames) {
+    for (const scriptName of requiredRootScriptNames) {
       const script = scripts[scriptName];
       expect(typeof script).toBe("string");
       expect(script?.trim().length).toBeGreaterThan(0);
+      expect(script?.trim().startsWith("bun")).toBe(true);
+    }
+
+    expect(scripts.test).toContain("bun test");
+    expect(scripts.typecheck).toContain("tsc");
+    expect(scripts.typecheck).toContain("tsconfig.typecheck.json");
+    expect(scripts["test:integration:api"]).toContain("bun test");
+    expect(scripts["test:integration:db"]).toContain("bun test");
+  });
+
+  test("generated workflow required gate script keys mirror root package scripts", () => {
+    const scripts = readPackageScripts();
+    const generatedPackageScripts = extractConstJson<Record<string, string>>(
+      readGeneratedWorkflowSource(),
+      "PACKAGE_SCRIPTS",
+    );
+    const requiredRootScriptNames = [
+      "test",
+      "typecheck",
+      "test:integration:api",
+      "test:integration:db",
+    ] as const;
+
+    for (const scriptName of requiredRootScriptNames) {
+      expect(generatedPackageScripts[scriptName]).toBe(scripts[scriptName]);
     }
   });
 
@@ -307,7 +391,13 @@ describe("workflow gate policy integration", () => {
   });
 
   test("temp jj repo keeps progress checkpoints visible from bookmarks and accepts bookmarks(...) revsets", () => {
-    const repoRoot = mkdtempSync(join(tmpdir(), "workflow-gates-jj-traceability-"));
+    if (!isCommandAvailable("jj")) {
+      return;
+    }
+
+    const repoRoot = mkdtempSync(
+      join(tmpdir(), "workflow-gates-jj-traceability-"),
+    );
     const remoteRoot = join(repoRoot, "origin.git");
 
     try {

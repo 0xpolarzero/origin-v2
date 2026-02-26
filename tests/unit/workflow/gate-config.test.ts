@@ -71,4 +71,17 @@ describe("gate-config", () => {
       "Missing required package scripts: typecheck",
     );
   });
+
+  test("assertRequiredGateScripts fails when required scripts are empty after trimming", () => {
+    expect(() =>
+      assertRequiredGateScripts({ test: "   ", typecheck: "\n\t" }),
+    ).toThrow("Missing required package scripts: test, typecheck");
+
+    expect(() =>
+      assertRequiredGateScripts({
+        test: "bun test",
+        typecheck: "  ",
+      }),
+    ).toThrow("Missing required package scripts: typecheck");
+  });
 });
