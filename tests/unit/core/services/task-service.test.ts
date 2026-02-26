@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Either, Effect } from "effect";
 
 import { createTask } from "../../../../src/core/domain/task";
 import {
   completeTask,
   deferTask,
   rescheduleTask,
+  TaskTransitionError,
 } from "../../../../src/core/services/task-service";
 import { makeInMemoryCoreRepository } from "../../../../src/core/repositories/in-memory-core-repository";
 
@@ -41,6 +42,30 @@ describe("task-service", () => {
     expect(persisted).toEqual(updated);
     expect(auditTrail[0]?.fromState).toBe("planned");
     expect(auditTrail[0]?.toState).toBe("completed");
+  });
+
+  test("completeTask returns not_found code when task is missing", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        completeTask(
+          repository,
+          "task-missing-404",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T10:05:00.000Z"),
+        ),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(TaskTransitionError);
+      expect(result.left).toMatchObject({
+        message: "task task-missing-404 was not found",
+        code: "not_found",
+      });
+    }
   });
 
   test("deferTask transitions planned -> deferred", async () => {

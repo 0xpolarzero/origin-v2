@@ -145,6 +145,12 @@ const parseRecord = (
 ): RouteValidation<Record<string, unknown>> =>
   isRecord(input) ? valid(input) : invalid(route, "expected an object");
 
+const parseOptionalRecord = (
+  route: WorkflowRouteKey,
+  input: unknown,
+): RouteValidation<Record<string, unknown>> =>
+  input === undefined ? valid({}) : parseRecord(route, input);
+
 function parseStringField(
   route: WorkflowRouteKey,
   source: Record<string, unknown>,
@@ -1101,7 +1107,7 @@ const validateInspectJobRunRequest: RouteValidator<InspectJobRunRequest> = (
 
 const validateListJobsRequest: RouteValidator<ListJobsRequest> = (input) => {
   const route: WorkflowRouteKey = "job.list";
-  const sourceResult = parseRecord(route, input);
+  const sourceResult = parseOptionalRecord(route, input);
   if (!sourceResult.ok) {
     return sourceResult;
   }
@@ -1390,7 +1396,7 @@ const validateListActivityRequest: RouteValidator<ListActivityRequest> = (
   input,
 ) => {
   const route: WorkflowRouteKey = "activity.list";
-  const sourceResult = parseRecord(route, input);
+  const sourceResult = parseOptionalRecord(route, input);
   if (!sourceResult.ok) {
     return sourceResult;
   }
@@ -1616,6 +1622,7 @@ export const makeWorkflowRoutes = (
     key: "approval.approveOutboundAction",
     method: "POST",
     path: WORKFLOW_ROUTE_PATHS["approval.approveOutboundAction"],
+    actorSource: "trusted",
     handle: toRouteHandler(
       "approval.approveOutboundAction",
       validateApproveOutboundActionRequest,

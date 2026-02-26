@@ -382,6 +382,17 @@ describe("api/workflows/routes", () => {
     }
   });
 
+  test("approval.approveOutboundAction route is marked as trusted-actor-bound", () => {
+    const routes = makeWorkflowRoutes(makeApiStub());
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const approveRoute = byKey.get("approval.approveOutboundAction");
+
+    expect(approveRoute).toBeDefined();
+    expect(
+      (approveRoute as { actorSource?: string } | undefined)?.actorSource,
+    ).toBe("trusted");
+  });
+
   test("route handlers invoke their mapped workflow api methods", async () => {
     const calls: Array<{ route: WorkflowRouteKey; input: unknown }> = [];
     const routes = makeWorkflowRoutes(
@@ -406,13 +417,25 @@ describe("api/workflows/routes", () => {
     }
   });
 
-  test("route handlers reject undefined payloads with WorkflowApiError", async () => {
+  test("route handlers enforce undefined payload rules by route requirements", async () => {
     const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const routesAcceptingOmittedBody = new Set<WorkflowRouteKey>([
+      "job.list",
+      "activity.list",
+    ]);
 
     for (const route of routes) {
       const result = await Effect.runPromise(
         Effect.either(route.handle(undefined)),
       );
+
+      if (routesAcceptingOmittedBody.has(route.key)) {
+        expect(Either.isRight(result)).toBe(true);
+        if (Either.isRight(result)) {
+          expect(result.right).toBe(route.key);
+        }
+        continue;
+      }
 
       expect(Either.isLeft(result)).toBe(true);
       if (Either.isLeft(result)) {
@@ -871,7 +894,7 @@ describe("api/workflows/routes", () => {
     }
   });
 
-  test("job.list validator enforces runState/limit/beforeUpdatedAt and coerces ISO dates", async () => {
+  test("job.list validator accepts undefined body and enforces runState/limit/beforeUpdatedAt", async () => {
     const calls: Array<{ route: WorkflowRouteKey; input: unknown }> = [];
     const routes = makeWorkflowRoutes(
       makeApiSpy((route, input) => {
@@ -882,6 +905,16 @@ describe("api/workflows/routes", () => {
     const listRoute = byKey.get("job.list");
 
     expect(listRoute).toBeDefined();
+
+    await Effect.runPromise(listRoute!.handle(undefined));
+    expect(calls[0]).toEqual({
+      route: "job.list",
+      input: {
+        runState: undefined,
+        limit: undefined,
+        beforeUpdatedAt: undefined,
+      },
+    });
 
     await Effect.runPromise(
       listRoute!.handle({
@@ -939,7 +972,12 @@ describe("api/workflows/routes", () => {
       expect(invalidBefore.left.message).toContain("beforeUpdatedAt");
     }
 
-    const jobListCall = calls.find((call) => call.route === "job.list");
+    const jobListCall = calls.find(
+      (call) =>
+        call.route === "job.list" &&
+        (call.input as { beforeUpdatedAt?: unknown }).beforeUpdatedAt instanceof
+          Date,
+    );
     expect(jobListCall).toBeDefined();
     expect(
       (jobListCall!.input as { beforeUpdatedAt: unknown }).beforeUpdatedAt,
@@ -966,12 +1004,30 @@ describe("api/workflows/routes", () => {
     }
   });
 
-  test("activity.list validator enforces actor/filter/pagination fields", async () => {
-    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+  test("activity.list validator accepts undefined body and enforces actor/filter/pagination fields", async () => {
+    const calls: Array<{ route: WorkflowRouteKey; input: unknown }> = [];
+    const routes = makeWorkflowRoutes(
+      makeApiSpy((route, input) => {
+        calls.push({ route, input });
+      }),
+    );
     const byKey = new Map(routes.map((route) => [route.key, route]));
     const activityRoute = byKey.get("activity.list");
 
     expect(activityRoute).toBeDefined();
+
+    await Effect.runPromise(activityRoute!.handle(undefined));
+    expect(calls[0]).toEqual({
+      route: "activity.list",
+      input: {
+        entityType: undefined,
+        entityId: undefined,
+        actorKind: undefined,
+        aiOnly: undefined,
+        limit: undefined,
+        beforeAt: undefined,
+      },
+    });
 
     const invalidActorKind = await Effect.runPromise(
       Effect.either(

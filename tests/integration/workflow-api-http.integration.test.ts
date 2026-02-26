@@ -13,6 +13,14 @@ import { createEvent } from "../../src/core/domain/event";
 import { makeInMemoryCoreRepository } from "../../src/core/repositories/in-memory-core-repository";
 
 const ACTOR = { id: "user-1", kind: "user" } as const;
+const TRUSTED_SYSTEM_ACTOR = {
+  id: "system-trusted-1",
+  kind: "system",
+} as const;
+const TRUSTED_SIGNED_USER_ACTOR = {
+  id: "signed-user-1",
+  kind: "user",
+} as const;
 
 const expectOk = async (
   dispatch: ReturnType<typeof makeWorkflowHttpDispatcher>,
@@ -228,6 +236,35 @@ describe("workflow-api http integration", () => {
     });
   });
 
+  test("job.list and activity.list accept omitted JSON bodies", async () => {
+    const platform = await Effect.runPromise(buildCorePlatform());
+    const dispatcher = makeWorkflowHttpDispatcher(
+      makeWorkflowRoutes(makeWorkflowApi({ platform })),
+    );
+
+    const jobListResponse = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["job.list"],
+      }),
+    );
+    const activityListResponse = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["activity.list"],
+      }),
+    );
+
+    expect(jobListResponse).toEqual({
+      status: 200,
+      body: [],
+    });
+    expect(activityListResponse).toEqual({
+      status: 200,
+      body: [],
+    });
+  });
+
   test("checkpoint.create(ai) -> activity.list(aiOnly) -> checkpoint.inspect -> keep/recover executes through HTTP routes", async () => {
     const platform = await Effect.runPromise(buildCorePlatform());
     const dispatcher = makeWorkflowHttpDispatcher(
@@ -350,6 +387,87 @@ describe("workflow-api http integration", () => {
     });
   });
 
+  test("capture.suggest/planning.completeTask/signal.triage map missing resources to 404 and signal.convert precondition to 409", async () => {
+    const platform = await Effect.runPromise(buildCorePlatform());
+    const dispatcher = makeWorkflowHttpDispatcher(
+      makeWorkflowRoutes(makeWorkflowApi({ platform })),
+    );
+
+    const missingEntry = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["capture.suggest"],
+        body: {
+          entryId: "entry-http-missing-404",
+          suggestedTitle: "Missing entry suggestion",
+          actor: ACTOR,
+          at: "2026-02-23T09:35:00.000Z",
+        },
+      }),
+    );
+    const missingTask = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["planning.completeTask"],
+        body: {
+          taskId: "task-http-missing-404",
+          actor: ACTOR,
+          at: "2026-02-23T09:36:00.000Z",
+        },
+      }),
+    );
+    const missingSignal = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["signal.triage"],
+        body: {
+          signalId: "signal-http-missing-404",
+          decision: "ready_for_conversion",
+          actor: ACTOR,
+          at: "2026-02-23T09:37:00.000Z",
+        },
+      }),
+    );
+
+    await expectOk(dispatcher, "signal.ingest", {
+      signalId: "signal-http-untriaged-1",
+      source: "email",
+      payload: "needs conversion",
+      actor: ACTOR,
+      at: "2026-02-23T09:38:00.000Z",
+    });
+    const conflictSignalConvert = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["signal.convert"],
+        body: {
+          signalId: "signal-http-untriaged-1",
+          targetType: "task",
+          targetId: "task-http-from-signal-1",
+          actor: ACTOR,
+          at: "2026-02-23T09:39:00.000Z",
+        },
+      }),
+    );
+
+    expectSanitizedError(missingEntry, {
+      status: 404,
+      route: "capture.suggest",
+    });
+    expectSanitizedError(missingTask, {
+      status: 404,
+      route: "planning.completeTask",
+    });
+    expectSanitizedError(missingSignal, {
+      status: 404,
+      route: "signal.triage",
+    });
+    expectSanitizedError(conflictSignalConvert, {
+      status: 409,
+      route: "signal.convert",
+    });
+  });
+
   test("outbound-draft approval rejects non-user actors with sanitized 403", async () => {
     const platform = await Effect.runPromise(buildCorePlatform());
     const dispatcher = makeWorkflowHttpDispatcher(
@@ -394,6 +512,9 @@ describe("workflow-api http integration", () => {
           actor: { id: "system-1", kind: "system" },
           at: "2026-02-23T09:29:00.000Z",
         },
+        auth: {
+          sessionActor: { id: "system-1", kind: "system" },
+        },
       }),
     );
 
@@ -401,6 +522,143 @@ describe("workflow-api http integration", () => {
       status: 403,
       route: "approval.approveOutboundAction",
     });
+  });
+
+  test("approval.approveOutboundAction rejects non-user trusted context spoofing user payload actor", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const event = await Effect.runPromise(
+      createEvent({
+        id: "event-http-spoof-1",
+        title: "HTTP spoofed approval event",
+        startAt: new Date("2026-02-24T16:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("event", event.id, event));
+
+    let executeCount = 0;
+    const platform = await Effect.runPromise(
+      buildCorePlatform({
+        repository,
+        outboundActionPort: {
+          execute: (action) =>
+            Effect.sync(() => {
+              executeCount += 1;
+              return { executionId: `exec-${action.entityId}` };
+            }),
+        },
+      }),
+    );
+    const dispatcher = makeWorkflowHttpDispatcher(
+      makeWorkflowRoutes(makeWorkflowApi({ platform })),
+    );
+
+    await expectOk(dispatcher, "approval.requestEventSync", {
+      eventId: event.id,
+      actor: ACTOR,
+      at: "2026-02-24T16:01:00.000Z",
+    });
+
+    const spoofedApproval = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["approval.approveOutboundAction"],
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: event.id,
+          approved: true,
+          actor: ACTOR,
+          at: "2026-02-24T16:02:00.000Z",
+        },
+        auth: {
+          sessionActor: TRUSTED_SYSTEM_ACTOR,
+        },
+      }),
+    );
+
+    expectSanitizedError(spoofedApproval, {
+      status: 403,
+      route: "approval.approveOutboundAction",
+    });
+
+    const persisted = await Effect.runPromise(
+      repository.getEntity<{ syncState: string }>("event", event.id),
+    );
+    expect(executeCount).toBe(0);
+    expect(persisted?.syncState).toBe("pending_approval");
+  });
+
+  test("approval.approveOutboundAction accepts verified signed internal user context", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const event = await Effect.runPromise(
+      createEvent({
+        id: "event-http-signed-context-1",
+        title: "HTTP signed-context approval event",
+        startAt: new Date("2026-02-24T17:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("event", event.id, event));
+
+    let executeCount = 0;
+    let verifierCalls = 0;
+    const platform = await Effect.runPromise(
+      buildCorePlatform({
+        repository,
+        outboundActionPort: {
+          execute: (action) =>
+            Effect.sync(() => {
+              executeCount += 1;
+              return { executionId: `exec-${action.entityId}` };
+            }),
+        },
+      }),
+    );
+    const dispatcher = makeWorkflowHttpDispatcher(
+      makeWorkflowRoutes(makeWorkflowApi({ platform })),
+      {
+        verifySignedInternalActorContext: (context) =>
+          Effect.sync(() => {
+            verifierCalls += 1;
+            expect(context.signature).toBe("signed-approval-ok");
+            return context.actor;
+          }),
+      },
+    );
+
+    await expectOk(dispatcher, "approval.requestEventSync", {
+      eventId: event.id,
+      actor: ACTOR,
+      at: "2026-02-24T17:01:00.000Z",
+    });
+
+    const approved = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["approval.approveOutboundAction"],
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: event.id,
+          approved: true,
+          at: "2026-02-24T17:02:00.000Z",
+        },
+        auth: {
+          signedInternalActor: {
+            actor: TRUSTED_SIGNED_USER_ACTOR,
+            issuedAt: "2026-02-24T17:01:30.000Z",
+            signature: "signed-approval-ok",
+          },
+        },
+      }),
+    );
+
+    expect(approved.status).toBe(200);
+    expect(approved.body).toMatchObject({
+      approved: true,
+      executed: true,
+    });
+    expect(verifierCalls).toBe(1);
+    expect(executeCount).toBe(1);
   });
 
   test("approval endpoints return 400, 403, 404, and 409 with sanitized error payloads", async () => {
@@ -443,6 +701,9 @@ describe("workflow-api http integration", () => {
           actor: ACTOR,
           at: "2026-02-23T09:29:00.000Z",
         },
+        auth: {
+          sessionActor: ACTOR,
+        },
       }),
     );
     expectSanitizedError(notFound, {
@@ -468,6 +729,9 @@ describe("workflow-api http integration", () => {
           actor: ACTOR,
           at: "2026-02-23T09:31:00.000Z",
         },
+        auth: {
+          sessionActor: ACTOR,
+        },
       }),
     );
     expectSanitizedError(invalid, {
@@ -486,6 +750,9 @@ describe("workflow-api http integration", () => {
           approved: true,
           actor: { id: "system-1", kind: "system" },
           at: "2026-02-23T09:32:00.000Z",
+        },
+        auth: {
+          sessionActor: { id: "system-1", kind: "system" },
         },
       }),
     );
@@ -506,6 +773,9 @@ describe("workflow-api http integration", () => {
           actor: ACTOR,
           at: "2026-02-23T09:33:00.000Z",
         },
+        auth: {
+          sessionActor: ACTOR,
+        },
       }),
     );
     expect(firstApproval.status).toBe(200);
@@ -521,6 +791,9 @@ describe("workflow-api http integration", () => {
           approved: true,
           actor: ACTOR,
           at: "2026-02-23T09:34:00.000Z",
+        },
+        auth: {
+          sessionActor: ACTOR,
         },
       }),
     );

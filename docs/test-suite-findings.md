@@ -1,74 +1,62 @@
 ## core
-### Status: PARTIALLY SET UP
+### Status: PASSING
 ### What works:
-- Bun integration test discovery now finds and runs `tests/integration/core-platform.integration.test.ts`.
-- A smoke integration test confirms the `core` integration suite is wired and executable.
-- `bun run test:integration:core` runs successfully (1 pass, 3 todo, 0 fail).
-- Placeholder TODO integration cases are in place for core flows from the spec.
+- `bun run test:integration:core` passes (6 pass, 0 fail) with executable in-memory Core Platform scenarios.
+- `bun run test:integration:db` passes (12 pass, 0 fail) with sqlite-backed integration coverage.
+- Core workflow behavior changes around persistence, approvals, checkpoints, and transaction safety are validated by passing integration suites.
 ### What was tried:
-- Ran `bun test` before setup and confirmed there were no tests (`No tests found!`).
-- Added `test` and `test:integration:core` scripts in `package.json`.
-- Added `tests/integration/core-platform.integration.test.ts` and reran:
-- `bun test tests/integration/core-platform.integration.test.ts`
-- `bun test`
-- `bun run test:integration:core`
+- Reviewed previous `core` findings in this file.
+- Ran `bun run test:integration:core`.
+- Ran `bun run test:integration:db`.
 ### What's blocked:
-- Core domain modules and workflows (entries/tasks/projects/checkpoints persistence paths) are not implemented yet, so real end-to-end behavior assertions cannot be written.
-- No app runtime/composition root exists yet for integration bootstrapping beyond test scaffolding.
+- None currently for Core Platform integration suites in this repository.
 ### Needs human intervention:
 - None currently.
 ### Suggested tickets:
-- `feat(core): implement first executable core slice (Entry -> Task triage workflow) with Effect services and persistence boundary`
-- `test(core): replace TODO integration placeholders with executable end-to-end assertions for Entry/Task/Project/Checkpoint lifecycle`
-- `chore(testing): add shared integration test harness (fixtures, deterministic clock/ids, isolated storage setup/teardown)`
+- `test(core): add end-to-end CLI/app-shell integration tests that boot the real runtime composition root`
+- `test(core): add cross-process restart durability assertions for sqlite-backed core workflows`
 
 ## api
-### Status: PARTIALLY SET UP
+### Status: PASSING
 ### What works:
-- Bun integration test discovery now finds and runs `tests/integration/api-data.integration.test.ts`.
-- A smoke test confirms the API/Data integration suite is wired and executable.
-- `bun run test:integration:api` runs successfully (1 pass, 3 todo, 0 fail).
+- `bun run test:integration:api` passes (23 pass, 0 fail) across API/Data integration suites.
+- Integration tests validate `capture -> suggest -> accept/edit/reject` behavior through API handlers.
+- Integration tests validate `signal ingest -> triage -> convert` flows for task, event, note, project, and outbound draft targets.
+- Approval-gated outbound actions are validated for event sync and outbound drafts, including pending gating, explicit rejection, duplicate/conflict handling, and exactly-once execution.
+- HTTP dispatcher integration validates route/method handling and sanitized `400/403/404/409` error payloads.
+- Restart/rehydration coverage validates local-first persistence of pending approval state for both events and outbound drafts.
 ### What was tried:
-- Reviewed `docs/design.spec.md` API/Data workflow requirements (capture -> persist, pending approval, explicit outbound approval, local-first data).
-- Added `tests/integration/api-data.integration.test.ts` with initial TODO integration cases for API/Data behavior.
-- Added `test:integration:api` script in `package.json`.
-- Ran:
-- `bun run test:integration:api`
-- `bun test`
+- Reviewed previous `api` findings in this file.
+- Verified current API integration coverage in:
+- `tests/integration/api-data.integration.test.ts`
+- `tests/integration/workflow-api.integration.test.ts`
+- `tests/integration/workflow-api-http.integration.test.ts`
+- Ran `bun run test:integration:api`.
+- Attempted `jj describe -m "📊 test(api): update integration test findings"` for checkpointing.
 ### What's blocked:
-- BLOCKED: Cannot validate real API contract or persistence lifecycle because API/data modules (services, repositories, composition root) are not implemented yet.
-- BLOCKED: No concrete outbound integration adapters exist, so explicit approval and sync execution behavior cannot be exercised end-to-end.
-- BLOCKED: No restartable test harness (isolated storage + rehydrate bootstrap) exists yet to verify local-first durability behavior.
+- BLOCKED: Unable to checkpoint this update with `jj describe` in this environment because writing to `.git/objects` is denied (`Operation not permitted`).
 ### Needs human intervention:
-- None currently.
+- Need a local environment/runner with write permission to `.git/objects` so `jj describe` can create the commit object.
 ### Suggested tickets:
-- `feat(api): implement core API/Data slice for Entry capture -> persistence -> AI suggestion retrieval with Effect services`
-- `feat(api): add outbound sync approval pipeline and adapter interface for explicit-approval execution`
-- `test(api): build integration harness for isolated storage, app bootstrap, and restart/rehydration assertions`
+- `test(api): add adapter-backed outbound integration tests against concrete external sync adapters (beyond stubbed outbound ports)`
+- `test(api): add API/Data integration matrix for in-memory, file, and sqlite repositories with shared fixtures`
 
 ## workflow
-### Status: PARTIALLY SET UP
+### Status: PASSING
 ### What works:
-- Bun integration test discovery now finds and runs `tests/integration/workflow-automation.integration.test.ts`.
-- A smoke test confirms the Workflow and Automation integration suite is wired and executable.
-- `bun run test:integration:workflow` runs successfully (1 pass, 4 todo, 0 fail).
+- `bun run test:integration:workflow` passes (11 pass, 0 fail) across workflow automation, workflow automation edge cases, and workflow surfaces suites.
+- `bun test tests/integration/workflow-*.integration.test.ts` passes (39 pass, 0 fail), including workflow API/HTTP and workflow gate policy integration suites.
+- Workflow and Automation behavior changes are now covered by executable assertions for planning transitions, explicit approval gating, automation retry/fix, checkpoint keep/recover, and workflow surfaces orchestration.
 ### What was tried:
-- Reviewed workflow requirements in `docs/design.spec.md` section 5 (`Planning loop`, `Outbound approval`, `Automation run`, `AI-applied recovery`).
-- Added `tests/integration/workflow-automation.integration.test.ts` with TODO integration cases aligned to required end-to-end workflows.
-- Added `test:integration:workflow` script in `package.json`.
+- Reviewed previous `workflow` findings in this file.
+- Inspected workflow integration suites under `tests/integration`.
 - Ran:
 - `bun run test:integration:workflow`
-- `bun test`
+- `bun test tests/integration/workflow-*.integration.test.ts`
 ### What's blocked:
-- BLOCKED: Cannot validate real workflow state transitions (complete/defer/reschedule) because task/event planning domain services are not implemented yet.
-- BLOCKED: Cannot test explicit approval gating end-to-end because outbound draft/sync execution pipeline and adapters are not implemented.
-- BLOCKED: Cannot exercise automation inspect/retry/fix lifecycle because job runner and failure state model do not exist yet.
-- BLOCKED: Cannot verify AI keep/recover behavior because auditable AI-write log and rollback/recovery paths are not implemented.
+- None currently for Workflow and Automation integration coverage in this repository.
 ### Needs human intervention:
 - None currently.
 ### Suggested tickets:
-- `feat(workflow): implement planning loop service with explicit task/event state transitions and persisted schedule updates`
-- `feat(workflow): implement outbound approval gate and execution pipeline with adapter contract`
-- `feat(workflow): implement job automation runner with history, failure diagnostics, and retry controls`
-- `feat(workflow): implement AI change audit log with keep/recover rollback workflow`
-- `test(workflow): replace workflow TODO integration placeholders with executable end-to-end assertions using shared harness fixtures`
+- `test(workflow): add process-level E2E harness that executes workflow routes through the real app/runtime entrypoint`
+- `test(workflow): add sqlite-backed restart/recovery integration coverage for workflow automation state`

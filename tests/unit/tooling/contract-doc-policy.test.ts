@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
-import type { WorkflowRouteKey } from "../../../src/api/workflows/contracts";
+import type { WorkflowRouteKey } from "../../../src/contracts/workflow-route-keys";
 import {
   findPersistedSchemaContractViolations,
   findWorkflowRouteContractViolations,
@@ -14,6 +16,18 @@ import {
 } from "../../../src/core/tooling/contract-doc-policy";
 
 describe("contract-doc-policy", () => {
+  test("contract-doc-policy imports WorkflowRouteKey from neutral contracts, not api contracts", () => {
+    const policySource = readFileSync(
+      resolve(import.meta.dir, "../../../src/core/tooling/contract-doc-policy.ts"),
+      "utf8",
+    );
+
+    expect(policySource).toContain(
+      'import type { WorkflowRouteKey } from "../../contracts/workflow-route-keys";',
+    );
+    expect(policySource).not.toContain("../../api/workflows/contracts");
+  });
+
   test("parseMarkdownTableRows extracts rows from the requested heading table", () => {
     const markdown = `
 # Contracts
@@ -83,6 +97,30 @@ describe("contract-doc-policy", () => {
     expect(() => parseWorkflowRouteContractRows(markdown)).toThrow(
       "duplicate documented workflow route key: capture.entry",
     );
+  });
+
+  test("route violation typing remains compatible with documented route fixtures", () => {
+    const documented = [
+      {
+        key: "capture.entry",
+        method: "POST",
+        path: "/api/workflows/capture/entry",
+      },
+    ] as const satisfies ReadonlyArray<WorkflowRouteContractRow>;
+    const expectedPaths = {
+      "capture.entry": "/api/workflows/capture/entry",
+    } as Record<WorkflowRouteKey, string>;
+    const expectedMethodByKey = {
+      "capture.entry": "POST",
+    } as Record<WorkflowRouteKey, "POST">;
+
+    expect(
+      findWorkflowRouteContractViolations({
+        documented,
+        expectedPaths,
+        expectedMethodByKey,
+      }),
+    ).toEqual([]);
   });
 
   test("findWorkflowRouteContractViolations reports missing, extra, method mismatch, and path mismatch", () => {

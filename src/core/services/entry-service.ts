@@ -8,6 +8,7 @@ import { CoreRepository } from "../repositories/core-repository";
 
 export class EntryServiceError extends Data.TaggedError("EntryServiceError")<{
   message: string;
+  code?: "not_found";
 }> {}
 
 export interface CaptureEntryInput {
@@ -56,6 +57,7 @@ const loadEntry = (
       return yield* Effect.fail(
         new EntryServiceError({
           message: `entry ${entryId} was not found`,
+          code: "not_found",
         }),
       );
     }

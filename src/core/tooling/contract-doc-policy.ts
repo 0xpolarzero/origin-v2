@@ -1,4 +1,4 @@
-import type { WorkflowRouteKey } from "../../api/workflows/contracts";
+import type { WorkflowRouteKey } from "../../contracts/workflow-route-keys";
 
 export interface WorkflowRouteContractRow {
   key: WorkflowRouteKey;

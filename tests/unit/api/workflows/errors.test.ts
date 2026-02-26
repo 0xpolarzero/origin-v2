@@ -2,8 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import { ApprovalServiceError } from "../../../../src/core/services/approval-service";
 import { CheckpointServiceError } from "../../../../src/core/services/checkpoint-service";
+import { EntryServiceError } from "../../../../src/core/services/entry-service";
 import { EventServiceError } from "../../../../src/core/services/event-service";
 import { JobServiceError } from "../../../../src/core/services/job-service";
+import { SignalServiceError } from "../../../../src/core/services/signal-service";
+import { TaskTransitionError } from "../../../../src/core/services/task-service";
 import {
   toWorkflowApiError,
   WorkflowApiError,
@@ -136,6 +139,70 @@ describe("api/workflows/errors", () => {
       message: "failed to create checkpoint: name is required",
       code: "validation",
       statusCode: 400,
+    });
+  });
+
+  test("toWorkflowApiError maps EntryServiceError not_found code", () => {
+    const notFound = toWorkflowApiError(
+      "capture.acceptAsTask",
+      new EntryServiceError({
+        message: "entry entry-404 was not found",
+        code: "not_found",
+      }),
+    );
+
+    expect(notFound).toMatchObject({
+      route: "capture.acceptAsTask",
+      message: "entry entry-404 was not found",
+      code: "not_found",
+      statusCode: 404,
+    });
+  });
+
+  test("toWorkflowApiError maps TaskTransitionError not_found code", () => {
+    const notFound = toWorkflowApiError(
+      "planning.completeTask",
+      new TaskTransitionError({
+        message: "task task-404 was not found",
+        code: "not_found",
+      }),
+    );
+
+    expect(notFound).toMatchObject({
+      route: "planning.completeTask",
+      message: "task task-404 was not found",
+      code: "not_found",
+      statusCode: 404,
+    });
+  });
+
+  test("toWorkflowApiError maps SignalServiceError not_found and conflict codes", () => {
+    const notFound = toWorkflowApiError(
+      "signal.triage",
+      new SignalServiceError({
+        message: "signal signal-404 was not found",
+        code: "not_found",
+      }),
+    );
+    const conflict = toWorkflowApiError(
+      "signal.convert",
+      new SignalServiceError({
+        message: "signal signal-1 must be triaged before conversion",
+        code: "conflict",
+      }),
+    );
+
+    expect(notFound).toMatchObject({
+      route: "signal.triage",
+      message: "signal signal-404 was not found",
+      code: "not_found",
+      statusCode: 404,
+    });
+    expect(conflict).toMatchObject({
+      route: "signal.convert",
+      message: "signal signal-1 must be triaged before conversion",
+      code: "conflict",
+      statusCode: 409,
     });
   });
 

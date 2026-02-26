@@ -17,34 +17,10 @@ import {
   ConvertSignalInput,
   IngestSignalInput,
 } from "../../core/services/signal-service";
+import type { WorkflowRouteKey as SharedWorkflowRouteKey } from "../../contracts/workflow-route-keys";
 import { WorkflowApiError } from "./errors";
 
-export type WorkflowRouteKey =
-  | "capture.entry"
-  | "capture.suggest"
-  | "capture.editSuggestion"
-  | "capture.rejectSuggestion"
-  | "capture.acceptAsTask"
-  | "signal.ingest"
-  | "signal.triage"
-  | "signal.convert"
-  | "planning.completeTask"
-  | "planning.deferTask"
-  | "planning.rescheduleTask"
-  | "approval.requestEventSync"
-  | "approval.requestOutboundDraftExecution"
-  | "approval.approveOutboundAction"
-  | "job.create"
-  | "job.recordRun"
-  | "job.inspectRun"
-  | "job.list"
-  | "job.listHistory"
-  | "job.retry"
-  | "checkpoint.create"
-  | "checkpoint.inspect"
-  | "checkpoint.keep"
-  | "checkpoint.recover"
-  | "activity.list";
+export type WorkflowRouteKey = SharedWorkflowRouteKey;
 
 export interface TriageSignalRequest {
   signalId: string;
@@ -214,5 +190,8 @@ export interface WorkflowRouteDefinition {
   key: WorkflowRouteKey;
   method: "POST";
   path: string;
+  actorSource?: WorkflowRouteActorSource;
   handle: (input: unknown) => Effect.Effect<unknown, WorkflowApiError>;
 }
+
+export type WorkflowRouteActorSource = "payload" | "trusted";
