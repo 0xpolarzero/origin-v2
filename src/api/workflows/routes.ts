@@ -92,7 +92,7 @@ const SIGNAL_CONVERSION_TARGETS = [
 const OUTBOUND_ACTION_TYPES = ["event_sync", "outbound_draft"] as const;
 const JOB_RUN_OUTCOMES = ["succeeded", "failed"] as const;
 const ISO_8601_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})$/;
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})?$/;
 
 const valid = <Input>(value: Input): RouteValidation<Input> => ({
   ok: true,
@@ -161,6 +161,39 @@ function parseStringField(
     : invalid(route, `${field} must be a string`);
 }
 
+function parseNonEmptyStringField(
+  route: WorkflowRouteKey,
+  source: Record<string, unknown>,
+  field: string,
+): RouteValidation<string>;
+function parseNonEmptyStringField(
+  route: WorkflowRouteKey,
+  source: Record<string, unknown>,
+  field: string,
+  optional: true,
+): RouteValidation<string | undefined>;
+function parseNonEmptyStringField(
+  route: WorkflowRouteKey,
+  source: Record<string, unknown>,
+  field: string,
+  optional = false,
+): RouteValidation<string | undefined> {
+  const value = source[field];
+  if (value === undefined) {
+    return optional
+      ? valid(undefined)
+      : invalid(route, `${field} is required and must be a non-empty string`);
+  }
+
+  if (typeof value !== "string") {
+    return invalid(route, `${field} must be a string`);
+  }
+
+  return value.trim().length > 0
+    ? valid(value)
+    : invalid(route, `${field} must be a non-empty string`);
+}
+
 function parseDateField(
   route: WorkflowRouteKey,
   source: Record<string, unknown>,
@@ -219,9 +252,9 @@ function parseActorField(
     return invalid(route, `${field} must be an object`);
   }
 
-  const idResult = parseStringField(route, value, "id");
+  const idResult = parseNonEmptyStringField(route, value, "id");
   if (!idResult.ok) {
-    return invalid(route, `${field}.id must be a string`);
+    return invalid(route, `${field}.id must be a non-empty string`);
   }
 
   const kindValue = value.kind;
@@ -813,7 +846,11 @@ const validateRequestEventSyncRequest: RouteValidator<
     return sourceResult;
   }
 
-  const eventId = parseStringField(route, sourceResult.value, "eventId");
+  const eventId = parseNonEmptyStringField(
+    route,
+    sourceResult.value,
+    "eventId",
+  );
   if (!eventId.ok) {
     return eventId;
   }
@@ -844,7 +881,11 @@ const validateRequestOutboundDraftExecutionRequest: RouteValidator<
     return sourceResult;
   }
 
-  const draftId = parseStringField(route, sourceResult.value, "draftId");
+  const draftId = parseNonEmptyStringField(
+    route,
+    sourceResult.value,
+    "draftId",
+  );
   if (!draftId.ok) {
     return draftId;
   }
@@ -890,7 +931,11 @@ const validateApproveOutboundActionRequest: RouteValidator<
     return entityType;
   }
 
-  const entityId = parseStringField(route, sourceResult.value, "entityId");
+  const entityId = parseNonEmptyStringField(
+    route,
+    sourceResult.value,
+    "entityId",
+  );
   if (!entityId.ok) {
     return entityId;
   }
@@ -1133,7 +1178,7 @@ const validateCreateWorkflowCheckpointRequest: RouteValidator<
     return auditCursor;
   }
 
-  const rollbackTarget = parseStringField(
+  const rollbackTarget = parseNonEmptyStringField(
     route,
     sourceResult.value,
     "rollbackTarget",
@@ -1246,6 +1291,8 @@ const toRouteHandler =
         new WorkflowApiError({
           route,
           message: validationResult.message,
+          code: "validation",
+          statusCode: 400,
         }),
       );
     }

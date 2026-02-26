@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { WorkflowApi } from "../../../../src/api/workflows/contracts";
 import { WorkflowRouteDefinition } from "../../../../src/api/workflows/contracts";
 import { makeWorkflowHttpDispatcher } from "../../../../src/api/workflows/http-dispatch";
+import { WorkflowApiError } from "../../../../src/api/workflows/errors";
 import { makeWorkflowRoutes } from "../../../../src/api/workflows/routes";
 
 const ACTOR = { id: "user-1", kind: "user" } as const;
@@ -62,9 +63,7 @@ const makeApiStub = (): { api: WorkflowApi; calls: Array<StubCall> } => {
 describe("api/workflows/http-dispatch", () => {
   test("returns 404 when no workflow route matches the path", async () => {
     const stub = makeApiStub();
-    const dispatcher = makeWorkflowHttpDispatcher(
-      makeWorkflowRoutes(stub.api),
-    );
+    const dispatcher = makeWorkflowHttpDispatcher(makeWorkflowRoutes(stub.api));
 
     const response = await Effect.runPromise(
       dispatcher({
@@ -84,9 +83,7 @@ describe("api/workflows/http-dispatch", () => {
 
   test("returns 405 when path exists but method is unsupported", async () => {
     const stub = makeApiStub();
-    const dispatcher = makeWorkflowHttpDispatcher(
-      makeWorkflowRoutes(stub.api),
-    );
+    const dispatcher = makeWorkflowHttpDispatcher(makeWorkflowRoutes(stub.api));
 
     const response = await Effect.runPromise(
       dispatcher({
@@ -106,9 +103,7 @@ describe("api/workflows/http-dispatch", () => {
 
   test("returns 400 when payload fails route validation", async () => {
     const stub = makeApiStub();
-    const dispatcher = makeWorkflowHttpDispatcher(
-      makeWorkflowRoutes(stub.api),
-    );
+    const dispatcher = makeWorkflowHttpDispatcher(makeWorkflowRoutes(stub.api));
 
     const response = await Effect.runPromise(
       dispatcher({
@@ -139,9 +134,7 @@ describe("api/workflows/http-dispatch", () => {
 
   test("returns 200 with handler output for valid JSON payloads", async () => {
     const stub = makeApiStub();
-    const dispatcher = makeWorkflowHttpDispatcher(
-      makeWorkflowRoutes(stub.api),
-    );
+    const dispatcher = makeWorkflowHttpDispatcher(makeWorkflowRoutes(stub.api));
 
     const response = await Effect.runPromise(
       dispatcher({
@@ -162,16 +155,91 @@ describe("api/workflows/http-dispatch", () => {
       content: "Use dispatcher",
     });
 
-    const captureCall = stub.calls.find((call) => call.route === "capture.entry");
+    const captureCall = stub.calls.find(
+      (call) => call.route === "capture.entry",
+    );
     expect(captureCall).toBeDefined();
     expect((captureCall!.input as { at: unknown }).at).toBeInstanceOf(Date);
   });
 
+  test("returns 403 when a route returns a forbidden WorkflowApiError", async () => {
+    const routes: ReadonlyArray<WorkflowRouteDefinition> = [
+      {
+        key: "approval.approveOutboundAction",
+        method: "POST",
+        path: "/api/workflows/approval/approve-outbound-action",
+        handle: () =>
+          Effect.fail(
+            new WorkflowApiError({
+              route: "approval.approveOutboundAction",
+              message: "only user actors may approve outbound actions",
+              code: "forbidden",
+              statusCode: 403,
+            }),
+          ),
+      },
+    ];
+    const dispatcher = makeWorkflowHttpDispatcher(routes);
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: "/api/workflows/approval/approve-outbound-action",
+        body: {},
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        error: "workflow request failed",
+        route: "approval.approveOutboundAction",
+        message: "only user actors may approve outbound actions",
+      }),
+    );
+  });
+
+  test("returns 409 when a route returns a conflict WorkflowApiError", async () => {
+    const routes: ReadonlyArray<WorkflowRouteDefinition> = [
+      {
+        key: "approval.requestEventSync",
+        method: "POST",
+        path: "/api/workflows/approval/request-event-sync",
+        handle: () =>
+          Effect.fail(
+            new WorkflowApiError({
+              route: "approval.requestEventSync",
+              message:
+                "event event-1 must be local_only before requesting sync",
+              code: "conflict",
+              statusCode: 409,
+            }),
+          ),
+      },
+    ];
+    const dispatcher = makeWorkflowHttpDispatcher(routes);
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: "/api/workflows/approval/request-event-sync",
+        body: {},
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        error: "workflow request failed",
+        route: "approval.requestEventSync",
+        message: "event event-1 must be local_only before requesting sync",
+      }),
+    );
+  });
+
   test("dispatches job.listHistory route with the API stub", async () => {
     const stub = makeApiStub();
-    const dispatcher = makeWorkflowHttpDispatcher(
-      makeWorkflowRoutes(stub.api),
-    );
+    const dispatcher = makeWorkflowHttpDispatcher(makeWorkflowRoutes(stub.api));
 
     const response = await Effect.runPromise(
       dispatcher({
@@ -188,7 +256,9 @@ describe("api/workflows/http-dispatch", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual([]);
 
-    const historyCall = stub.calls.find((call) => call.route === "job.listHistory");
+    const historyCall = stub.calls.find(
+      (call) => call.route === "job.listHistory",
+    );
     expect(historyCall).toBeDefined();
     expect(
       (historyCall!.input as { beforeAt: unknown }).beforeAt,

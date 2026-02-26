@@ -9,6 +9,8 @@ import {
 import { makeWorkflowHttpDispatcher } from "../../src/api/workflows/http-dispatch";
 import { buildCorePlatform } from "../../src/core/app/core-platform";
 import { WorkflowRouteKey } from "../../src/api/workflows/contracts";
+import { createEvent } from "../../src/core/domain/event";
+import { makeInMemoryCoreRepository } from "../../src/core/repositories/in-memory-core-repository";
 
 const ACTOR = { id: "user-1", kind: "user" } as const;
 
@@ -117,5 +119,129 @@ describe("workflow-api http integration", () => {
     expect(inspection.runState).toBe("retrying");
     expect(inspection.retryCount).toBe(1);
     expect(checkpoint?.status).toBe("recovered");
+  });
+
+  test("approval endpoints return 400, 403, and 409 with sanitized error payloads", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const event = await Effect.runPromise(
+      createEvent({
+        id: "event-http-errors-1",
+        title: "HTTP approval status mapping",
+        startAt: new Date("2026-02-24T12:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("event", event.id, event));
+
+    let executeCount = 0;
+    const platform = await Effect.runPromise(
+      buildCorePlatform({
+        repository,
+        outboundActionPort: {
+          execute: (action) =>
+            Effect.sync(() => {
+              executeCount += 1;
+              return { executionId: `exec-${action.entityId}` };
+            }),
+        },
+      }),
+    );
+    const dispatcher = makeWorkflowHttpDispatcher(
+      makeWorkflowRoutes(makeWorkflowApi({ platform })),
+    );
+
+    await expectOk(dispatcher, "approval.requestEventSync", {
+      eventId: event.id,
+      actor: ACTOR,
+      at: "2026-02-23T09:30:00.000Z",
+    });
+
+    const invalid = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["approval.approveOutboundAction"],
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: "   ",
+          approved: true,
+          actor: ACTOR,
+          at: "2026-02-23T09:31:00.000Z",
+        },
+      }),
+    );
+    expect(invalid.status).toBe(400);
+    expect(invalid.body).toEqual(
+      expect.objectContaining({
+        error: "workflow request failed",
+        route: "approval.approveOutboundAction",
+      }),
+    );
+    expect(invalid.body).not.toHaveProperty("_tag");
+    expect(invalid.body).not.toHaveProperty("cause");
+
+    const forbidden = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["approval.approveOutboundAction"],
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: event.id,
+          approved: true,
+          actor: { id: "system-1", kind: "system" },
+          at: "2026-02-23T09:32:00.000Z",
+        },
+      }),
+    );
+    expect(forbidden.status).toBe(403);
+    expect(forbidden.body).toEqual(
+      expect.objectContaining({
+        error: "workflow request failed",
+        route: "approval.approveOutboundAction",
+      }),
+    );
+    expect(forbidden.body).not.toHaveProperty("_tag");
+    expect(forbidden.body).not.toHaveProperty("cause");
+
+    const firstApproval = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["approval.approveOutboundAction"],
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: event.id,
+          approved: true,
+          actor: ACTOR,
+          at: "2026-02-23T09:33:00.000Z",
+        },
+      }),
+    );
+    expect(firstApproval.status).toBe(200);
+
+    const conflict = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS["approval.approveOutboundAction"],
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: event.id,
+          approved: true,
+          actor: ACTOR,
+          at: "2026-02-23T09:34:00.000Z",
+        },
+      }),
+    );
+    expect(conflict.status).toBe(409);
+    expect(conflict.body).toEqual(
+      expect.objectContaining({
+        error: "workflow request failed",
+        route: "approval.approveOutboundAction",
+      }),
+    );
+    expect(conflict.body).not.toHaveProperty("_tag");
+    expect(conflict.body).not.toHaveProperty("cause");
+    expect(executeCount).toBe(1);
   });
 });

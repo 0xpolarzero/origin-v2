@@ -415,6 +415,150 @@ describe("api/workflows/routes", () => {
     }
   });
 
+  test("approval.approveOutboundAction rejects whitespace-only entityId", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const approveRoute = byKey.get("approval.approveOutboundAction");
+
+    expect(approveRoute).toBeDefined();
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        approveRoute!.handle({
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: "   ",
+          approved: true,
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "approval.approveOutboundAction",
+      });
+      expect(result.left.message).toContain("entityId");
+    }
+  });
+
+  test("approval routes reject whitespace-only actor.id", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const approvalRoutes: ReadonlyArray<WorkflowRouteKey> = [
+      "approval.requestEventSync",
+      "approval.requestOutboundDraftExecution",
+      "approval.approveOutboundAction",
+    ];
+
+    for (const key of approvalRoutes) {
+      const route = byKey.get(key);
+      expect(route).toBeDefined();
+      const payload = {
+        ...(VALID_ROUTE_INPUTS[key] as Record<string, unknown>),
+        actor: {
+          id: "   ",
+          kind: "user",
+        },
+      };
+
+      const result = await Effect.runPromise(
+        Effect.either(route!.handle(payload)),
+      );
+      expect(Either.isLeft(result)).toBe(true);
+
+      if (Either.isLeft(result)) {
+        expect(result.left).toMatchObject({
+          _tag: "WorkflowApiError",
+          route: key,
+        });
+        expect(result.left.message).toContain("actor.id");
+      }
+    }
+  });
+
+  test("approval request routes reject blank eventId and draftId", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const eventSyncRoute = byKey.get("approval.requestEventSync");
+    const outboundDraftRoute = byKey.get(
+      "approval.requestOutboundDraftExecution",
+    );
+
+    expect(eventSyncRoute).toBeDefined();
+    expect(outboundDraftRoute).toBeDefined();
+
+    const blankEventId = await Effect.runPromise(
+      Effect.either(
+        eventSyncRoute!.handle({
+          eventId: "",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+    expect(Either.isLeft(blankEventId)).toBe(true);
+    if (Either.isLeft(blankEventId)) {
+      expect(blankEventId.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "approval.requestEventSync",
+      });
+      expect(blankEventId.left.message).toContain("eventId");
+    }
+
+    const blankDraftId = await Effect.runPromise(
+      Effect.either(
+        outboundDraftRoute!.handle({
+          draftId: "   ",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+    expect(Either.isLeft(blankDraftId)).toBe(true);
+    if (Either.isLeft(blankDraftId)) {
+      expect(blankDraftId.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "approval.requestOutboundDraftExecution",
+      });
+      expect(blankDraftId.left.message).toContain("draftId");
+    }
+  });
+
+  test("checkpoint.create rejects blank rollbackTarget", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const checkpointCreateRoute = byKey.get("checkpoint.create");
+
+    expect(checkpointCreateRoute).toBeDefined();
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        checkpointCreateRoute!.handle({
+          checkpointId: "checkpoint-route-1",
+          name: "Before conversion",
+          snapshotEntityRefs: [{ entityType: "task", entityId: "task-route-1" }],
+          auditCursor: 1,
+          rollbackTarget: "   ",
+          actor: ACTOR,
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "checkpoint.create",
+      });
+      expect(result.left.message).toContain("rollbackTarget");
+    }
+  });
+
   test("job.listHistory validator requires jobId and enforces optional filters", async () => {
     const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
     const byKey = new Map(routes.map((route) => [route.key, route]));
@@ -569,6 +713,48 @@ describe("api/workflows/routes", () => {
     expect(call).toBeDefined();
     expect((call!.input as { beforeAt: Date }).beforeAt.toISOString()).toBe(
       "2026-02-23T09:00:00.000Z",
+    );
+  });
+
+  test("route handlers accept broader ISO-8601 variants for timestamp fields", async () => {
+    const calls: Array<{ route: WorkflowRouteKey; input: unknown }> = [];
+    const routes = makeWorkflowRoutes(
+      makeApiSpy((route, input) => {
+        calls.push({ route, input });
+      }),
+    );
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const captureRoute = byKey.get("capture.entry");
+    const historyRoute = byKey.get("job.listHistory");
+
+    expect(captureRoute).toBeDefined();
+    expect(historyRoute).toBeDefined();
+
+    await Effect.runPromise(
+      captureRoute!.handle({
+        entryId: "entry-route-iso-variant-1",
+        content: "Capture content",
+        actor: ACTOR,
+        at: "2026-02-23T10:00:00.1Z",
+      }),
+    );
+
+    await Effect.runPromise(
+      historyRoute!.handle({
+        jobId: "job-route-iso-variant-1",
+        beforeAt: "2026-02-23T10:00:00",
+        limit: 5,
+      }),
+    );
+
+    const captureCall = calls.find((entry) => entry.route === "capture.entry");
+    const historyCall = calls.find((entry) => entry.route === "job.listHistory");
+
+    expect(captureCall).toBeDefined();
+    expect(historyCall).toBeDefined();
+    expect((captureCall!.input as { at: Date }).at).toBeInstanceOf(Date);
+    expect((historyCall!.input as { beforeAt: Date }).beforeAt).toBeInstanceOf(
+      Date,
     );
   });
 });
