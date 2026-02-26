@@ -22,6 +22,19 @@ const createTempPaths = (): {
   };
 };
 
+type LegacySnapshotPayload = {
+  version: 1;
+  entities: Record<string, ReadonlyArray<Record<string, unknown>>>;
+  auditTrail: ReadonlyArray<Record<string, unknown>>;
+};
+
+const writeLegacySnapshot = (
+  snapshotPath: string,
+  payload: LegacySnapshotPayload,
+): void => {
+  writeFileSync(snapshotPath, JSON.stringify(payload, null, 2), "utf8");
+};
+
 describe("database-backed core platform", () => {
   test("buildCorePlatform({ databasePath }) runs migrations and supports existing workflow routes", async () => {
     const { tempDir, databasePath } = createTempPaths();
@@ -183,6 +196,7 @@ describe("database-backed core platform", () => {
           "job-db-history-1",
           { id: "user-1", kind: "user" },
           new Date("2026-02-23T14:02:00.000Z"),
+          "Increase timeout before retry",
         ),
       );
       await Effect.runPromise(
@@ -902,7 +916,9 @@ describe("database-backed core platform", () => {
             transition.entityType === "job" &&
             transition.reason.includes("Job run recorded")
           ) {
-            return Effect.fail(new Error("forced recordJobRun transition failure"));
+            return Effect.fail(
+              new Error("forced recordJobRun transition failure"),
+            );
           }
 
           return sqliteRepository.appendAuditTransition(transition as never);
@@ -946,7 +962,9 @@ describe("database-backed core platform", () => {
         );
       }
 
-      const after = await Effect.runPromise(platform.inspectJobRun("job-db-rollback-1"));
+      const after = await Effect.runPromise(
+        platform.inspectJobRun("job-db-rollback-1"),
+      );
       const history = await Effect.runPromise(
         platform.listJobRunHistory("job-db-rollback-1"),
       );
@@ -1061,10 +1079,11 @@ describe("database-backed core platform", () => {
       }
 
       const persistedView = await Effect.runPromise(
-        platform.getEntity<{ name: string; query: string; filters: { status: string } }>(
-          "view",
-          "view-db-rollback-1",
-        ),
+        platform.getEntity<{
+          name: string;
+          query: string;
+          filters: { status: string };
+        }>("view", "view-db-rollback-1"),
       );
       const checkpoint = await Effect.runPromise(
         platform.getEntity<{ status: string }>(
@@ -1084,7 +1103,9 @@ describe("database-backed core platform", () => {
       expect(persistedView?.filters.status).toBe("completed");
       expect(checkpoint?.status).toBe("created");
       expect(
-        checkpointAudit.filter((transition) => transition.toState === "recovered"),
+        checkpointAudit.filter(
+          (transition) => transition.toState === "recovered",
+        ),
       ).toHaveLength(0);
 
       if (!platform.close) {
@@ -1100,42 +1121,34 @@ describe("database-backed core platform", () => {
     const { tempDir, databasePath, snapshotPath } = createTempPaths();
 
     try {
-      writeFileSync(
-        snapshotPath,
-        JSON.stringify(
-          {
-            version: 1,
-            entities: {
-              entry: [
-                {
-                  id: "entry-legacy-1",
-                  content: "Imported from snapshot",
-                  source: "manual",
-                  status: "captured",
-                  capturedAt: "2026-02-23T00:00:00.000Z",
-                  createdAt: "2026-02-23T00:00:00.000Z",
-                  updatedAt: "2026-02-23T00:00:00.000Z",
-                },
-              ],
+      writeLegacySnapshot(snapshotPath, {
+        version: 1,
+        entities: {
+          entry: [
+            {
+              id: "entry-legacy-1",
+              content: "Imported from snapshot",
+              source: "manual",
+              status: "captured",
+              capturedAt: "2026-02-23T00:00:00.000Z",
+              createdAt: "2026-02-23T00:00:00.000Z",
+              updatedAt: "2026-02-23T00:00:00.000Z",
             },
-            auditTrail: [
-              {
-                id: "audit-legacy-1",
-                entityType: "entry",
-                entityId: "entry-legacy-1",
-                fromState: "none",
-                toState: "captured",
-                actor: { id: "user-1", kind: "user" },
-                reason: "Imported capture",
-                at: "2026-02-23T00:00:00.000Z",
-              },
-            ],
+          ],
+        },
+        auditTrail: [
+          {
+            id: "audit-legacy-1",
+            entityType: "entry",
+            entityId: "entry-legacy-1",
+            fromState: "none",
+            toState: "captured",
+            actor: { id: "user-1", kind: "user" },
+            reason: "Imported capture",
+            at: "2026-02-23T00:00:00.000Z",
           },
-          null,
-          2,
-        ),
-        "utf8",
-      );
+        ],
+      });
 
       const platformA = await Effect.runPromise(
         buildCorePlatform({
@@ -1188,6 +1201,135 @@ describe("database-backed core platform", () => {
         throw new Error("database-backed platform should expose close()");
       }
       await Effect.runPromise(platformB.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("legacy snapshot import skips non-empty database and preserves existing rows", async () => {
+    const { tempDir, databasePath, snapshotPath } = createTempPaths();
+    const existingEntryId = "entry-db-legacy-existing-1";
+    const existingEntryContent = "Keep existing sqlite content";
+    const snapshotOnlyEntryId = "entry-db-legacy-snapshot-only-1";
+    const snapshotAuditMarker = "snapshot-import-should-skip-marker";
+
+    try {
+      const platformA = await Effect.runPromise(
+        buildCorePlatform({
+          databasePath,
+        }),
+      );
+      let seededUpdatedAt: string | undefined;
+      let seededAuditCount = 0;
+
+      try {
+        await Effect.runPromise(
+          platformA.captureEntry({
+            entryId: existingEntryId,
+            content: existingEntryContent,
+            actor: { id: "user-1", kind: "user" },
+            at: new Date("2026-02-23T11:00:00.000Z"),
+          }),
+        );
+
+        const seededEntryBeforeImport = await Effect.runPromise(
+          platformA.getEntity<{ content: string; updatedAt: string }>(
+            "entry",
+            existingEntryId,
+          ),
+        );
+        const seededAuditBeforeImport = await Effect.runPromise(
+          platformA.listAuditTrail({
+            entityType: "entry",
+            entityId: existingEntryId,
+          }),
+        );
+
+        seededUpdatedAt = seededEntryBeforeImport?.updatedAt;
+        seededAuditCount = seededAuditBeforeImport.length;
+      } finally {
+        if (platformA.close) {
+          await Effect.runPromise(Effect.either(platformA.close()));
+        }
+      }
+
+      writeLegacySnapshot(snapshotPath, {
+        version: 1,
+        entities: {
+          entry: [
+            {
+              id: existingEntryId,
+              content: "Snapshot overwrite attempt",
+              source: "manual",
+              status: "captured",
+              capturedAt: "2026-02-23T12:00:00.000Z",
+              createdAt: "2026-02-23T12:00:00.000Z",
+              updatedAt: "2026-02-23T12:00:00.000Z",
+            },
+            {
+              id: snapshotOnlyEntryId,
+              content: "Snapshot-only row that must not import",
+              source: "manual",
+              status: "captured",
+              capturedAt: "2026-02-23T12:05:00.000Z",
+              createdAt: "2026-02-23T12:05:00.000Z",
+              updatedAt: "2026-02-23T12:05:00.000Z",
+            },
+          ],
+        },
+        auditTrail: [
+          {
+            id: "audit-db-legacy-existing-1",
+            entityType: "entry",
+            entityId: existingEntryId,
+            fromState: "none",
+            toState: "captured",
+            actor: { id: "user-1", kind: "user" },
+            reason: snapshotAuditMarker,
+            at: "2026-02-23T12:00:00.000Z",
+          },
+        ],
+      });
+
+      const platformB = await Effect.runPromise(
+        buildCorePlatform({
+          databasePath,
+          snapshotPath,
+          importSnapshotIntoDatabase: true,
+        }),
+      );
+
+      try {
+        const seededEntryAfterImportAttempt = await Effect.runPromise(
+          platformB.getEntity<{ content: string; updatedAt: string }>(
+            "entry",
+            existingEntryId,
+          ),
+        );
+        const snapshotOnlyEntry = await Effect.runPromise(
+          platformB.getEntity("entry", snapshotOnlyEntryId),
+        );
+        const seededAuditAfterImportAttempt = await Effect.runPromise(
+          platformB.listAuditTrail({
+            entityType: "entry",
+            entityId: existingEntryId,
+          }),
+        );
+
+        expect(seededEntryAfterImportAttempt?.content).toBe(existingEntryContent);
+        expect(seededEntryAfterImportAttempt?.updatedAt).toBe(seededUpdatedAt);
+        expect(snapshotOnlyEntry).toBeUndefined();
+        expect(seededAuditAfterImportAttempt).toHaveLength(seededAuditCount);
+        expect(
+          seededAuditAfterImportAttempt.some(
+            (transition) => transition.reason === snapshotAuditMarker,
+          ),
+        ).toBe(false);
+      } finally {
+        if (platformB.close) {
+          await Effect.runPromise(Effect.either(platformB.close()));
+        }
+      }
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
