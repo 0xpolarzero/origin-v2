@@ -22,6 +22,195 @@ const TRUSTED_SIGNED_USER_ACTOR = {
   kind: "user",
 } as const;
 
+type InvalidActorKindRoute = Exclude<
+  WorkflowRouteKey,
+  | "approval.approveOutboundAction"
+  | "job.inspectRun"
+  | "job.list"
+  | "job.listHistory"
+  | "checkpoint.inspect"
+  | "activity.list"
+>;
+
+const INVALID_ACTOR_KIND_CASES: ReadonlyArray<{
+  route: InvalidActorKindRoute;
+  body: Record<string, unknown>;
+}> = [
+  {
+    route: "capture.entry",
+    body: {
+      entryId: "entry-http-invalid-actor-kind-1",
+      content: "Capture with invalid actor kind",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:00:00.000Z",
+    },
+  },
+  {
+    route: "capture.suggest",
+    body: {
+      entryId: "entry-http-invalid-actor-kind-2",
+      suggestedTitle: "Suggest task",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:01:00.000Z",
+    },
+  },
+  {
+    route: "capture.editSuggestion",
+    body: {
+      entryId: "entry-http-invalid-actor-kind-3",
+      suggestedTitle: "Edited suggestion",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:02:00.000Z",
+    },
+  },
+  {
+    route: "capture.rejectSuggestion",
+    body: {
+      entryId: "entry-http-invalid-actor-kind-4",
+      reason: "Not now",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:03:00.000Z",
+    },
+  },
+  {
+    route: "capture.acceptAsTask",
+    body: {
+      entryId: "entry-http-invalid-actor-kind-5",
+      taskId: "task-http-invalid-actor-kind-1",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:04:00.000Z",
+    },
+  },
+  {
+    route: "signal.ingest",
+    body: {
+      signalId: "signal-http-invalid-actor-kind-1",
+      source: "email",
+      payload: "Signal payload",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:05:00.000Z",
+    },
+  },
+  {
+    route: "signal.triage",
+    body: {
+      signalId: "signal-http-invalid-actor-kind-2",
+      decision: "ready_for_conversion",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:06:00.000Z",
+    },
+  },
+  {
+    route: "signal.convert",
+    body: {
+      signalId: "signal-http-invalid-actor-kind-3",
+      targetType: "task",
+      targetId: "task-http-invalid-actor-kind-2",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:07:00.000Z",
+    },
+  },
+  {
+    route: "planning.completeTask",
+    body: {
+      taskId: "task-http-invalid-actor-kind-3",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:08:00.000Z",
+    },
+  },
+  {
+    route: "planning.deferTask",
+    body: {
+      taskId: "task-http-invalid-actor-kind-4",
+      until: "2026-02-25T18:09:00.000Z",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:09:00.000Z",
+    },
+  },
+  {
+    route: "planning.rescheduleTask",
+    body: {
+      taskId: "task-http-invalid-actor-kind-5",
+      nextAt: "2026-02-25T18:10:00.000Z",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:10:00.000Z",
+    },
+  },
+  {
+    route: "approval.requestEventSync",
+    body: {
+      eventId: "event-http-invalid-actor-kind-1",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:11:00.000Z",
+    },
+  },
+  {
+    route: "approval.requestOutboundDraftExecution",
+    body: {
+      draftId: "outbound-draft-http-invalid-actor-kind-1",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:12:00.000Z",
+    },
+  },
+  {
+    route: "job.create",
+    body: {
+      jobId: "job-http-invalid-actor-kind-1",
+      name: "Create job invalid actor kind",
+      actor: { id: "system-1", kind: "robot" },
+      at: "2026-02-24T18:13:00.000Z",
+    },
+  },
+  {
+    route: "job.recordRun",
+    body: {
+      jobId: "job-http-invalid-actor-kind-2",
+      outcome: "failed",
+      diagnostics: "timeout",
+      actor: { id: "system-1", kind: "robot" },
+      at: "2026-02-24T18:14:00.000Z",
+    },
+  },
+  {
+    route: "job.retry",
+    body: {
+      jobId: "job-http-invalid-actor-kind-3",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:15:00.000Z",
+    },
+  },
+  {
+    route: "checkpoint.create",
+    body: {
+      checkpointId: "checkpoint-http-invalid-actor-kind-1",
+      name: "Before invalid actor kind",
+      snapshotEntityRefs: [
+        { entityType: "task", entityId: "task-http-invalid-actor-kind-6" },
+      ],
+      auditCursor: 1,
+      rollbackTarget: "audit-invalid-actor-kind-1",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:16:00.000Z",
+    },
+  },
+  {
+    route: "checkpoint.keep",
+    body: {
+      checkpointId: "checkpoint-http-invalid-actor-kind-2",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:17:00.000Z",
+    },
+  },
+  {
+    route: "checkpoint.recover",
+    body: {
+      checkpointId: "checkpoint-http-invalid-actor-kind-3",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:18:00.000Z",
+    },
+  },
+];
+
 const expectOk = async (
   dispatch: ReturnType<typeof makeWorkflowHttpDispatcher>,
   route: WorkflowRouteKey,
@@ -61,6 +250,26 @@ const expectSanitizedError = (
       expected.messageIncludes,
     );
   }
+};
+
+const expectInvalidActorKind400 = async (
+  dispatch: ReturnType<typeof makeWorkflowHttpDispatcher>,
+  route: InvalidActorKindRoute,
+  body: Record<string, unknown>,
+): Promise<void> => {
+  const response = await Effect.runPromise(
+    dispatch({
+      method: "POST",
+      path: WORKFLOW_ROUTE_PATHS[route],
+      body,
+    }),
+  );
+
+  expectSanitizedError(response, {
+    status: 400,
+    route,
+    messageIncludes: "actor.kind",
+  });
 };
 
 describe("workflow-api http integration", () => {
@@ -235,6 +444,21 @@ describe("workflow-api http integration", () => {
       messageIncludes: "payload",
     });
   });
+
+  for (const testCase of INVALID_ACTOR_KIND_CASES) {
+    test(`${testCase.route} returns sanitized 400 for invalid actor.kind`, async () => {
+      const platform = await Effect.runPromise(buildCorePlatform());
+      const dispatcher = makeWorkflowHttpDispatcher(
+        makeWorkflowRoutes(makeWorkflowApi({ platform })),
+      );
+
+      await expectInvalidActorKind400(
+        dispatcher,
+        testCase.route,
+        testCase.body,
+      );
+    });
+  }
 
   test("job.list and activity.list accept omitted JSON bodies", async () => {
     const platform = await Effect.runPromise(buildCorePlatform());
