@@ -25,7 +25,7 @@
   },
   "patchedDependencies": {
     "super-ralph@github:evmts/super-ralph#ef8726d": "patches/super-ralph-codex-schema.patch",
-    "smithers-orchestrator@0.8.5": "patches/smithers-orchestrator-jj-traceability.patch"
+    "smithers-orchestrator@0.8.5": "patches/smithers-orchestrator@0.8.5.patch"
   },
   "devDependencies": {
     "bun-types": "1.3.7",
