@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { Effect } from "effect";
 
 import { buildCorePlatform } from "../../src/core/app/core-platform";
+import { CoreRepository } from "../../src/core/repositories/core-repository";
+import { makeInMemoryCoreRepository } from "../../src/core/repositories/in-memory-core-repository";
 
 describe("Core Platform integration", () => {
   test("captures an Entry and promotes it into a triaged Task", async () => {
@@ -132,5 +134,33 @@ describe("Core Platform integration", () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  test("wraps mutating workflow operations in repository transaction boundaries", async () => {
+    const baseRepository = makeInMemoryCoreRepository();
+    const transactionCalls: Array<string> = [];
+
+    const repository: CoreRepository = {
+      ...baseRepository,
+      withTransaction: (effect) => {
+        transactionCalls.push("withTransaction");
+        return effect;
+      },
+    };
+    const platform = await Effect.runPromise(
+      buildCorePlatform({
+        repository,
+      }),
+    );
+
+    await Effect.runPromise(
+      platform.captureEntry({
+        entryId: "entry-tx-1",
+        content: "Exercise transaction boundary",
+        actor: { id: "user-1", kind: "user" },
+      }),
+    );
+
+    expect(transactionCalls.length).toBe(1);
   });
 });

@@ -1,11 +1,12 @@
 import { Effect } from "effect";
 
 import { createAuditTransition } from "../domain/audit-transition";
-import { ActorRef } from "../domain/common";
+import { ActorRef, ENTITY_TYPES } from "../domain/common";
 import { createJob, CreateJobInput, Job } from "../domain/job";
 import { CoreRepository } from "../repositories/core-repository";
 import { makeFileCoreRepository } from "../repositories/file-core-repository";
 import { makeInMemoryCoreRepository } from "../repositories/in-memory-core-repository";
+import { makeSqliteCoreRepository } from "../repositories/sqlite/sqlite-core-repository";
 import {
   approveOutboundAction,
   ApproveOutboundActionInput,
@@ -55,8 +56,11 @@ import {
 
 export interface BuildCorePlatformOptions {
   repository?: CoreRepository;
+  databasePath?: string;
+  runMigrationsOnInit?: boolean;
   snapshotPath?: string;
   loadSnapshotOnInit?: boolean;
+  importSnapshotIntoDatabase?: boolean;
   outboundActionPort?: OutboundActionPort;
 }
 
@@ -154,7 +158,73 @@ export interface CorePlatform {
   }) => ReturnType<CoreRepository["listAuditTrail"]>;
   persistSnapshot: () => Effect.Effect<void, Error>;
   loadSnapshot: () => Effect.Effect<void, Error>;
+  close?: () => Effect.Effect<void, Error>;
 }
+
+const toNativeError = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isRepositoryEmpty = (
+  repository: CoreRepository,
+): Effect.Effect<boolean> =>
+  Effect.gen(function* () {
+    const auditTrail = yield* repository.listAuditTrail();
+    if (auditTrail.length > 0) {
+      return false;
+    }
+
+    for (const entityType of ENTITY_TYPES) {
+      const entities = yield* repository.listEntities(entityType);
+      if (entities.length > 0) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+const importLegacySnapshotIntoEmptyRepository = (
+  repository: CoreRepository,
+  snapshotPath: string,
+): Effect.Effect<void, Error> =>
+  Effect.gen(function* () {
+    const shouldImport = yield* isRepositoryEmpty(repository);
+    if (!shouldImport) {
+      return;
+    }
+
+    const snapshotRepository = yield* makeFileCoreRepository(snapshotPath).pipe(
+      Effect.mapError((error) => new Error(error.message)),
+    );
+
+    if (snapshotRepository.loadSnapshot) {
+      yield* snapshotRepository.loadSnapshot(snapshotPath);
+    }
+
+    for (const entityType of ENTITY_TYPES) {
+      const entities = yield* snapshotRepository.listEntities(entityType);
+      for (const entity of entities) {
+        if (!isRecord(entity)) {
+          continue;
+        }
+
+        const entityId = entity.id;
+        if (typeof entityId !== "string" || entityId.trim().length === 0) {
+          continue;
+        }
+
+        yield* repository.saveEntity(entityType, entityId, entity);
+      }
+    }
+
+    const auditTrail = yield* snapshotRepository.listAuditTrail();
+    for (const transition of auditTrail) {
+      yield* repository.appendAuditTransition(transition);
+    }
+  });
 
 export const buildCorePlatform = (
   options: BuildCorePlatformOptions = {},
@@ -163,6 +233,13 @@ export const buildCorePlatform = (
     const repository = yield* ((): Effect.Effect<CoreRepository, Error> => {
       if (options.repository) {
         return Effect.succeed(options.repository);
+      }
+
+      if (options.databasePath) {
+        return makeSqliteCoreRepository({
+          databasePath: options.databasePath,
+          runMigrationsOnInit: options.runMigrationsOnInit,
+        }).pipe(Effect.mapError((error) => new Error(error.message)));
       }
 
       if (options.snapshotPath) {
@@ -190,6 +267,13 @@ export const buildCorePlatform = (
       yield* repository
         .loadSnapshot(options.snapshotPath)
         .pipe(Effect.catchAll(() => Effect.void));
+    }
+
+    if (options.importSnapshotIntoDatabase && options.snapshotPath) {
+      yield* importLegacySnapshotIntoEmptyRepository(
+        repository,
+        options.snapshotPath,
+      );
     }
 
     const createJobInPlatform = (
@@ -226,44 +310,67 @@ export const buildCorePlatform = (
         return job;
       });
 
+    const withMutationBoundary = <A, E>(
+      effect: Effect.Effect<A, E>,
+    ): Effect.Effect<A, E> => repository.withTransaction(effect);
+
     return {
-      captureEntry: (input) => captureEntry(repository, input),
-      acceptEntryAsTask: (input) => acceptEntryAsTask(repository, input),
-      suggestEntryAsTask: (input) => suggestEntryAsTask(repository, input),
-      editEntrySuggestion: (input) => editEntrySuggestion(repository, input),
+      captureEntry: (input) =>
+        withMutationBoundary(captureEntry(repository, input)),
+      acceptEntryAsTask: (input) =>
+        withMutationBoundary(acceptEntryAsTask(repository, input)),
+      suggestEntryAsTask: (input) =>
+        withMutationBoundary(suggestEntryAsTask(repository, input)),
+      editEntrySuggestion: (input) =>
+        withMutationBoundary(editEntrySuggestion(repository, input)),
       rejectEntrySuggestion: (input) =>
-        rejectEntrySuggestion(repository, input),
+        withMutationBoundary(rejectEntrySuggestion(repository, input)),
       completeTask: (taskId, actor, at) =>
-        completeTask(repository, taskId, actor, at),
+        withMutationBoundary(completeTask(repository, taskId, actor, at)),
       deferTask: (taskId, until, actor, at) =>
-        deferTask(repository, taskId, until, actor, at),
+        withMutationBoundary(deferTask(repository, taskId, until, actor, at)),
       rescheduleTask: (taskId, nextAt, actor, at) =>
-        rescheduleTask(repository, taskId, nextAt, actor, at),
-      ingestSignal: (input) => ingestSignal(repository, input),
+        withMutationBoundary(
+          rescheduleTask(repository, taskId, nextAt, actor, at),
+        ),
+      ingestSignal: (input) =>
+        withMutationBoundary(ingestSignal(repository, input)),
       triageSignal: (signalId, decision, actor, at) =>
-        triageSignal(repository, signalId, decision, actor, at),
-      convertSignal: (input) => convertSignal(repository, input),
+        withMutationBoundary(
+          triageSignal(repository, signalId, decision, actor, at),
+        ),
+      convertSignal: (input) =>
+        withMutationBoundary(convertSignal(repository, input)),
       requestEventSync: (eventId, actor, at) =>
-        requestEventSync(repository, eventId, actor, at),
+        withMutationBoundary(requestEventSync(repository, eventId, actor, at)),
       requestOutboundDraftExecution: (draftId, actor, at) =>
-        requestOutboundDraftExecution(repository, draftId, actor, at),
+        withMutationBoundary(
+          requestOutboundDraftExecution(repository, draftId, actor, at),
+        ),
       approveOutboundAction: (input) =>
-        approveOutboundAction(repository, outboundActionPort, input),
-      createJob: createJobInPlatform,
-      recordJobRun: (input) => recordJobRun(repository, input),
+        withMutationBoundary(
+          approveOutboundAction(repository, outboundActionPort, input),
+        ),
+      createJob: (input) => withMutationBoundary(createJobInPlatform(input)),
+      recordJobRun: (input) =>
+        withMutationBoundary(recordJobRun(repository, input)),
       inspectJobRun: (jobId) =>
         inspectJobRun(repository, jobId).pipe(
           Effect.mapError((error) => new Error(error.message)),
         ),
-      retryJob: (jobId, actor, at) => retryJobRun(repository, jobId, actor, at),
+      retryJob: (jobId, actor, at) =>
+        withMutationBoundary(retryJobRun(repository, jobId, actor, at)),
       createWorkflowCheckpoint: (input) =>
-        createWorkflowCheckpoint(repository, input),
+        withMutationBoundary(createWorkflowCheckpoint(repository, input)),
       keepCheckpoint: (checkpointId, actor, at) =>
-        keepCheckpoint(repository, checkpointId, actor, at),
+        withMutationBoundary(keepCheckpoint(repository, checkpointId, actor, at)),
       recoverCheckpoint: (checkpointId, actor, at) =>
-        recoverCheckpoint(repository, checkpointId, actor, at),
-      saveView: (input) => saveView(repository, input),
-      upsertMemory: (input) => upsertMemory(repository, input),
+        withMutationBoundary(
+          recoverCheckpoint(repository, checkpointId, actor, at),
+        ),
+      saveView: (input) => withMutationBoundary(saveView(repository, input)),
+      upsertMemory: (input) =>
+        withMutationBoundary(upsertMemory(repository, input)),
       getEntity: <T>(entityType: string, entityId: string) =>
         repository.getEntity<T>(entityType, entityId),
       listEntities: <T>(entityType: string) =>
@@ -283,5 +390,8 @@ export const buildCorePlatform = (
 
         return Effect.void;
       },
+      close: repository.close
+        ? () => repository.close!().pipe(Effect.mapError(toNativeError))
+        : undefined,
     };
   });
