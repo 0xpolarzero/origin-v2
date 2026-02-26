@@ -286,7 +286,7 @@ function parseActorField(
   }
 
   return valid({
-    id: idResult.value,
+    id: idResult.value.trim(),
     kind,
   });
 }

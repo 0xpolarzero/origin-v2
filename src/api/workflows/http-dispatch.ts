@@ -43,6 +43,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isActorKind = (value: unknown): value is ActorRef["kind"] =>
   ACTOR_KINDS.some((candidate) => candidate === value);
 
+const normalizeActorId = (id: string): string => id.trim();
+
+const normalizeActor = (actor: ActorRef): ActorRef => ({
+  id: normalizeActorId(actor.id),
+  kind: actor.kind,
+});
+
 const toForbiddenRouteError = (
   route: WorkflowRouteDefinition,
   message: string,
@@ -77,7 +84,7 @@ const parsePayloadActor = (body: unknown): ActorRef | undefined => {
   }
 
   return {
-    id: actor.id,
+    id: normalizeActorId(actor.id),
     kind: actor.kind,
   };
 };
@@ -93,7 +100,7 @@ const resolveTrustedActor = (
 
   const sessionActor = request.auth?.sessionActor;
   if (sessionActor) {
-    return Effect.succeed(sessionActor);
+    return Effect.succeed(normalizeActor(sessionActor));
   }
 
   const signedInternalActor = request.auth?.signedInternalActor;
@@ -113,6 +120,7 @@ const resolveTrustedActor = (
   }
 
   return options.verifySignedInternalActorContext(signedInternalActor).pipe(
+    Effect.map(normalizeActor),
     Effect.mapError((error) =>
       toForbiddenRouteErrorFromUnknown(
         route,

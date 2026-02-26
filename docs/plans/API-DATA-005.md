@@ -7,7 +7,14 @@ This ticket should be delivered as a regression-first slice that proves API beha
 
 The expected statuses are already defined by contract (`not_found -> 404`, `conflict -> 409`), so the minimal implementation should focus on tagging the relevant core service failures with explicit error `code` values. The dispatcher response shape (`{ error, route, message }`) remains unchanged.
 
-## TDD step order (tests before implementation)
+## Historical delivery note
+Status-mapping infrastructure for workflow API error normalization was already in the branch before this ticket:
+- `c111d81` (2026-02-23): introduced workflow API error normalization scaffolding.
+- `5c1817a` (2026-02-24): expanded dispatcher and route-level status mapping behavior.
+
+`API-DATA-005` is a regression-backfill ticket that adds missing entry/task/signal coverage plus explicit core error-code tagging. This plan therefore captures the intended RED -> GREEN sequence for incremental delta work, not repository-wide chronology before the ticket existed.
+
+## TDD step order for incremental delta (tests before implementation)
 
 ### Phase 1: RED (write failing tests first)
 1. Add a core unit test in `tests/unit/core/services/entry-service.test.ts`:

@@ -22,6 +22,19 @@ const createTempPaths = (): {
   };
 };
 
+type LegacySnapshotPayload = {
+  version: 1;
+  entities: Record<string, ReadonlyArray<Record<string, unknown>>>;
+  auditTrail: ReadonlyArray<Record<string, unknown>>;
+};
+
+const writeLegacySnapshot = (
+  snapshotPath: string,
+  payload: LegacySnapshotPayload,
+): void => {
+  writeFileSync(snapshotPath, JSON.stringify(payload, null, 2), "utf8");
+};
+
 describe("database-backed core platform", () => {
   test("buildCorePlatform({ databasePath }) runs migrations and supports existing workflow routes", async () => {
     const { tempDir, databasePath } = createTempPaths();
@@ -1100,42 +1113,34 @@ describe("database-backed core platform", () => {
     const { tempDir, databasePath, snapshotPath } = createTempPaths();
 
     try {
-      writeFileSync(
-        snapshotPath,
-        JSON.stringify(
-          {
-            version: 1,
-            entities: {
-              entry: [
-                {
-                  id: "entry-legacy-1",
-                  content: "Imported from snapshot",
-                  source: "manual",
-                  status: "captured",
-                  capturedAt: "2026-02-23T00:00:00.000Z",
-                  createdAt: "2026-02-23T00:00:00.000Z",
-                  updatedAt: "2026-02-23T00:00:00.000Z",
-                },
-              ],
+      writeLegacySnapshot(snapshotPath, {
+        version: 1,
+        entities: {
+          entry: [
+            {
+              id: "entry-legacy-1",
+              content: "Imported from snapshot",
+              source: "manual",
+              status: "captured",
+              capturedAt: "2026-02-23T00:00:00.000Z",
+              createdAt: "2026-02-23T00:00:00.000Z",
+              updatedAt: "2026-02-23T00:00:00.000Z",
             },
-            auditTrail: [
-              {
-                id: "audit-legacy-1",
-                entityType: "entry",
-                entityId: "entry-legacy-1",
-                fromState: "none",
-                toState: "captured",
-                actor: { id: "user-1", kind: "user" },
-                reason: "Imported capture",
-                at: "2026-02-23T00:00:00.000Z",
-              },
-            ],
+          ],
+        },
+        auditTrail: [
+          {
+            id: "audit-legacy-1",
+            entityType: "entry",
+            entityId: "entry-legacy-1",
+            fromState: "none",
+            toState: "captured",
+            actor: { id: "user-1", kind: "user" },
+            reason: "Imported capture",
+            at: "2026-02-23T00:00:00.000Z",
           },
-          null,
-          2,
-        ),
-        "utf8",
-      );
+        ],
+      });
 
       const platformA = await Effect.runPromise(
         buildCorePlatform({
@@ -1183,6 +1188,133 @@ describe("database-backed core platform", () => {
 
       expect(importedEntriesAfterRestart).toHaveLength(1);
       expect(importedAuditAfterRestart).toHaveLength(1);
+
+      if (!platformB.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platformB.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("legacy snapshot import skips non-empty database and preserves existing rows", async () => {
+    const { tempDir, databasePath, snapshotPath } = createTempPaths();
+    const existingEntryId = "entry-db-legacy-existing-1";
+    const existingEntryContent = "Keep existing sqlite content";
+    const snapshotOnlyEntryId = "entry-db-legacy-snapshot-only-1";
+    const snapshotAuditMarker = "snapshot-import-should-skip-marker";
+
+    try {
+      const platformA = await Effect.runPromise(
+        buildCorePlatform({
+          databasePath,
+        }),
+      );
+
+      await Effect.runPromise(
+        platformA.captureEntry({
+          entryId: existingEntryId,
+          content: existingEntryContent,
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T11:00:00.000Z"),
+        }),
+      );
+
+      const seededEntryBeforeImport = await Effect.runPromise(
+        platformA.getEntity<{ content: string; updatedAt: string }>(
+          "entry",
+          existingEntryId,
+        ),
+      );
+      const seededAuditBeforeImport = await Effect.runPromise(
+        platformA.listAuditTrail({
+          entityType: "entry",
+          entityId: existingEntryId,
+        }),
+      );
+
+      if (!platformA.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platformA.close());
+
+      writeLegacySnapshot(snapshotPath, {
+        version: 1,
+        entities: {
+          entry: [
+            {
+              id: existingEntryId,
+              content: "Snapshot overwrite attempt",
+              source: "manual",
+              status: "captured",
+              capturedAt: "2026-02-23T12:00:00.000Z",
+              createdAt: "2026-02-23T12:00:00.000Z",
+              updatedAt: "2026-02-23T12:00:00.000Z",
+            },
+            {
+              id: snapshotOnlyEntryId,
+              content: "Snapshot-only row that must not import",
+              source: "manual",
+              status: "captured",
+              capturedAt: "2026-02-23T12:05:00.000Z",
+              createdAt: "2026-02-23T12:05:00.000Z",
+              updatedAt: "2026-02-23T12:05:00.000Z",
+            },
+          ],
+        },
+        auditTrail: [
+          {
+            id: "audit-db-legacy-existing-1",
+            entityType: "entry",
+            entityId: existingEntryId,
+            fromState: "none",
+            toState: "captured",
+            actor: { id: "user-1", kind: "user" },
+            reason: snapshotAuditMarker,
+            at: "2026-02-23T12:00:00.000Z",
+          },
+        ],
+      });
+
+      const platformB = await Effect.runPromise(
+        buildCorePlatform({
+          databasePath,
+          snapshotPath,
+          importSnapshotIntoDatabase: true,
+        }),
+      );
+
+      const seededEntryAfterImportAttempt = await Effect.runPromise(
+        platformB.getEntity<{ content: string; updatedAt: string }>(
+          "entry",
+          existingEntryId,
+        ),
+      );
+      const snapshotOnlyEntry = await Effect.runPromise(
+        platformB.getEntity("entry", snapshotOnlyEntryId),
+      );
+      const seededAuditAfterImportAttempt = await Effect.runPromise(
+        platformB.listAuditTrail({
+          entityType: "entry",
+          entityId: existingEntryId,
+        }),
+      );
+
+      expect(seededEntryBeforeImport).toBeDefined();
+      expect(seededEntryAfterImportAttempt?.content).toBe(existingEntryContent);
+      expect(seededEntryAfterImportAttempt?.updatedAt).toBe(
+        seededEntryBeforeImport?.updatedAt,
+      );
+      expect(snapshotOnlyEntry).toBeUndefined();
+      expect(seededAuditAfterImportAttempt).toHaveLength(
+        seededAuditBeforeImport.length,
+      );
+      expect(
+        seededAuditAfterImportAttempt.some(
+          (transition) => transition.reason === snapshotAuditMarker,
+        ),
+      ).toBe(false);
 
       if (!platformB.close) {
         throw new Error("database-backed platform should expose close()");

@@ -409,16 +409,13 @@ export const buildCorePlatform = (
       createJob: (input) => withMutationBoundary(createJobInPlatform(input)),
       recordJobRun: (input) =>
         withMutationBoundary(recordJobRun(repository, input)),
-      inspectJobRun: (jobId) =>
-        inspectJobRun(repository, jobId).pipe(
-          Effect.mapError((error) => new Error(error.message)),
-        ),
+      inspectJobRun: (jobId) => inspectJobRun(repository, jobId),
       listJobRunHistory: (jobId, options) =>
         listJobRunHistory(repository, {
           jobId,
           limit: options?.limit,
           beforeAt: options?.beforeAt,
-        }).pipe(Effect.mapError((error) => new Error(error.message))),
+        }),
       listJobs: (options) =>
         listJobs(repository, options).pipe(
           Effect.mapError((error) => new Error(error.message)),
@@ -428,9 +425,7 @@ export const buildCorePlatform = (
           retryJobRun(repository, jobId, actor, at, fixSummary),
         ),
       inspectWorkflowCheckpoint: (checkpointId) =>
-        inspectWorkflowCheckpointInService(repository, checkpointId).pipe(
-          Effect.mapError((error) => new Error(error.message)),
-        ),
+        inspectWorkflowCheckpointInService(repository, checkpointId),
       listActivityFeed: (options) =>
         listActivityFeed(repository, options).pipe(
           Effect.mapError((error) => new Error(error.message)),

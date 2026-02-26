@@ -3,9 +3,17 @@ import { Effect } from "effect";
 
 import { WorkflowApi } from "../../../../src/api/workflows/contracts";
 import { WorkflowRouteDefinition } from "../../../../src/api/workflows/contracts";
-import { makeWorkflowHttpDispatcher } from "../../../../src/api/workflows/http-dispatch";
+import { WorkflowRouteKey } from "../../../../src/api/workflows/contracts";
+import {
+  makeWorkflowHttpDispatcher,
+  WorkflowHttpAuthContext,
+} from "../../../../src/api/workflows/http-dispatch";
 import { WorkflowApiError } from "../../../../src/api/workflows/errors";
-import { makeWorkflowRoutes } from "../../../../src/api/workflows/routes";
+import {
+  makeWorkflowRoutes,
+  WORKFLOW_ROUTE_PATHS,
+} from "../../../../src/api/workflows/routes";
+import { WORKFLOW_ROUTE_KEYS } from "../../../../src/contracts/workflow-route-keys";
 
 const ACTOR = { id: "user-1", kind: "user" } as const;
 const APPROVAL_ROUTE_PATH = "/api/workflows/approval/approve-outbound-action";
@@ -95,6 +103,227 @@ const makeApiStub = (): { api: WorkflowApi; calls: Array<StubCall> } => {
   };
   return { api, calls };
 };
+
+const expectSanitizedWorkflowError = (
+  response: { status: number; body: unknown },
+  expected: {
+    status: 400 | 403 | 404 | 409;
+    route: WorkflowRouteKey;
+    messageIncludes?: string;
+  },
+): void => {
+  expect(response.status).toBe(expected.status);
+  expect(response.body).toEqual(
+    expect.objectContaining({
+      error: "workflow request failed",
+      route: expected.route,
+    }),
+  );
+  expect(response.body).not.toHaveProperty("_tag");
+  expect(response.body).not.toHaveProperty("cause");
+  if (expected.messageIncludes) {
+    expect((response.body as { message: string }).message).toContain(
+      expected.messageIncludes,
+    );
+  }
+};
+
+interface UnitDispatcherNegativeCase {
+  route: WorkflowRouteKey;
+  expectedStatus: 400 | 403 | 404 | 409;
+  errorCode: "validation" | "forbidden" | "conflict" | "not_found";
+  body: Record<string, unknown>;
+  message: string;
+  actorSource?: "payload" | "trusted";
+  auth?: WorkflowHttpAuthContext;
+}
+
+const UNIT_DISPATCHER_NEGATIVE_CASES: ReadonlyArray<UnitDispatcherNegativeCase> = [
+  {
+    route: "capture.entry",
+    expectedStatus: 400,
+    errorCode: "validation",
+    body: { content: "   " },
+    message: "invalid request payload for capture.entry",
+  },
+  {
+    route: "capture.suggest",
+    expectedStatus: 404,
+    errorCode: "not_found",
+    body: { entryId: "entry-missing" },
+    message: "entry entry-missing was not found",
+  },
+  {
+    route: "capture.editSuggestion",
+    expectedStatus: 404,
+    errorCode: "not_found",
+    body: { entryId: "entry-missing" },
+    message: "entry entry-missing was not found",
+  },
+  {
+    route: "capture.rejectSuggestion",
+    expectedStatus: 404,
+    errorCode: "not_found",
+    body: { entryId: "entry-missing" },
+    message: "entry entry-missing was not found",
+  },
+  {
+    route: "capture.acceptAsTask",
+    expectedStatus: 404,
+    errorCode: "not_found",
+    body: { entryId: "entry-missing" },
+    message: "entry entry-missing was not found",
+  },
+  {
+    route: "signal.ingest",
+    expectedStatus: 400,
+    errorCode: "validation",
+    body: { payload: "   " },
+    message: "invalid request payload for signal.ingest",
+  },
+  {
+    route: "signal.triage",
+    expectedStatus: 404,
+    errorCode: "not_found",
+    body: { signalId: "signal-missing" },
+    message: "signal signal-missing was not found",
+  },
+  {
+    route: "signal.convert",
+    expectedStatus: 409,
+    errorCode: "conflict",
+    body: { signalId: "signal-untriaged" },
+    message: "signal signal-untriaged must be triaged before conversion",
+  },
+  {
+    route: "planning.completeTask",
+    expectedStatus: 404,
+    errorCode: "not_found",
+    body: { taskId: "task-missing" },
+    message: "task task-missing was not found",
+  },
+  {
+    route: "planning.deferTask",
+    expectedStatus: 404,
+    errorCode: "not_found",
+    body: { taskId: "task-missing" },
+    message: "task task-missing was not found",
+  },
+  {
+    route: "planning.rescheduleTask",
+    expectedStatus: 404,
+    errorCode: "not_found",
+    body: { taskId: "task-missing" },
+    message: "task task-missing was not found",
+  },
+  {
+    route: "approval.requestEventSync",
+    expectedStatus: 409,
+    errorCode: "conflict",
+    body: { eventId: "event-conflict" },
+    message: "event event-conflict must be local_only before requesting sync",
+  },
+  {
+    route: "approval.requestOutboundDraftExecution",
+    expectedStatus: 409,
+    errorCode: "conflict",
+    body: { draftId: "draft-conflict" },
+    message:
+      "outbound draft draft-conflict must be in draft state before requesting execution",
+  },
+  {
+    route: "approval.approveOutboundAction",
+    expectedStatus: 403,
+    errorCode: "forbidden",
+    body: {
+      actionType: "event_sync",
+      entityType: "event",
+      entityId: "event-forbidden",
+      approved: true,
+      actor: ACTOR,
+    },
+    message: "only user actors may approve outbound actions",
+    actorSource: "trusted",
+    auth: { sessionActor: ACTOR },
+  },
+  {
+    route: "job.create",
+    expectedStatus: 400,
+    errorCode: "validation",
+    body: { name: "   " },
+    message: "invalid request payload for job.create",
+  },
+  {
+    route: "job.recordRun",
+    expectedStatus: 404,
+    errorCode: "not_found",
+    body: { jobId: "job-missing" },
+    message: "job job-missing was not found",
+  },
+  {
+    route: "job.inspectRun",
+    expectedStatus: 404,
+    errorCode: "not_found",
+    body: { jobId: "job-missing" },
+    message: "job job-missing was not found",
+  },
+  {
+    route: "job.list",
+    expectedStatus: 400,
+    errorCode: "validation",
+    body: { limit: 0 },
+    message: "limit must be a positive integer",
+  },
+  {
+    route: "job.listHistory",
+    expectedStatus: 404,
+    errorCode: "not_found",
+    body: { jobId: "job-missing" },
+    message: "job job-missing was not found",
+  },
+  {
+    route: "job.retry",
+    expectedStatus: 409,
+    errorCode: "conflict",
+    body: { jobId: "job-retry-conflict" },
+    message: "job job-retry-conflict is idle; must be in failed state before retry",
+  },
+  {
+    route: "checkpoint.create",
+    expectedStatus: 400,
+    errorCode: "validation",
+    body: { rollbackTarget: "   " },
+    message: "invalid request payload for checkpoint.create",
+  },
+  {
+    route: "checkpoint.inspect",
+    expectedStatus: 404,
+    errorCode: "not_found",
+    body: { checkpointId: "checkpoint-missing" },
+    message: "checkpoint checkpoint-missing was not found",
+  },
+  {
+    route: "checkpoint.keep",
+    expectedStatus: 409,
+    errorCode: "conflict",
+    body: { checkpointId: "checkpoint-conflict" },
+    message: "checkpoint checkpoint-conflict cannot transition recovered -> kept",
+  },
+  {
+    route: "checkpoint.recover",
+    expectedStatus: 409,
+    errorCode: "conflict",
+    body: { checkpointId: "checkpoint-conflict" },
+    message: "checkpoint checkpoint-conflict cannot transition recovered -> recovered",
+  },
+  {
+    route: "activity.list",
+    expectedStatus: 400,
+    errorCode: "validation",
+    body: { actorKind: "robot" },
+    message: "actorKind must be one of: user, system, ai",
+  },
+];
 
 describe("api/workflows/http-dispatch", () => {
   test("returns 404 when no workflow route matches the path", async () => {
@@ -373,6 +602,49 @@ describe("api/workflows/http-dispatch", () => {
     );
     expect((response.body as { message: string }).message).toContain("spoof");
     expect(handled).toBe(0);
+  });
+
+  test("accepts trusted payload actor when payload actor id has surrounding whitespace", async () => {
+    let handledInput: unknown;
+    const routes = [
+      {
+        key: "approval.approveOutboundAction",
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        actorSource: "trusted",
+        handle: (input) =>
+          Effect.sync(() => {
+            handledInput = input;
+            return { ok: true };
+          }),
+      },
+    ] as ReadonlyArray<WorkflowRouteDefinition>;
+    const dispatcher = makeWorkflowHttpDispatcher(routes);
+
+    const response = await Effect.runPromise(
+      dispatcher({
+        method: "POST",
+        path: APPROVAL_ROUTE_PATH,
+        body: {
+          actionType: "event_sync",
+          entityType: "event",
+          entityId: "event-4a",
+          approved: true,
+          actor: {
+            id: " trusted-user-1 ",
+            kind: "user",
+          },
+        },
+        auth: {
+          sessionActor: TRUSTED_USER_ACTOR,
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(handledInput).toMatchObject({
+      actor: TRUSTED_USER_ACTOR,
+    });
   });
 
   test("accepts signed internal actor context when verifier succeeds", async () => {
@@ -844,6 +1116,53 @@ describe("api/workflows/http-dispatch", () => {
     );
     expect(response.body).not.toHaveProperty("_tag");
     expect(response.body).not.toHaveProperty("cause");
+  });
+
+  test("returns sanitized negative-path status mappings for all workflow routes", async () => {
+    const routes: ReadonlyArray<WorkflowRouteDefinition> =
+      UNIT_DISPATCHER_NEGATIVE_CASES.map((routeCase) => ({
+        key: routeCase.route,
+        method: "POST",
+        path: WORKFLOW_ROUTE_PATHS[routeCase.route],
+        actorSource: routeCase.actorSource,
+        handle: () =>
+          Effect.fail(
+            new WorkflowApiError({
+              route: routeCase.route,
+              message: routeCase.message,
+              code: routeCase.errorCode,
+              statusCode: routeCase.expectedStatus,
+              cause: { internal: "sensitive" },
+            }),
+          ),
+      }));
+    const dispatcher = makeWorkflowHttpDispatcher(routes);
+
+    for (const routeCase of UNIT_DISPATCHER_NEGATIVE_CASES) {
+      const response = await Effect.runPromise(
+        dispatcher({
+          method: "POST",
+          path: WORKFLOW_ROUTE_PATHS[routeCase.route],
+          body: routeCase.body,
+          auth: routeCase.auth,
+        }),
+      );
+
+      expectSanitizedWorkflowError(response, {
+        status: routeCase.expectedStatus,
+        route: routeCase.route,
+        messageIncludes: routeCase.message,
+      });
+    }
+  });
+
+  test("unit negative-case matrix includes every workflow route key", () => {
+    const coveredRoutes = UNIT_DISPATCHER_NEGATIVE_CASES.map(
+      (routeCase) => routeCase.route,
+    );
+    expect(UNIT_DISPATCHER_NEGATIVE_CASES).toHaveLength(WORKFLOW_ROUTE_KEYS.length);
+    expect(new Set(coveredRoutes).size).toBe(WORKFLOW_ROUTE_KEYS.length);
+    expect(new Set(coveredRoutes)).toEqual(new Set(WORKFLOW_ROUTE_KEYS));
   });
 
   test("returns sanitized 500 body when a route defects", async () => {
