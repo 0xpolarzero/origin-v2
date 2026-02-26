@@ -502,6 +502,33 @@ describe("api/workflows/routes", () => {
     }
   });
 
+  test("capture.entry rejects invalid actor.kind", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const captureRoute = byKey.get("capture.entry");
+
+    expect(captureRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        captureRoute!.handle({
+          entryId: "entry-route-1",
+          content: "Capture content",
+          actor: { id: "user-1", kind: "robot" },
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "capture.entry",
+      });
+      expect(result.left.message).toContain("actor.kind");
+    }
+  });
+
   test("signal.ingest rejects whitespace-only source", async () => {
     const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
     const byKey = new Map(routes.map((route) => [route.key, route]));
@@ -759,6 +786,33 @@ describe("api/workflows/routes", () => {
         route: "job.create",
       });
       expect(result.left.message).toContain("name");
+    }
+  });
+
+  test("job.create rejects invalid provided optional actor.kind", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const createRoute = byKey.get("job.create");
+
+    expect(createRoute).toBeDefined();
+    const result = await Effect.runPromise(
+      Effect.either(
+        createRoute!.handle({
+          jobId: "job-route-1",
+          name: "Workflow sweep",
+          actor: { id: "system-1", kind: "robot" },
+          at: AT,
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "job.create",
+      });
+      expect(result.left.message).toContain("actor.kind");
     }
   });
 
