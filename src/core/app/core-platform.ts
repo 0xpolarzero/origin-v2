@@ -39,9 +39,12 @@ import {
 } from "../services/job-service";
 import { saveView, SaveViewInput } from "../services/view-service";
 import { upsertMemory, UpsertMemoryInput } from "../services/memory-service";
+import { requestOutboundDraftExecution } from "../services/outbound-draft-service";
 import {
   convertSignal,
   ConvertSignalInput,
+  ingestSignal,
+  IngestSignalInput,
   triageSignal,
 } from "../services/signal-service";
 import {
@@ -94,6 +97,7 @@ export interface CorePlatform {
     actor: ActorRef,
     at?: Date,
   ) => ReturnType<typeof rescheduleTask>;
+  ingestSignal: (input: IngestSignalInput) => ReturnType<typeof ingestSignal>;
   triageSignal: (
     signalId: string,
     decision: string,
@@ -108,6 +112,11 @@ export interface CorePlatform {
     actor: ActorRef,
     at?: Date,
   ) => ReturnType<typeof requestEventSync>;
+  requestOutboundDraftExecution: (
+    draftId: string,
+    actor: ActorRef,
+    at?: Date,
+  ) => ReturnType<typeof requestOutboundDraftExecution>;
   approveOutboundAction: (
     input: ApproveOutboundActionInput,
   ) => ReturnType<typeof approveOutboundAction>;
@@ -138,9 +147,7 @@ export interface CorePlatform {
     entityType: string,
     entityId: string,
   ) => Effect.Effect<T | undefined>;
-  listEntities: <T>(
-    entityType: string,
-  ) => Effect.Effect<ReadonlyArray<T>>;
+  listEntities: <T>(entityType: string) => Effect.Effect<ReadonlyArray<T>>;
   listAuditTrail: (filter?: {
     entityType?: string;
     entityId?: string;
@@ -232,11 +239,14 @@ export const buildCorePlatform = (
         deferTask(repository, taskId, until, actor, at),
       rescheduleTask: (taskId, nextAt, actor, at) =>
         rescheduleTask(repository, taskId, nextAt, actor, at),
+      ingestSignal: (input) => ingestSignal(repository, input),
       triageSignal: (signalId, decision, actor, at) =>
         triageSignal(repository, signalId, decision, actor, at),
       convertSignal: (input) => convertSignal(repository, input),
       requestEventSync: (eventId, actor, at) =>
         requestEventSync(repository, eventId, actor, at),
+      requestOutboundDraftExecution: (draftId, actor, at) =>
+        requestOutboundDraftExecution(repository, draftId, actor, at),
       approveOutboundAction: (input) =>
         approveOutboundAction(repository, outboundActionPort, input),
       createJob: createJobInPlatform,
