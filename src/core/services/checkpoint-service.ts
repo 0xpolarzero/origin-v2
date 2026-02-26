@@ -52,69 +52,99 @@ const loadCheckpoint = (
     return checkpoint;
   });
 
+const ensureCanKeep = (
+  checkpoint: Checkpoint,
+): Effect.Effect<void, CheckpointServiceError> => {
+  if (checkpoint.status === "created") {
+    return Effect.void;
+  }
+
+  return Effect.fail(
+    new CheckpointServiceError({
+      message: `checkpoint ${checkpoint.id} cannot transition ${checkpoint.status} -> kept`,
+    }),
+  );
+};
+
+const ensureCanRecover = (
+  checkpoint: Checkpoint,
+): Effect.Effect<void, CheckpointServiceError> => {
+  if (checkpoint.status === "created" || checkpoint.status === "kept") {
+    return Effect.void;
+  }
+
+  return Effect.fail(
+    new CheckpointServiceError({
+      message: `checkpoint ${checkpoint.id} cannot transition ${checkpoint.status} -> recovered`,
+    }),
+  );
+};
+
 export const createWorkflowCheckpoint = (
   repository: CoreRepository,
   input: CreateWorkflowCheckpointInput,
 ): Effect.Effect<Checkpoint, CheckpointServiceError> =>
-  Effect.gen(function* () {
-    const snapshotEntities: Array<CheckpointEntitySnapshot> = [];
-    for (const snapshotRef of input.snapshotEntityRefs) {
-      const entity = yield* repository.getEntity(
-        snapshotRef.entityType,
-        snapshotRef.entityId,
+  repository.withTransaction(
+    Effect.gen(function* () {
+      const snapshotEntities: Array<CheckpointEntitySnapshot> = [];
+      for (const snapshotRef of input.snapshotEntityRefs) {
+        const entity = yield* repository.getEntity(
+          snapshotRef.entityType,
+          snapshotRef.entityId,
+        );
+        snapshotEntities.push({
+          entityType: snapshotRef.entityType,
+          entityId: snapshotRef.entityId,
+          existed: entity !== undefined,
+          state: entity,
+        });
+      }
+
+      const checkpoint = yield* createCheckpoint({
+        id: input.checkpointId,
+        name: input.name,
+        snapshotEntityRefs: input.snapshotEntityRefs,
+        snapshotEntities,
+        auditCursor: input.auditCursor,
+        rollbackTarget: input.rollbackTarget,
+        createdAt: input.at,
+        updatedAt: input.at,
+      }).pipe(
+        Effect.mapError(
+          (error) =>
+            new CheckpointServiceError({
+              message: `failed to create checkpoint: ${error.message}`,
+            }),
+        ),
       );
-      snapshotEntities.push({
-        entityType: snapshotRef.entityType,
-        entityId: snapshotRef.entityId,
-        existed: entity !== undefined,
-        state: entity,
-      });
-    }
 
-    const checkpoint = yield* createCheckpoint({
-      id: input.checkpointId,
-      name: input.name,
-      snapshotEntityRefs: input.snapshotEntityRefs,
-      snapshotEntities,
-      auditCursor: input.auditCursor,
-      rollbackTarget: input.rollbackTarget,
-      createdAt: input.at,
-      updatedAt: input.at,
-    }).pipe(
-      Effect.mapError(
-        (error) =>
-          new CheckpointServiceError({
-            message: `failed to create checkpoint: ${error.message}`,
-          }),
-      ),
-    );
+      yield* repository.saveEntity("checkpoint", checkpoint.id, checkpoint);
 
-    yield* repository.saveEntity("checkpoint", checkpoint.id, checkpoint);
+      const transition = yield* createAuditTransition({
+        entityType: "checkpoint",
+        entityId: checkpoint.id,
+        fromState: "none",
+        toState: checkpoint.status,
+        actor: input.actor,
+        reason: "Checkpoint created",
+        at: input.at,
+        metadata: {
+          rollbackTarget: checkpoint.rollbackTarget,
+        },
+      }).pipe(
+        Effect.mapError(
+          (error) =>
+            new CheckpointServiceError({
+              message: `failed to append checkpoint create transition: ${error.message}`,
+            }),
+        ),
+      );
 
-    const transition = yield* createAuditTransition({
-      entityType: "checkpoint",
-      entityId: checkpoint.id,
-      fromState: "none",
-      toState: checkpoint.status,
-      actor: input.actor,
-      reason: "Checkpoint created",
-      at: input.at,
-      metadata: {
-        rollbackTarget: checkpoint.rollbackTarget,
-      },
-    }).pipe(
-      Effect.mapError(
-        (error) =>
-          new CheckpointServiceError({
-            message: `failed to append checkpoint create transition: ${error.message}`,
-          }),
-      ),
-    );
+      yield* repository.appendAuditTransition(transition);
 
-    yield* repository.appendAuditTransition(transition);
-
-    return checkpoint;
-  });
+      return checkpoint;
+    }),
+  );
 
 export const keepCheckpoint = (
   repository: CoreRepository,
@@ -122,37 +152,41 @@ export const keepCheckpoint = (
   actor: ActorRef,
   at: Date = new Date(),
 ): Effect.Effect<Checkpoint, CheckpointServiceError> =>
-  Effect.gen(function* () {
-    const checkpoint = yield* loadCheckpoint(repository, checkpointId);
-    const updated: Checkpoint = {
-      ...checkpoint,
-      status: "kept",
-      updatedAt: at.toISOString(),
-    };
+  repository.withTransaction(
+    Effect.gen(function* () {
+      const checkpoint = yield* loadCheckpoint(repository, checkpointId);
+      yield* ensureCanKeep(checkpoint);
 
-    yield* repository.saveEntity("checkpoint", updated.id, updated);
+      const updated: Checkpoint = {
+        ...checkpoint,
+        status: "kept",
+        updatedAt: at.toISOString(),
+      };
 
-    const transition = yield* createAuditTransition({
-      entityType: "checkpoint",
-      entityId: updated.id,
-      fromState: checkpoint.status,
-      toState: updated.status,
-      actor,
-      reason: "Checkpoint kept",
-      at,
-    }).pipe(
-      Effect.mapError(
-        (error) =>
-          new CheckpointServiceError({
-            message: `failed to append checkpoint keep transition: ${error.message}`,
-          }),
-      ),
-    );
+      yield* repository.saveEntity("checkpoint", updated.id, updated);
 
-    yield* repository.appendAuditTransition(transition);
+      const transition = yield* createAuditTransition({
+        entityType: "checkpoint",
+        entityId: updated.id,
+        fromState: checkpoint.status,
+        toState: updated.status,
+        actor,
+        reason: "Checkpoint kept",
+        at,
+      }).pipe(
+        Effect.mapError(
+          (error) =>
+            new CheckpointServiceError({
+              message: `failed to append checkpoint keep transition: ${error.message}`,
+            }),
+        ),
+      );
 
-    return updated;
-  });
+      yield* repository.appendAuditTransition(transition);
+
+      return updated;
+    }),
+  );
 
 export const recoverCheckpoint = (
   repository: CoreRepository,
@@ -160,63 +194,66 @@ export const recoverCheckpoint = (
   actor: ActorRef,
   at: Date = new Date(),
 ): Effect.Effect<RecoveryResult, CheckpointServiceError> =>
-  Effect.gen(function* () {
-    const checkpoint = yield* loadCheckpoint(repository, checkpointId);
+  repository.withTransaction(
+    Effect.gen(function* () {
+      const checkpoint = yield* loadCheckpoint(repository, checkpointId);
+      yield* ensureCanRecover(checkpoint);
 
-    for (const snapshot of checkpoint.snapshotEntities) {
-      if (snapshot.existed) {
-        if (snapshot.state === undefined) {
-          return yield* Effect.fail(
-            new CheckpointServiceError({
-              message: `checkpoint ${checkpoint.id} has an invalid snapshot for ${snapshot.entityType}:${snapshot.entityId}`,
-            }),
+      for (const snapshot of checkpoint.snapshotEntities) {
+        if (snapshot.existed) {
+          if (snapshot.state === undefined) {
+            return yield* Effect.fail(
+              new CheckpointServiceError({
+                message: `checkpoint ${checkpoint.id} has an invalid snapshot for ${snapshot.entityType}:${snapshot.entityId}`,
+              }),
+            );
+          }
+          yield* repository.saveEntity(
+            snapshot.entityType,
+            snapshot.entityId,
+            snapshot.state,
           );
+          continue;
         }
-        yield* repository.saveEntity(
-          snapshot.entityType,
-          snapshot.entityId,
-          snapshot.state,
-        );
-        continue;
+
+        yield* repository.deleteEntity(snapshot.entityType, snapshot.entityId);
       }
 
-      yield* repository.deleteEntity(snapshot.entityType, snapshot.entityId);
-    }
+      const updated: Checkpoint = {
+        ...checkpoint,
+        status: "recovered",
+        recoveredAt: at.toISOString(),
+        updatedAt: at.toISOString(),
+      };
 
-    const updated: Checkpoint = {
-      ...checkpoint,
-      status: "recovered",
-      recoveredAt: at.toISOString(),
-      updatedAt: at.toISOString(),
-    };
+      yield* repository.saveEntity("checkpoint", updated.id, updated);
 
-    yield* repository.saveEntity("checkpoint", updated.id, updated);
+      const transition = yield* createAuditTransition({
+        entityType: "checkpoint",
+        entityId: updated.id,
+        fromState: checkpoint.status,
+        toState: updated.status,
+        actor,
+        reason: "Checkpoint recovered",
+        at,
+        metadata: {
+          rollbackTarget: checkpoint.rollbackTarget,
+        },
+      }).pipe(
+        Effect.mapError(
+          (error) =>
+            new CheckpointServiceError({
+              message: `failed to append checkpoint recovery transition: ${error.message}`,
+            }),
+        ),
+      );
 
-    const transition = yield* createAuditTransition({
-      entityType: "checkpoint",
-      entityId: updated.id,
-      fromState: checkpoint.status,
-      toState: updated.status,
-      actor,
-      reason: "Checkpoint recovered",
-      at,
-      metadata: {
+      yield* repository.appendAuditTransition(transition);
+
+      return {
+        checkpoint: updated,
+        recoveredEntityRefs: [...checkpoint.snapshotEntityRefs],
         rollbackTarget: checkpoint.rollbackTarget,
-      },
-    }).pipe(
-      Effect.mapError(
-        (error) =>
-          new CheckpointServiceError({
-            message: `failed to append checkpoint recovery transition: ${error.message}`,
-          }),
-      ),
-    );
-
-    yield* repository.appendAuditTransition(transition);
-
-    return {
-      checkpoint: updated,
-      recoveredEntityRefs: [...checkpoint.snapshotEntityRefs],
-      rollbackTarget: checkpoint.rollbackTarget,
-    };
-  });
+      };
+    }),
+  );
