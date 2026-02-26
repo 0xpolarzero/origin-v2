@@ -31,8 +31,12 @@ describe("workflow gate policy integration", () => {
       "bun run test:integration:workflow",
     );
     expect(fallbackConfig.testCmds.db).toBe("bun run test:integration:db");
-    expect(fallbackConfig.preLandChecks).toEqual(Object.values(fallbackConfig.buildCmds));
-    expect(fallbackConfig.postLandChecks).toEqual(Object.values(fallbackConfig.testCmds));
+    expect(fallbackConfig.preLandChecks).toEqual(
+      Object.values(fallbackConfig.buildCmds),
+    );
+    expect(fallbackConfig.postLandChecks).toEqual(
+      Object.values(fallbackConfig.testCmds),
+    );
   });
 
   test("maps this repo's scripts to runnable gate commands", () => {
@@ -119,5 +123,13 @@ describe("workflow gate policy integration", () => {
       },
     ]);
     expect(fallback.validationCommands).toEqual(fallback.verifyCommands);
+  });
+
+  test("workflow integration script includes workflow surfaces suite", () => {
+    const scripts = readPackageScripts();
+    const workflowScript = scripts["test:integration:workflow"];
+
+    expect(workflowScript).toBeDefined();
+    expect(workflowScript).toContain("workflow-surfaces.integration.test.ts");
   });
 });

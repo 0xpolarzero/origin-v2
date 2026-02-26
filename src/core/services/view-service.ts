@@ -16,6 +16,31 @@ export interface SaveViewInput {
   at?: Date;
 }
 
+export interface SaveScopedViewInput {
+  name?: string;
+  query: string;
+  filters?: ViewFilters;
+  at?: Date;
+}
+
+const JOBS_VIEW_ID = "view:workflow:jobs";
+const ACTIVITY_VIEW_ID = "view:workflow:activity";
+
+const saveScopedView = (
+  repository: CoreRepository,
+  input: SaveScopedViewInput & {
+    viewId: string;
+    defaultName: string;
+  },
+): Effect.Effect<View, ViewServiceError> =>
+  saveView(repository, {
+    viewId: input.viewId,
+    name: input.name ?? input.defaultName,
+    query: input.query,
+    filters: input.filters,
+    at: input.at,
+  });
+
 export const saveView = (
   repository: CoreRepository,
   input: SaveViewInput,
@@ -32,7 +57,7 @@ export const saveView = (
           ...existing,
           name: input.name,
           query: input.query,
-          filters: { ...(input.filters ?? {}) },
+          filters: { ...(input.filters ?? existing.filters ?? {}) },
           updatedAt: at.toISOString(),
         }
       : yield* createView({
@@ -74,3 +99,33 @@ export const saveView = (
 
     return view;
   });
+
+export const saveJobsView = (
+  repository: CoreRepository,
+  input: SaveScopedViewInput,
+): Effect.Effect<View, ViewServiceError> =>
+  saveScopedView(repository, {
+    ...input,
+    viewId: JOBS_VIEW_ID,
+    defaultName: "Jobs Filters",
+  });
+
+export const getJobsView = (
+  repository: CoreRepository,
+): Effect.Effect<View | undefined> =>
+  repository.getEntity<View>("view", JOBS_VIEW_ID);
+
+export const saveActivityView = (
+  repository: CoreRepository,
+  input: SaveScopedViewInput,
+): Effect.Effect<View, ViewServiceError> =>
+  saveScopedView(repository, {
+    ...input,
+    viewId: ACTIVITY_VIEW_ID,
+    defaultName: "Activity Filters",
+  });
+
+export const getActivityView = (
+  repository: CoreRepository,
+): Effect.Effect<View | undefined> =>
+  repository.getEntity<View>("view", ACTIVITY_VIEW_ID);

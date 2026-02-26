@@ -31,11 +31,14 @@ const REQUIRED_ROUTE_KEYS: ReadonlyArray<WorkflowRouteKey> = [
   "job.create",
   "job.recordRun",
   "job.inspectRun",
+  "job.list",
   "job.listHistory",
   "job.retry",
   "checkpoint.create",
+  "checkpoint.inspect",
   "checkpoint.keep",
   "checkpoint.recover",
+  "activity.list",
 ];
 
 const VALID_ROUTE_INPUTS: Record<WorkflowRouteKey, unknown> = {
@@ -140,6 +143,11 @@ const VALID_ROUTE_INPUTS: Record<WorkflowRouteKey, unknown> = {
   "job.inspectRun": {
     jobId: "job-route-1",
   },
+  "job.list": {
+    runState: "failed",
+    limit: 10,
+    beforeUpdatedAt: new Date("2026-02-24T00:00:00.000Z"),
+  },
   "job.listHistory": {
     jobId: "job-route-1",
     limit: 10,
@@ -164,10 +172,21 @@ const VALID_ROUTE_INPUTS: Record<WorkflowRouteKey, unknown> = {
     actor: ACTOR,
     at: AT,
   },
+  "checkpoint.inspect": {
+    checkpointId: "checkpoint-route-1",
+  },
   "checkpoint.recover": {
     checkpointId: "checkpoint-route-1",
     actor: ACTOR,
     at: AT,
+  },
+  "activity.list": {
+    entityType: "job",
+    entityId: "job-route-1",
+    actorKind: "ai",
+    aiOnly: true,
+    limit: 10,
+    beforeAt: new Date("2026-02-24T00:00:00.000Z"),
   },
 };
 
@@ -189,11 +208,14 @@ const makeApiStub = (): WorkflowApi => ({
   createJob: (_input) => Effect.die("unused"),
   recordJobRun: (_input) => Effect.die("unused"),
   inspectJobRun: (_input) => Effect.die("unused"),
+  listJobs: (_input) => Effect.die("unused"),
   listJobRunHistory: (_input) => Effect.die("unused"),
   retryJob: (_input) => Effect.die("unused"),
   createWorkflowCheckpoint: (_input) => Effect.die("unused"),
+  inspectWorkflowCheckpoint: (_input) => Effect.die("unused"),
   keepCheckpoint: (_input) => Effect.die("unused"),
   recoverCheckpoint: (_input) => Effect.die("unused"),
+  listActivity: (_input) => Effect.die("unused"),
 });
 
 const makeApiSpy = (
@@ -285,6 +307,11 @@ const makeApiSpy = (
         onCall("job.inspectRun", input);
         return "job.inspectRun";
       }),
+    listJobs: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("job.list", input);
+        return "job.list";
+      }),
     listJobRunHistory: (input: unknown) =>
       Effect.sync(() => {
         onCall("job.listHistory", input);
@@ -300,6 +327,11 @@ const makeApiSpy = (
         onCall("checkpoint.create", input);
         return "checkpoint.create";
       }),
+    inspectWorkflowCheckpoint: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("checkpoint.inspect", input);
+        return "checkpoint.inspect";
+      }),
     keepCheckpoint: (input: unknown) =>
       Effect.sync(() => {
         onCall("checkpoint.keep", input);
@@ -309,6 +341,11 @@ const makeApiSpy = (
       Effect.sync(() => {
         onCall("checkpoint.recover", input);
         return "checkpoint.recover";
+      }),
+    listActivity: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("activity.list", input);
+        return "activity.list";
       }),
   }) as unknown as WorkflowApi;
 
@@ -623,7 +660,9 @@ describe("api/workflows/routes", () => {
         checkpointCreateRoute!.handle({
           checkpointId: "checkpoint-route-1",
           name: "Before conversion",
-          snapshotEntityRefs: [{ entityType: "task", entityId: "task-route-1" }],
+          snapshotEntityRefs: [
+            { entityType: "task", entityId: "task-route-1" },
+          ],
           auditCursor: 1,
           rollbackTarget: "   ",
           actor: ACTOR,
@@ -832,6 +871,203 @@ describe("api/workflows/routes", () => {
     }
   });
 
+  test("job.list validator enforces runState/limit/beforeUpdatedAt and coerces ISO dates", async () => {
+    const calls: Array<{ route: WorkflowRouteKey; input: unknown }> = [];
+    const routes = makeWorkflowRoutes(
+      makeApiSpy((route, input) => {
+        calls.push({ route, input });
+      }),
+    );
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const listRoute = byKey.get("job.list");
+
+    expect(listRoute).toBeDefined();
+
+    await Effect.runPromise(
+      listRoute!.handle({
+        runState: "failed",
+        limit: 5,
+        beforeUpdatedAt: "2026-02-23T10:00:00.000Z",
+      }),
+    );
+
+    const invalidRunState = await Effect.runPromise(
+      Effect.either(
+        listRoute!.handle({
+          runState: "unknown",
+        }),
+      ),
+    );
+    expect(Either.isLeft(invalidRunState)).toBe(true);
+    if (Either.isLeft(invalidRunState)) {
+      expect(invalidRunState.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "job.list",
+      });
+      expect(invalidRunState.left.message).toContain("runState");
+    }
+
+    const invalidLimit = await Effect.runPromise(
+      Effect.either(
+        listRoute!.handle({
+          limit: 0,
+        }),
+      ),
+    );
+    expect(Either.isLeft(invalidLimit)).toBe(true);
+    if (Either.isLeft(invalidLimit)) {
+      expect(invalidLimit.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "job.list",
+      });
+      expect(invalidLimit.left.message).toContain("limit");
+    }
+
+    const invalidBefore = await Effect.runPromise(
+      Effect.either(
+        listRoute!.handle({
+          beforeUpdatedAt: "invalid-date",
+        }),
+      ),
+    );
+    expect(Either.isLeft(invalidBefore)).toBe(true);
+    if (Either.isLeft(invalidBefore)) {
+      expect(invalidBefore.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "job.list",
+      });
+      expect(invalidBefore.left.message).toContain("beforeUpdatedAt");
+    }
+
+    const jobListCall = calls.find((call) => call.route === "job.list");
+    expect(jobListCall).toBeDefined();
+    expect(
+      (jobListCall!.input as { beforeUpdatedAt: unknown }).beforeUpdatedAt,
+    ).toBeInstanceOf(Date);
+  });
+
+  test("checkpoint.inspect validator requires checkpointId", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const inspectRoute = byKey.get("checkpoint.inspect");
+
+    expect(inspectRoute).toBeDefined();
+
+    const missingCheckpointId = await Effect.runPromise(
+      Effect.either(inspectRoute!.handle({})),
+    );
+    expect(Either.isLeft(missingCheckpointId)).toBe(true);
+    if (Either.isLeft(missingCheckpointId)) {
+      expect(missingCheckpointId.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "checkpoint.inspect",
+      });
+      expect(missingCheckpointId.left.message).toContain("checkpointId");
+    }
+  });
+
+  test("activity.list validator enforces actor/filter/pagination fields", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const activityRoute = byKey.get("activity.list");
+
+    expect(activityRoute).toBeDefined();
+
+    const invalidActorKind = await Effect.runPromise(
+      Effect.either(
+        activityRoute!.handle({
+          actorKind: "robot",
+        }),
+      ),
+    );
+    expect(Either.isLeft(invalidActorKind)).toBe(true);
+    if (Either.isLeft(invalidActorKind)) {
+      expect(invalidActorKind.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "activity.list",
+      });
+      expect(invalidActorKind.left.message).toContain("actorKind");
+    }
+
+    const invalidAiOnly = await Effect.runPromise(
+      Effect.either(
+        activityRoute!.handle({
+          aiOnly: "true",
+        }),
+      ),
+    );
+    expect(Either.isLeft(invalidAiOnly)).toBe(true);
+    if (Either.isLeft(invalidAiOnly)) {
+      expect(invalidAiOnly.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "activity.list",
+      });
+      expect(invalidAiOnly.left.message).toContain("aiOnly");
+    }
+
+    const invalidLimit = await Effect.runPromise(
+      Effect.either(
+        activityRoute!.handle({
+          limit: -1,
+        }),
+      ),
+    );
+    expect(Either.isLeft(invalidLimit)).toBe(true);
+    if (Either.isLeft(invalidLimit)) {
+      expect(invalidLimit.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "activity.list",
+      });
+      expect(invalidLimit.left.message).toContain("limit");
+    }
+
+    const invalidBeforeAt = await Effect.runPromise(
+      Effect.either(
+        activityRoute!.handle({
+          beforeAt: "not-a-date",
+        }),
+      ),
+    );
+    expect(Either.isLeft(invalidBeforeAt)).toBe(true);
+    if (Either.isLeft(invalidBeforeAt)) {
+      expect(invalidBeforeAt.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "activity.list",
+      });
+      expect(invalidBeforeAt.left.message).toContain("beforeAt");
+    }
+  });
+
+  test("job.retry validator forwards optional fixSummary", async () => {
+    const calls: Array<{ route: WorkflowRouteKey; input: unknown }> = [];
+    const routes = makeWorkflowRoutes(
+      makeApiSpy((route, input) => {
+        calls.push({ route, input });
+      }),
+    );
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const retryRoute = byKey.get("job.retry");
+
+    expect(retryRoute).toBeDefined();
+
+    await Effect.runPromise(
+      retryRoute!.handle({
+        jobId: "job-route-1",
+        actor: ACTOR,
+        at: "2026-02-23T11:00:00.000Z",
+        fixSummary: "Increase timeout and retry",
+      }),
+    );
+
+    const retryCall = calls.find((call) => call.route === "job.retry");
+    expect(retryCall).toBeDefined();
+    expect(retryCall?.input).toMatchObject({
+      jobId: "job-route-1",
+      fixSummary: "Increase timeout and retry",
+    });
+    expect((retryCall?.input as { at: unknown }).at).toBeInstanceOf(Date);
+  });
+
   test("route handlers coerce ISO timestamp strings for workflow payloads", async () => {
     const calls: Array<{ route: WorkflowRouteKey; input: unknown }> = [];
     const routes = makeWorkflowRoutes(
@@ -969,7 +1205,9 @@ describe("api/workflows/routes", () => {
     );
 
     const captureCall = calls.find((entry) => entry.route === "capture.entry");
-    const historyCall = calls.find((entry) => entry.route === "job.listHistory");
+    const historyCall = calls.find(
+      (entry) => entry.route === "job.listHistory",
+    );
 
     expect(captureCall).toBeDefined();
     expect((captureCall!.input as { at: Date }).at).toBeInstanceOf(Date);

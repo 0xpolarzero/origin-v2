@@ -1,8 +1,10 @@
 import { Effect } from "effect";
 
 import { createAuditTransition } from "../domain/audit-transition";
+import { Checkpoint } from "../domain/checkpoint";
 import { ActorRef, ENTITY_TYPES } from "../domain/common";
 import { createJob, CreateJobInput, Job } from "../domain/job";
+import { View } from "../domain/view";
 import { CoreRepository } from "../repositories/core-repository";
 import { makeFileCoreRepository } from "../repositories/file-core-repository";
 import { makeInMemoryCoreRepository } from "../repositories/in-memory-core-repository";
@@ -13,8 +15,14 @@ import {
   OutboundActionPort,
 } from "../services/approval-service";
 import {
+  ActivityFeedItem,
+  listActivityFeed,
+  ListActivityFeedInput,
+} from "../services/activity-service";
+import {
   createWorkflowCheckpoint,
   CreateWorkflowCheckpointInput,
+  inspectWorkflowCheckpoint as inspectWorkflowCheckpointInService,
   keepCheckpoint,
   recoverCheckpoint,
 } from "../services/checkpoint-service";
@@ -33,14 +41,24 @@ import {
 import { requestEventSync } from "../services/event-service";
 import {
   inspectJobRun,
+  JobListItem,
   JobRunHistoryRecord,
   JobRunInspection,
+  listJobs,
   listJobRunHistory,
   recordJobRun,
   RecordJobRunInput,
   retryJobRun,
 } from "../services/job-service";
-import { saveView, SaveViewInput } from "../services/view-service";
+import {
+  getActivityView as getActivityViewInService,
+  getJobsView as getJobsViewInService,
+  saveActivityView as saveActivityViewInService,
+  saveJobsView as saveJobsViewInService,
+  saveView,
+  SaveScopedViewInput,
+  SaveViewInput,
+} from "../services/view-service";
 import { upsertMemory, UpsertMemoryInput } from "../services/memory-service";
 import { requestOutboundDraftExecution } from "../services/outbound-draft-service";
 import {
@@ -133,11 +151,23 @@ export interface CorePlatform {
     jobId: string,
     options?: { limit?: number; beforeAt?: Date },
   ) => Effect.Effect<ReadonlyArray<JobRunHistoryRecord>, Error>;
+  listJobs: (options?: {
+    runState?: Job["runState"];
+    limit?: number;
+    beforeUpdatedAt?: Date;
+  }) => Effect.Effect<ReadonlyArray<JobListItem>, Error>;
   retryJob: (
     jobId: string,
     actor: ActorRef,
     at?: Date,
+    fixSummary?: string,
   ) => ReturnType<typeof retryJobRun>;
+  inspectWorkflowCheckpoint: (
+    checkpointId: string,
+  ) => Effect.Effect<Checkpoint, Error>;
+  listActivityFeed: (
+    options?: ListActivityFeedInput,
+  ) => Effect.Effect<ReadonlyArray<ActivityFeedItem>, Error>;
   createWorkflowCheckpoint: (
     input: CreateWorkflowCheckpointInput,
   ) => ReturnType<typeof createWorkflowCheckpoint>;
@@ -151,6 +181,14 @@ export interface CorePlatform {
     actor: ActorRef,
     at?: Date,
   ) => ReturnType<typeof recoverCheckpoint>;
+  saveJobsView: (
+    input: SaveScopedViewInput,
+  ) => ReturnType<typeof saveJobsViewInService>;
+  getJobsView: () => Effect.Effect<View | undefined>;
+  saveActivityView: (
+    input: SaveScopedViewInput,
+  ) => ReturnType<typeof saveActivityViewInService>;
+  getActivityView: () => Effect.Effect<View | undefined>;
   saveView: (input: SaveViewInput) => ReturnType<typeof saveView>;
   upsertMemory: (input: UpsertMemoryInput) => ReturnType<typeof upsertMemory>;
   getEntity: <T>(
@@ -197,11 +235,6 @@ const importLegacySnapshotIntoEmptyRepository = (
   snapshotPath: string,
 ): Effect.Effect<void, Error> =>
   Effect.gen(function* () {
-    const shouldImport = yield* isRepositoryEmpty(repository);
-    if (!shouldImport) {
-      return;
-    }
-
     const snapshotRepository = yield* makeFileCoreRepository(snapshotPath).pipe(
       Effect.mapError((error) => new Error(error.message)),
     );
@@ -210,26 +243,42 @@ const importLegacySnapshotIntoEmptyRepository = (
       yield* snapshotRepository.loadSnapshot(snapshotPath);
     }
 
+    const entitiesByType = new Map<string, ReadonlyArray<unknown>>();
     for (const entityType of ENTITY_TYPES) {
       const entities = yield* snapshotRepository.listEntities(entityType);
-      for (const entity of entities) {
-        if (!isRecord(entity)) {
-          continue;
-        }
-
-        const entityId = entity.id;
-        if (typeof entityId !== "string" || entityId.trim().length === 0) {
-          continue;
-        }
-
-        yield* repository.saveEntity(entityType, entityId, entity);
-      }
+      entitiesByType.set(entityType, entities);
     }
 
     const auditTrail = yield* snapshotRepository.listAuditTrail();
-    for (const transition of auditTrail) {
-      yield* repository.appendAuditTransition(transition);
-    }
+
+    yield* repository.withTransaction(
+      Effect.gen(function* () {
+        const shouldImport = yield* isRepositoryEmpty(repository);
+        if (!shouldImport) {
+          return;
+        }
+
+        for (const entityType of ENTITY_TYPES) {
+          const entities = entitiesByType.get(entityType) ?? [];
+          for (const entity of entities) {
+            if (!isRecord(entity)) {
+              continue;
+            }
+
+            const entityId = entity.id;
+            if (typeof entityId !== "string" || entityId.trim().length === 0) {
+              continue;
+            }
+
+            yield* repository.saveEntity(entityType, entityId, entity);
+          }
+        }
+
+        for (const transition of auditTrail) {
+          yield* repository.appendAuditTransition(transition);
+        }
+      }),
+    );
   });
 
 export const buildCorePlatform = (
@@ -370,8 +419,22 @@ export const buildCorePlatform = (
           limit: options?.limit,
           beforeAt: options?.beforeAt,
         }).pipe(Effect.mapError((error) => new Error(error.message))),
-      retryJob: (jobId, actor, at) =>
-        withMutationBoundary(retryJobRun(repository, jobId, actor, at)),
+      listJobs: (options) =>
+        listJobs(repository, options).pipe(
+          Effect.mapError((error) => new Error(error.message)),
+        ),
+      retryJob: (jobId, actor, at, fixSummary) =>
+        withMutationBoundary(
+          retryJobRun(repository, jobId, actor, at, fixSummary),
+        ),
+      inspectWorkflowCheckpoint: (checkpointId) =>
+        inspectWorkflowCheckpointInService(repository, checkpointId).pipe(
+          Effect.mapError((error) => new Error(error.message)),
+        ),
+      listActivityFeed: (options) =>
+        listActivityFeed(repository, options).pipe(
+          Effect.mapError((error) => new Error(error.message)),
+        ),
       createWorkflowCheckpoint: (input) =>
         withMutationBoundary(createWorkflowCheckpoint(repository, input)),
       keepCheckpoint: (checkpointId, actor, at) =>
@@ -382,6 +445,12 @@ export const buildCorePlatform = (
         withMutationBoundary(
           recoverCheckpoint(repository, checkpointId, actor, at),
         ),
+      saveJobsView: (input) =>
+        withMutationBoundary(saveJobsViewInService(repository, input)),
+      getJobsView: () => getJobsViewInService(repository),
+      saveActivityView: (input) =>
+        withMutationBoundary(saveActivityViewInService(repository, input)),
+      getActivityView: () => getActivityViewInService(repository),
       saveView: (input) => withMutationBoundary(saveView(repository, input)),
       upsertMemory: (input) =>
         withMutationBoundary(upsertMemory(repository, input)),

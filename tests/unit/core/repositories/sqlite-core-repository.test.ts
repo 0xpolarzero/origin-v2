@@ -270,6 +270,101 @@ describe("makeSqliteCoreRepository", () => {
     }
   });
 
+  test("listJobs queries filtered rows with SQL ordering and limit", async () => {
+    const { tempDir, databasePath } = makeTempDatabasePath();
+
+    try {
+      const repository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+
+      await Effect.runPromise(
+        repository.saveEntity("job", "job-list-query-1", {
+          id: "job-list-query-1",
+          name: "Job list one",
+          runState: "failed",
+          retryCount: 1,
+          createdAt: "2026-02-23T09:00:00.000Z",
+          updatedAt: "2026-02-23T11:00:00.000Z",
+        }),
+      );
+      await Effect.runPromise(
+        repository.saveEntity("job", "job-list-query-2", {
+          id: "job-list-query-2",
+          name: "Job list two",
+          runState: "failed",
+          retryCount: 0,
+          createdAt: "2026-02-23T09:00:00.000Z",
+          updatedAt: "2026-02-23T10:00:00.000Z",
+        }),
+      );
+      await Effect.runPromise(
+        repository.saveEntity("job", "job-list-query-3", {
+          id: "job-list-query-3",
+          name: "Job list three",
+          runState: "succeeded",
+          retryCount: 0,
+          createdAt: "2026-02-23T09:00:00.000Z",
+          updatedAt: "2026-02-23T12:00:00.000Z",
+        }),
+      );
+
+      const listJobs = (
+        repository as {
+          listJobs?: (query: {
+            runState?: "idle" | "running" | "succeeded" | "failed" | "retrying";
+            limit?: number;
+            beforeUpdatedAt?: Date;
+          }) => Effect.Effect<
+            ReadonlyArray<{
+              id: string;
+              name: string;
+              runState: string;
+              retryCount: number;
+              createdAt: string;
+              updatedAt: string;
+              lastRunAt?: string;
+              lastSuccessAt?: string;
+              lastFailureAt?: string;
+              lastFailureReason?: string;
+              diagnostics?: string;
+            }>
+          >;
+        }
+      ).listJobs;
+
+      expect(listJobs).toBeDefined();
+
+      const queried = await Effect.runPromise(
+        listJobs!({
+          runState: "failed",
+          beforeUpdatedAt: new Date("2026-02-23T11:30:00.000Z"),
+          limit: 1,
+        }),
+      );
+
+      expect(queried).toEqual([
+        {
+          id: "job-list-query-1",
+          name: "Job list one",
+          runState: "failed",
+          retryCount: 1,
+          createdAt: "2026-02-23T09:00:00.000Z",
+          updatedAt: "2026-02-23T11:00:00.000Z",
+          lastRunAt: undefined,
+          lastSuccessAt: undefined,
+          lastFailureAt: undefined,
+          lastFailureReason: undefined,
+          diagnostics: undefined,
+        },
+      ]);
+
+      await Effect.runPromise(repository.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("saveEntity returns deterministic relation-constraint errors", async () => {
     const { tempDir, databasePath } = makeTempDatabasePath();
 
@@ -793,6 +888,122 @@ describe("makeSqliteCoreRepository", () => {
       expect(filtered.map((transition) => transition.id)).toEqual([
         "audit-filter-1",
         "audit-filter-3",
+      ]);
+
+      await Effect.runPromise(repository.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("listActivityFeed applies SQL filters, ordering, and limit", async () => {
+    const { tempDir, databasePath } = makeTempDatabasePath();
+
+    try {
+      const repository = await Effect.runPromise(
+        makeSqliteCoreRepository({ databasePath }),
+      );
+      const task = await Effect.runPromise(
+        createTask({
+          id: "task-activity-1",
+          title: "Task activity feed",
+        }),
+      );
+      await Effect.runPromise(repository.saveEntity("task", task.id, task));
+
+      const transitions = await Promise.all([
+        Effect.runPromise(
+          createAuditTransition({
+            id: "audit-activity-query-1",
+            entityType: "task",
+            entityId: "task-activity-1",
+            fromState: "none",
+            toState: "planned",
+            actor: { id: "ai-1", kind: "ai" },
+            reason: "AI planned task",
+            at: new Date("2026-02-23T13:00:00.000Z"),
+          }),
+        ),
+        Effect.runPromise(
+          createAuditTransition({
+            id: "audit-activity-query-2",
+            entityType: "task",
+            entityId: "task-activity-1",
+            fromState: "planned",
+            toState: "blocked",
+            actor: { id: "user-1", kind: "user" },
+            reason: "User blocked task",
+            at: new Date("2026-02-23T13:01:00.000Z"),
+          }),
+        ),
+        Effect.runPromise(
+          createAuditTransition({
+            id: "audit-activity-query-3",
+            entityType: "task",
+            entityId: "task-activity-1",
+            fromState: "blocked",
+            toState: "planned",
+            actor: { id: "ai-1", kind: "ai" },
+            reason: "AI unblocked task",
+            at: new Date("2026-02-23T13:02:00.000Z"),
+            metadata: { rollbackTarget: "audit-77" },
+          }),
+        ),
+      ]);
+
+      for (const transition of transitions) {
+        await Effect.runPromise(repository.appendAuditTransition(transition));
+      }
+
+      const listActivityFeed = (
+        repository as {
+          listActivityFeed?: (query: {
+            entityType?: string;
+            entityId?: string;
+            actorKind?: "user" | "system" | "ai";
+            aiOnly?: boolean;
+            limit?: number;
+            beforeAt?: Date;
+          }) => Effect.Effect<
+            ReadonlyArray<{
+              id: string;
+              entityType: string;
+              entityId: string;
+              fromState: string;
+              toState: string;
+              actor: { id: string; kind: "user" | "system" | "ai" };
+              reason: string;
+              at: string;
+              metadata?: Record<string, string>;
+            }>
+          >;
+        }
+      ).listActivityFeed;
+
+      expect(listActivityFeed).toBeDefined();
+
+      const queried = await Effect.runPromise(
+        listActivityFeed!({
+          entityType: "task",
+          entityId: "task-activity-1",
+          aiOnly: true,
+          beforeAt: new Date("2026-02-23T13:03:00.000Z"),
+          limit: 1,
+        }),
+      );
+
+      expect(queried).toEqual([
+        {
+          id: "audit-activity-query-3",
+          entityType: "task",
+          entityId: "task-activity-1",
+          fromState: "blocked",
+          toState: "planned",
+          actor: { id: "ai-1", kind: "ai" },
+          reason: "AI unblocked task",
+          at: "2026-02-23T13:02:00.000Z",
+          metadata: { rollbackTarget: "audit-77" },
+        },
       ]);
 
       await Effect.runPromise(repository.close());

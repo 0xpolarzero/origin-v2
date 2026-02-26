@@ -2,8 +2,11 @@ import { Effect } from "effect";
 
 import { ENTITY_TYPES, EntityType } from "../../core/domain/common";
 import {
+  ListActivityRequest,
+  ListJobsRequest,
   CompleteTaskRequest,
   DeferTaskRequest,
+  InspectWorkflowCheckpointRequest,
   InspectJobRunRequest,
   ListJobRunHistoryRequest,
   KeepCheckpointRequest,
@@ -39,11 +42,14 @@ export const WORKFLOW_ROUTE_PATHS: Record<WorkflowRouteKey, string> = {
   "job.create": "/api/workflows/job/create",
   "job.recordRun": "/api/workflows/job/record-run",
   "job.inspectRun": "/api/workflows/job/inspect-run",
+  "job.list": "/api/workflows/job/list",
   "job.listHistory": "/api/workflows/job/list-history",
   "job.retry": "/api/workflows/job/retry",
   "checkpoint.create": "/api/workflows/checkpoint/create",
+  "checkpoint.inspect": "/api/workflows/checkpoint/inspect",
   "checkpoint.keep": "/api/workflows/checkpoint/keep",
   "checkpoint.recover": "/api/workflows/checkpoint/recover",
+  "activity.list": "/api/workflows/activity/list",
 };
 
 type ActorKind = "user" | "system" | "ai";
@@ -91,6 +97,13 @@ const SIGNAL_CONVERSION_TARGETS = [
 ] as const;
 const OUTBOUND_ACTION_TYPES = ["event_sync", "outbound_draft"] as const;
 const JOB_RUN_OUTCOMES = ["succeeded", "failed"] as const;
+const JOB_RUN_STATES = [
+  "idle",
+  "running",
+  "succeeded",
+  "failed",
+  "retrying",
+] as const;
 const ISO_8601_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 
@@ -418,7 +431,11 @@ const validateCaptureEntryRequest: RouteValidator<CaptureEntryRequest> = (
     return entryId;
   }
 
-  const content = parseNonEmptyStringField(route, sourceResult.value, "content");
+  const content = parseNonEmptyStringField(
+    route,
+    sourceResult.value,
+    "content",
+  );
   if (!content.ok) {
     return content;
   }
@@ -627,7 +644,11 @@ const validateIngestSignalRequest: RouteValidator<IngestSignalRequest> = (
     return source;
   }
 
-  const payload = parseNonEmptyStringField(route, sourceResult.value, "payload");
+  const payload = parseNonEmptyStringField(
+    route,
+    sourceResult.value,
+    "payload",
+  );
   if (!payload.ok) {
     return payload;
   }
@@ -1078,6 +1099,52 @@ const validateInspectJobRunRequest: RouteValidator<InspectJobRunRequest> = (
   });
 };
 
+const validateListJobsRequest: RouteValidator<ListJobsRequest> = (input) => {
+  const route: WorkflowRouteKey = "job.list";
+  const sourceResult = parseRecord(route, input);
+  if (!sourceResult.ok) {
+    return sourceResult;
+  }
+
+  const runStateValue = sourceResult.value.runState;
+  const runState =
+    runStateValue === undefined
+      ? undefined
+      : JOB_RUN_STATES.find((candidate) => candidate === runStateValue);
+  if (runStateValue !== undefined && runState === undefined) {
+    return invalid(
+      route,
+      `runState must be one of: ${JOB_RUN_STATES.join(", ")}`,
+    );
+  }
+
+  const limit = parsePositiveIntegerField(
+    route,
+    sourceResult.value,
+    "limit",
+    true,
+  );
+  if (!limit.ok) {
+    return limit;
+  }
+
+  const beforeUpdatedAt = parseDateField(
+    route,
+    sourceResult.value,
+    "beforeUpdatedAt",
+    true,
+  );
+  if (!beforeUpdatedAt.ok) {
+    return beforeUpdatedAt;
+  }
+
+  return valid({
+    runState,
+    limit: limit.value,
+    beforeUpdatedAt: beforeUpdatedAt.value,
+  });
+};
+
 const validateListJobRunHistoryRequest: RouteValidator<
   ListJobRunHistoryRequest
 > = (input) => {
@@ -1136,10 +1203,21 @@ const validateRetryJobRequest: RouteValidator<RetryJobRequest> = (input) => {
     return at;
   }
 
+  const fixSummary = parseNonEmptyStringField(
+    route,
+    sourceResult.value,
+    "fixSummary",
+    true,
+  );
+  if (!fixSummary.ok) {
+    return fixSummary;
+  }
+
   return valid({
     jobId: jobId.value,
     actor: actor.value,
     at: at.value,
+    fixSummary: fixSummary.value,
   });
 };
 
@@ -1250,6 +1328,29 @@ const validateKeepCheckpointRequest: RouteValidator<KeepCheckpointRequest> = (
   });
 };
 
+const validateInspectWorkflowCheckpointRequest: RouteValidator<
+  InspectWorkflowCheckpointRequest
+> = (input) => {
+  const route: WorkflowRouteKey = "checkpoint.inspect";
+  const sourceResult = parseRecord(route, input);
+  if (!sourceResult.ok) {
+    return sourceResult;
+  }
+
+  const checkpointId = parseNonEmptyStringField(
+    route,
+    sourceResult.value,
+    "checkpointId",
+  );
+  if (!checkpointId.ok) {
+    return checkpointId;
+  }
+
+  return valid({
+    checkpointId: checkpointId.value,
+  });
+};
+
 const validateRecoverCheckpointRequest: RouteValidator<
   RecoverCheckpointRequest
 > = (input) => {
@@ -1282,6 +1383,77 @@ const validateRecoverCheckpointRequest: RouteValidator<
     checkpointId: checkpointId.value,
     actor: actor.value,
     at: at.value,
+  });
+};
+
+const validateListActivityRequest: RouteValidator<ListActivityRequest> = (
+  input,
+) => {
+  const route: WorkflowRouteKey = "activity.list";
+  const sourceResult = parseRecord(route, input);
+  if (!sourceResult.ok) {
+    return sourceResult;
+  }
+
+  const entityType = parseNonEmptyStringField(
+    route,
+    sourceResult.value,
+    "entityType",
+    true,
+  );
+  if (!entityType.ok) {
+    return entityType;
+  }
+
+  const entityId = parseNonEmptyStringField(
+    route,
+    sourceResult.value,
+    "entityId",
+    true,
+  );
+  if (!entityId.ok) {
+    return entityId;
+  }
+
+  const actorKindValue = sourceResult.value.actorKind;
+  const actorKind =
+    actorKindValue === undefined
+      ? undefined
+      : ACTOR_KINDS.find((candidate) => candidate === actorKindValue);
+  if (actorKindValue !== undefined && actorKind === undefined) {
+    return invalid(
+      route,
+      `actorKind must be one of: ${ACTOR_KINDS.join(", ")}`,
+    );
+  }
+
+  const aiOnlyValue = sourceResult.value.aiOnly;
+  if (aiOnlyValue !== undefined && typeof aiOnlyValue !== "boolean") {
+    return invalid(route, "aiOnly must be a boolean");
+  }
+
+  const limit = parsePositiveIntegerField(
+    route,
+    sourceResult.value,
+    "limit",
+    true,
+  );
+  if (!limit.ok) {
+    return limit;
+  }
+
+  const beforeAt = parseDateField(route, sourceResult.value, "beforeAt", true);
+  if (!beforeAt.ok) {
+    return beforeAt;
+  }
+
+  return valid({
+    entityType: entityType.value,
+    entityId: entityId.value,
+    actorKind,
+    aiOnly: aiOnlyValue as boolean | undefined,
+    limit: limit.value,
+    beforeAt: beforeAt.value,
   });
 };
 
@@ -1481,6 +1653,12 @@ export const makeWorkflowRoutes = (
     ),
   },
   {
+    key: "job.list",
+    method: "POST",
+    path: WORKFLOW_ROUTE_PATHS["job.list"],
+    handle: toRouteHandler("job.list", validateListJobsRequest, api.listJobs),
+  },
+  {
     key: "job.listHistory",
     method: "POST",
     path: WORKFLOW_ROUTE_PATHS["job.listHistory"],
@@ -1507,6 +1685,16 @@ export const makeWorkflowRoutes = (
     ),
   },
   {
+    key: "checkpoint.inspect",
+    method: "POST",
+    path: WORKFLOW_ROUTE_PATHS["checkpoint.inspect"],
+    handle: toRouteHandler(
+      "checkpoint.inspect",
+      validateInspectWorkflowCheckpointRequest,
+      api.inspectWorkflowCheckpoint,
+    ),
+  },
+  {
     key: "checkpoint.keep",
     method: "POST",
     path: WORKFLOW_ROUTE_PATHS["checkpoint.keep"],
@@ -1524,6 +1712,16 @@ export const makeWorkflowRoutes = (
       "checkpoint.recover",
       validateRecoverCheckpointRequest,
       api.recoverCheckpoint,
+    ),
+  },
+  {
+    key: "activity.list",
+    method: "POST",
+    path: WORKFLOW_ROUTE_PATHS["activity.list"],
+    handle: toRouteHandler(
+      "activity.list",
+      validateListActivityRequest,
+      api.listActivity,
     ),
   },
 ];

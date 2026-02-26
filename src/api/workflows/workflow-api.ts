@@ -2,8 +2,11 @@ import { Effect } from "effect";
 
 import { CorePlatform } from "../../core/app/core-platform";
 import {
+  ListActivityRequest,
+  ListJobsRequest,
   CompleteTaskRequest,
   DeferTaskRequest,
+  InspectWorkflowCheckpointRequest,
   InspectJobRunRequest,
   ListJobRunHistoryRequest,
   KeepCheckpointRequest,
@@ -118,6 +121,13 @@ export const makeWorkflowApi = (
       "job.inspectRun",
       (input: InspectJobRunRequest) => platform.inspectJobRun(input.jobId),
     ),
+    listJobs: wrapHandler("job.list", (input: ListJobsRequest) =>
+      platform.listJobs({
+        runState: input.runState,
+        limit: input.limit,
+        beforeUpdatedAt: input.beforeUpdatedAt,
+      }),
+    ),
     listJobRunHistory: wrapHandler(
       "job.listHistory",
       (input: ListJobRunHistoryRequest) =>
@@ -127,10 +137,15 @@ export const makeWorkflowApi = (
         }),
     ),
     retryJob: wrapHandler("job.retry", (input: RetryJobRequest) =>
-      platform.retryJob(input.jobId, input.actor, input.at),
+      platform.retryJob(input.jobId, input.actor, input.at, input.fixSummary),
     ),
     createWorkflowCheckpoint: wrapHandler("checkpoint.create", (input) =>
       platform.createWorkflowCheckpoint(input),
+    ),
+    inspectWorkflowCheckpoint: wrapHandler(
+      "checkpoint.inspect",
+      (input: InspectWorkflowCheckpointRequest) =>
+        platform.inspectWorkflowCheckpoint(input.checkpointId),
     ),
     keepCheckpoint: wrapHandler(
       "checkpoint.keep",
@@ -141,6 +156,16 @@ export const makeWorkflowApi = (
       "checkpoint.recover",
       (input: RecoverCheckpointRequest) =>
         platform.recoverCheckpoint(input.checkpointId, input.actor, input.at),
+    ),
+    listActivity: wrapHandler("activity.list", (input: ListActivityRequest) =>
+      platform.listActivityFeed({
+        entityType: input.entityType,
+        entityId: input.entityId,
+        actorKind: input.actorKind,
+        aiOnly: input.aiOnly,
+        limit: input.limit,
+        beforeAt: input.beforeAt,
+      }),
     ),
   };
 };

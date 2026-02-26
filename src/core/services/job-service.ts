@@ -26,6 +26,26 @@ export interface JobRunInspection {
   lastFailureReason?: string;
 }
 
+export interface ListJobsInput {
+  runState?: Job["runState"];
+  limit?: number;
+  beforeUpdatedAt?: Date;
+}
+
+export interface JobListItem {
+  id: string;
+  name: string;
+  runState: Job["runState"];
+  retryCount: number;
+  lastRunAt?: string;
+  lastSuccessAt?: string;
+  lastFailureAt?: string;
+  lastFailureReason?: string;
+  diagnostics?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface JobRunHistoryRecord {
   id: string;
   jobId: string;
@@ -55,6 +75,13 @@ const RUN_OUTCOMES: ReadonlyArray<JobRunHistoryRecord["outcome"]> = [
   "failed",
 ];
 const ACTOR_KINDS: ReadonlyArray<ActorKind> = ["user", "system", "ai"];
+const JOB_RUN_STATES: ReadonlyArray<Job["runState"]> = [
+  "idle",
+  "running",
+  "succeeded",
+  "failed",
+  "retrying",
+];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -126,6 +153,51 @@ const toHistoryRecord = (value: unknown): JobRunHistoryRecord | undefined => {
   };
 };
 
+const toJobListItem = (value: unknown): JobListItem | undefined => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const id = value.id;
+  const name = value.name;
+  const runState = value.runState;
+  const retryCount = value.retryCount;
+  const createdAt = value.createdAt;
+  const updatedAt = value.updatedAt;
+
+  if (
+    typeof id !== "string" ||
+    typeof name !== "string" ||
+    typeof runState !== "string" ||
+    !JOB_RUN_STATES.includes(runState as Job["runState"]) ||
+    typeof retryCount !== "number" ||
+    !Number.isFinite(retryCount) ||
+    typeof createdAt !== "string" ||
+    typeof updatedAt !== "string"
+  ) {
+    return undefined;
+  }
+
+  const maybeString = (field: string): string | undefined => {
+    const raw = value[field];
+    return typeof raw === "string" ? raw : undefined;
+  };
+
+  return {
+    id,
+    name,
+    runState: runState as Job["runState"],
+    retryCount,
+    lastRunAt: maybeString("lastRunAt"),
+    lastSuccessAt: maybeString("lastSuccessAt"),
+    lastFailureAt: maybeString("lastFailureAt"),
+    lastFailureReason: maybeString("lastFailureReason"),
+    diagnostics: maybeString("diagnostics"),
+    createdAt,
+    updatedAt,
+  };
+};
+
 const loadJob = (
   repository: CoreRepository,
   jobId: string,
@@ -149,112 +221,123 @@ export const recordJobRun = (
   repository: CoreRepository,
   input: RecordJobRunInput,
 ): Effect.Effect<Job, JobServiceError> =>
-  Effect.gen(function* () {
-    const job = yield* loadJob(repository, input.jobId);
-    const at = input.at ?? new Date();
-    const atIso = at.toISOString();
+  repository.withTransaction(
+    Effect.gen(function* () {
+      const job = yield* loadJob(repository, input.jobId);
+      const at = input.at ?? new Date();
+      const atIso = at.toISOString();
 
-    const updated: Job = {
-      ...job,
-      runState: input.outcome,
-      diagnostics: input.diagnostics,
-      lastRunAt: atIso,
-      lastSuccessAt: input.outcome === "succeeded" ? atIso : job.lastSuccessAt,
-      lastFailureAt: input.outcome === "failed" ? atIso : job.lastFailureAt,
-      lastFailureReason:
-        input.outcome === "failed" ? input.diagnostics : job.lastFailureReason,
-      updatedAt: atIso,
-    };
-
-    yield* repository.saveEntity("job", updated.id, updated);
-
-    const historyEntry: StoredJobRunHistoryRecord = {
-      id: createId("job-run-history"),
-      jobId: updated.id,
-      outcome: input.outcome,
-      diagnostics: input.diagnostics,
-      retryCount: job.retryCount,
-      actor: input.actor,
-      actorId: input.actor.id,
-      actorKind: input.actor.kind,
-      at: atIso,
-      createdAt: atIso,
-    };
-    yield* repository.saveEntity(
-      "job_run_history",
-      historyEntry.id,
-      historyEntry,
-    );
-
-    const transition = yield* createAuditTransition({
-      entityType: "job",
-      entityId: updated.id,
-      fromState: job.runState,
-      toState: updated.runState,
-      actor: input.actor,
-      reason: `Job run recorded (${input.outcome})`,
-      at,
-      metadata: {
+      const updated: Job = {
+        ...job,
+        runState: input.outcome,
         diagnostics: input.diagnostics,
-      },
-    }).pipe(
-      Effect.mapError(
-        (error) =>
-          new JobServiceError({
-            message: `failed to append job run transition: ${error.message}`,
-          }),
-      ),
-    );
+        lastRunAt: atIso,
+        lastSuccessAt:
+          input.outcome === "succeeded" ? atIso : job.lastSuccessAt,
+        lastFailureAt: input.outcome === "failed" ? atIso : job.lastFailureAt,
+        lastFailureReason:
+          input.outcome === "failed"
+            ? input.diagnostics
+            : job.lastFailureReason,
+        updatedAt: atIso,
+      };
 
-    yield* repository.appendAuditTransition(transition);
+      yield* repository.saveEntity("job", updated.id, updated);
 
-    return updated;
-  });
+      const historyEntry: StoredJobRunHistoryRecord = {
+        id: createId("job-run-history"),
+        jobId: updated.id,
+        outcome: input.outcome,
+        diagnostics: input.diagnostics,
+        retryCount: job.retryCount,
+        actor: input.actor,
+        actorId: input.actor.id,
+        actorKind: input.actor.kind,
+        at: atIso,
+        createdAt: atIso,
+      };
+      yield* repository.saveEntity(
+        "job_run_history",
+        historyEntry.id,
+        historyEntry,
+      );
+
+      const transition = yield* createAuditTransition({
+        entityType: "job",
+        entityId: updated.id,
+        fromState: job.runState,
+        toState: updated.runState,
+        actor: input.actor,
+        reason: `Job run recorded (${input.outcome})`,
+        at,
+        metadata: {
+          diagnostics: input.diagnostics,
+        },
+      }).pipe(
+        Effect.mapError(
+          (error) =>
+            new JobServiceError({
+              message: `failed to append job run transition: ${error.message}`,
+            }),
+        ),
+      );
+
+      yield* repository.appendAuditTransition(transition);
+
+      return updated;
+    }),
+  );
 
 export const retryJobRun = (
   repository: CoreRepository,
   jobId: string,
   actor: ActorRef,
   at: Date = new Date(),
+  fixSummary?: string,
 ): Effect.Effect<Job, JobServiceError> =>
-  Effect.gen(function* () {
-    const job = yield* loadJob(repository, jobId);
-    const atIso = at.toISOString();
+  repository.withTransaction(
+    Effect.gen(function* () {
+      const job = yield* loadJob(repository, jobId);
+      const atIso = at.toISOString();
 
-    const updated: Job = {
-      ...job,
-      runState: "retrying",
-      retryCount: job.retryCount + 1,
-      diagnostics: `Retry requested after failure: ${job.lastFailureReason ?? "unknown"}`,
-      updatedAt: atIso,
-    };
+      const updated: Job = {
+        ...job,
+        runState: "retrying",
+        retryCount: job.retryCount + 1,
+        diagnostics: `Retry requested after failure: ${job.lastFailureReason ?? "unknown"}`,
+        updatedAt: atIso,
+      };
 
-    yield* repository.saveEntity("job", updated.id, updated);
+      yield* repository.saveEntity("job", updated.id, updated);
 
-    const transition = yield* createAuditTransition({
-      entityType: "job",
-      entityId: updated.id,
-      fromState: job.runState,
-      toState: updated.runState,
-      actor,
-      reason: "Job retry requested",
-      at,
-      metadata: {
-        previousFailure: job.lastFailureReason ?? "unknown",
-      },
-    }).pipe(
-      Effect.mapError(
-        (error) =>
-          new JobServiceError({
-            message: `failed to append job retry transition: ${error.message}`,
-          }),
-      ),
-    );
+      const transition = yield* createAuditTransition({
+        entityType: "job",
+        entityId: updated.id,
+        fromState: job.runState,
+        toState: updated.runState,
+        actor,
+        reason: "Job retry requested",
+        at,
+        metadata: {
+          previousFailure: job.lastFailureReason ?? "unknown",
+          ...(typeof fixSummary === "string" && fixSummary.trim().length > 0
+            ? { fixSummary }
+            : {}),
+        },
+      }).pipe(
+        Effect.mapError(
+          (error) =>
+            new JobServiceError({
+              message: `failed to append job retry transition: ${error.message}`,
+            }),
+        ),
+      );
 
-    yield* repository.appendAuditTransition(transition);
+      yield* repository.appendAuditTransition(transition);
 
-    return updated;
-  });
+      return updated;
+    }),
+  );
 
 export const inspectJobRun = (
   repository: CoreRepository,
@@ -269,6 +352,62 @@ export const inspectJobRun = (
       diagnostics: job.diagnostics,
       lastFailureReason: job.lastFailureReason,
     };
+  });
+
+export const listJobs = (
+  repository: CoreRepository,
+  input: ListJobsInput = {},
+): Effect.Effect<ReadonlyArray<JobListItem>, JobServiceError> =>
+  Effect.gen(function* () {
+    if (
+      input.limit !== undefined &&
+      (!Number.isInteger(input.limit) || input.limit <= 0)
+    ) {
+      return yield* Effect.fail(
+        new JobServiceError({
+          message: "limit must be a positive integer",
+          code: "invalid_request",
+        }),
+      );
+    }
+
+    if (repository.listJobs) {
+      const queriedRows = yield* repository.listJobs({
+        runState: input.runState,
+        limit: input.limit,
+        beforeUpdatedAt: input.beforeUpdatedAt,
+      });
+
+      return queriedRows
+        .map((row) => toJobListItem(row))
+        .filter((row): row is JobListItem => row !== undefined);
+    }
+
+    const beforeUpdatedAtIso = input.beforeUpdatedAt?.toISOString();
+    const jobs = yield* repository.listEntities<unknown>("job");
+    const filtered = jobs
+      .map((job) => toJobListItem(job))
+      .filter((job): job is JobListItem => job !== undefined)
+      .filter(
+        (job) =>
+          input.runState === undefined || job.runState === input.runState,
+      )
+      .filter(
+        (job) =>
+          beforeUpdatedAtIso === undefined ||
+          job.updatedAt < beforeUpdatedAtIso,
+      )
+      .sort(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) ||
+          right.id.localeCompare(left.id),
+      );
+
+    if (input.limit === undefined) {
+      return filtered;
+    }
+
+    return filtered.slice(0, input.limit);
   });
 
 export const listJobRunHistory = (

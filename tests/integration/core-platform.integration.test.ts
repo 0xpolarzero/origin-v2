@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Effect } from "effect";
@@ -162,5 +162,125 @@ describe("Core Platform integration", () => {
     );
 
     expect(transactionCalls.length).toBe(1);
+  });
+
+  test("wraps legacy snapshot import in repository transaction boundary", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "origin-legacy-import-tx-"));
+    const snapshotPath = join(tempDir, "legacy-snapshot.json");
+    const baseRepository = makeInMemoryCoreRepository();
+    const transactionCalls: Array<string> = [];
+
+    writeFileSync(
+      snapshotPath,
+      JSON.stringify(
+        {
+          version: 1,
+          entities: {
+            entry: [
+              {
+                id: "entry-legacy-tx-1",
+                content: "Imported entry",
+                source: "manual",
+                status: "captured",
+                capturedAt: "2026-02-23T00:00:00.000Z",
+                createdAt: "2026-02-23T00:00:00.000Z",
+                updatedAt: "2026-02-23T00:00:00.000Z",
+              },
+            ],
+          },
+          auditTrail: [],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    try {
+      const repository: CoreRepository = {
+        ...baseRepository,
+        withTransaction: (effect) => {
+          transactionCalls.push("withTransaction");
+          return effect;
+        },
+      };
+
+      const platform = await Effect.runPromise(
+        buildCorePlatform({
+          repository,
+          snapshotPath,
+          importSnapshotIntoDatabase: true,
+        }),
+      );
+
+      const importedEntry = await Effect.runPromise(
+        platform.getEntity<{ id: string }>("entry", "entry-legacy-tx-1"),
+      );
+
+      expect(importedEntry?.id).toBe("entry-legacy-tx-1");
+      expect(transactionCalls).toEqual(["withTransaction"]);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("exposes job/activity/checkpoint read surfaces and forwards retry fixSummary", async () => {
+    const platform = await Effect.runPromise(buildCorePlatform());
+
+    await Effect.runPromise(
+      platform.createJob({
+        jobId: "job-platform-read-1",
+        name: "Platform read test",
+      }),
+    );
+    await Effect.runPromise(
+      platform.recordJobRun({
+        jobId: "job-platform-read-1",
+        outcome: "failed",
+        diagnostics: "Provider timeout",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T19:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      platform.retryJob(
+        "job-platform-read-1",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T19:01:00.000Z"),
+        "Increase timeout to 15 seconds",
+      ),
+    );
+
+    await Effect.runPromise(
+      platform.createWorkflowCheckpoint({
+        checkpointId: "checkpoint-platform-read-1",
+        name: "Checkpoint for inspect",
+        snapshotEntityRefs: [],
+        auditCursor: 20,
+        rollbackTarget: "audit-20",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T19:02:00.000Z"),
+      }),
+    );
+
+    const jobs = await Effect.runPromise(
+      platform.listJobs({ runState: "retrying" }),
+    );
+    const inspectedCheckpoint = await Effect.runPromise(
+      platform.inspectWorkflowCheckpoint("checkpoint-platform-read-1"),
+    );
+    const jobActivity = await Effect.runPromise(
+      platform.listActivityFeed({
+        entityType: "job",
+        entityId: "job-platform-read-1",
+      }),
+    );
+    const retryEntry = jobActivity.find((item) => item.toState === "retrying");
+
+    expect(jobs.map((job) => job.id)).toEqual(["job-platform-read-1"]);
+    expect(inspectedCheckpoint.id).toBe("checkpoint-platform-read-1");
+    expect(retryEntry?.metadata).toMatchObject({
+      fixSummary: "Increase timeout to 15 seconds",
+    });
   });
 });

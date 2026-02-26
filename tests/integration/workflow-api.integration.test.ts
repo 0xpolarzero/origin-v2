@@ -472,7 +472,7 @@ describe("workflow-api integration", () => {
     }
   });
 
-  test("job run -> inspect -> retry -> listHistory workflow executes through API handlers", async () => {
+  test("job.create -> recordRun -> inspect -> retry/fix -> recordRun -> list/listHistory executes through API handlers", async () => {
     const platform = await Effect.runPromise(buildCorePlatform());
     const api = makeWorkflowApi({ platform });
 
@@ -503,6 +503,7 @@ describe("workflow-api integration", () => {
         jobId: "job-api-flow-1",
         actor: { id: "user-1", kind: "user" },
         at: new Date("2026-02-23T17:10:00.000Z"),
+        fixSummary: "Increase timeout to 15 seconds",
       }),
     );
 
@@ -520,6 +521,20 @@ describe("workflow-api integration", () => {
         jobId: "job-api-flow-1",
       }),
     );
+    const jobs = await Effect.runPromise(
+      api.listJobs({
+        limit: 20,
+      }),
+    );
+    const retryActivity = await Effect.runPromise(
+      platform.listActivityFeed({
+        entityType: "job",
+        entityId: "job-api-flow-1",
+      }),
+    );
+    const retryTransition = retryActivity.find(
+      (item) => item.toState === "retrying",
+    );
 
     const inspection = await Effect.runPromise(
       platform.inspectJobRun("job-api-flow-1"),
@@ -534,6 +549,10 @@ describe("workflow-api integration", () => {
     ]);
     expect(history[0]?.retryCount).toBe(1);
     expect(history[1]?.retryCount).toBe(0);
+    expect(jobs.some((job) => job.id === "job-api-flow-1")).toBe(true);
+    expect(retryTransition?.metadata).toMatchObject({
+      fixSummary: "Increase timeout to 15 seconds",
+    });
   });
 
   test("checkpoint create/keep/recover stays auditable and reversible through API handlers", async () => {

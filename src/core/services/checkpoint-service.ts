@@ -151,6 +151,12 @@ export const createWorkflowCheckpoint = (
     }),
   );
 
+export const inspectWorkflowCheckpoint = (
+  repository: CoreRepository,
+  checkpointId: string,
+): Effect.Effect<Checkpoint, CheckpointServiceError> =>
+  loadCheckpoint(repository, checkpointId);
+
 export const keepCheckpoint = (
   repository: CoreRepository,
   checkpointId: string,
