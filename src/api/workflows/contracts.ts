@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { CorePlatform } from "../../core/app/core-platform";
 import { ActorRef } from "../../core/domain/common";
 import { Job } from "../../core/domain/job";
+import { ProjectLifecycle } from "../../core/domain/project";
 import { ApproveOutboundActionInput } from "../../core/services/approval-service";
 import { CreateWorkflowCheckpointInput } from "../../core/services/checkpoint-service";
 import {
@@ -12,11 +13,29 @@ import {
   RejectEntrySuggestionInput,
   SuggestEntryAsTaskInput,
 } from "../../core/services/entry-service";
+import {
+  CreateEventInServiceInput,
+  ListEventsInput,
+  UpdateEventInServiceInput,
+} from "../../core/services/event-service";
 import { RecordJobRunInput } from "../../core/services/job-service";
+import { ListNotificationsInput } from "../../core/services/notification-service";
+import { CreateNoteInServiceInput, ListNotesInput } from "../../core/services/note-service";
+import {
+  CreateProjectInServiceInput,
+  ListProjectsInput,
+  UpdateProjectInServiceInput,
+} from "../../core/services/project-service";
+import { SearchEntitiesInput } from "../../core/services/search-service";
 import {
   ConvertSignalInput,
   IngestSignalInput,
 } from "../../core/services/signal-service";
+import {
+  CreateTaskFromInput,
+  ListTasksInput,
+  UpdateTaskDetailsInput,
+} from "../../core/services/task-service";
 import type { WorkflowRouteKey as SharedWorkflowRouteKey } from "../../contracts/workflow-route-keys";
 import { WorkflowApiError } from "./errors";
 
@@ -48,6 +67,76 @@ export interface RescheduleTaskRequest {
   actor: ActorRef;
   at?: Date;
 }
+
+export interface CreateTaskRequest extends CreateTaskFromInput {}
+
+export interface UpdateTaskRequest extends UpdateTaskDetailsInput {}
+
+export interface ListTasksRequest extends ListTasksInput {}
+
+export interface CreateEventRequest extends CreateEventInServiceInput {}
+
+export interface UpdateEventRequest extends UpdateEventInServiceInput {}
+
+export interface ListEventsRequest extends ListEventsInput {}
+
+export interface ListEventConflictsRequest {
+  eventId?: string;
+}
+
+export interface CreateProjectRequest extends CreateProjectInServiceInput {}
+
+export interface UpdateProjectRequest extends UpdateProjectInServiceInput {}
+
+export interface SetProjectLifecycleRequest {
+  projectId: string;
+  lifecycle: ProjectLifecycle;
+  actor: ActorRef;
+  at?: Date;
+}
+
+export interface ListProjectsRequest extends ListProjectsInput {}
+
+export interface CreateNoteRequest extends CreateNoteInServiceInput {}
+
+export interface UpdateNoteRequest {
+  noteId: string;
+  body: string;
+  actor: ActorRef;
+  at?: Date;
+}
+
+export interface LinkNoteEntityRequest {
+  noteId: string;
+  entityRef: string;
+  actor: ActorRef;
+  at?: Date;
+}
+
+export interface UnlinkNoteEntityRequest {
+  noteId: string;
+  entityRef: string;
+  actor: ActorRef;
+  at?: Date;
+}
+
+export interface ListNotesRequest extends ListNotesInput {}
+
+export interface ListNotificationsRequest extends ListNotificationsInput {}
+
+export interface AcknowledgeNotificationRequest {
+  notificationId: string;
+  actor: ActorRef;
+  at?: Date;
+}
+
+export interface DismissNotificationRequest {
+  notificationId: string;
+  actor: ActorRef;
+  at?: Date;
+}
+
+export interface SearchQueryRequest extends SearchEntitiesInput {}
 
 export interface RequestEventSyncRequest {
   eventId: string;
@@ -146,6 +235,66 @@ export interface WorkflowApi {
   rescheduleTask: (
     input: RescheduleTaskRequest,
   ) => ApiOutput<CorePlatform["rescheduleTask"]>;
+  createTask: (
+    input: CreateTaskRequest,
+  ) => ApiOutput<CorePlatform["createTask"]>;
+  updateTask: (
+    input: UpdateTaskRequest,
+  ) => ApiOutput<CorePlatform["updateTask"]>;
+  listTasks: (
+    input: ListTasksRequest,
+  ) => ApiOutput<CorePlatform["listTasks"]>;
+  createEvent: (
+    input: CreateEventRequest,
+  ) => ApiOutput<CorePlatform["createEvent"]>;
+  updateEvent: (
+    input: UpdateEventRequest,
+  ) => ApiOutput<CorePlatform["updateEvent"]>;
+  listEvents: (
+    input: ListEventsRequest,
+  ) => ApiOutput<CorePlatform["listEvents"]>;
+  listEventConflicts: (
+    input: ListEventConflictsRequest,
+  ) => ApiOutput<CorePlatform["listEventConflicts"]>;
+  createProject: (
+    input: CreateProjectRequest,
+  ) => ApiOutput<CorePlatform["createProject"]>;
+  updateProject: (
+    input: UpdateProjectRequest,
+  ) => ApiOutput<CorePlatform["updateProject"]>;
+  setProjectLifecycle: (
+    input: SetProjectLifecycleRequest,
+  ) => ApiOutput<CorePlatform["setProjectLifecycle"]>;
+  listProjects: (
+    input: ListProjectsRequest,
+  ) => ApiOutput<CorePlatform["listProjects"]>;
+  createNote: (
+    input: CreateNoteRequest,
+  ) => ApiOutput<CorePlatform["createNote"]>;
+  updateNote: (
+    input: UpdateNoteRequest,
+  ) => ApiOutput<CorePlatform["updateNoteBody"]>;
+  linkNoteEntity: (
+    input: LinkNoteEntityRequest,
+  ) => ApiOutput<CorePlatform["linkNoteEntity"]>;
+  unlinkNoteEntity: (
+    input: UnlinkNoteEntityRequest,
+  ) => ApiOutput<CorePlatform["unlinkNoteEntity"]>;
+  listNotes: (
+    input: ListNotesRequest,
+  ) => ApiOutput<CorePlatform["listNotes"]>;
+  listNotifications: (
+    input: ListNotificationsRequest,
+  ) => ApiOutput<CorePlatform["listNotifications"]>;
+  acknowledgeNotification: (
+    input: AcknowledgeNotificationRequest,
+  ) => ApiOutput<CorePlatform["acknowledgeNotification"]>;
+  dismissNotification: (
+    input: DismissNotificationRequest,
+  ) => ApiOutput<CorePlatform["dismissNotification"]>;
+  searchQuery: (
+    input: SearchQueryRequest,
+  ) => ApiOutput<CorePlatform["searchEntities"]>;
   requestEventSync: (
     input: RequestEventSyncRequest,
   ) => ApiOutput<CorePlatform["requestEventSync"]>;

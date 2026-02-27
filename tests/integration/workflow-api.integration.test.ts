@@ -604,4 +604,228 @@ describe("workflow-api integration", () => {
       "recovered",
     ]);
   });
+
+  test("task/event/project/note/notification/search routes execute end-to-end through workflow api", async () => {
+    const platform = await Effect.runPromise(buildCorePlatform());
+    const api = makeWorkflowApi({ platform });
+
+    await Effect.runPromise(
+      api.createProject!({
+        projectId: "project-api-slice-1",
+        name: "Origin rollout",
+        description: "Initial rollout project",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      api.updateProject!({
+        projectId: "project-api-slice-1",
+        name: "Origin rollout v2",
+        description: "Updated rollout details",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:01:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      api.setProjectLifecycle!({
+        projectId: "project-api-slice-1",
+        lifecycle: "paused",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:02:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      api.createTask!({
+        taskId: "task-api-slice-1",
+        title: "Coordinate origin rollout",
+        description: "Sequence project milestones",
+        projectId: "project-api-slice-1",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:03:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      api.updateTask!({
+        taskId: "task-api-slice-1",
+        description: "Sequence and verify project milestones",
+        dueAt: new Date("2026-02-25T09:00:00.000Z"),
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:04:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      api.createEvent!({
+        eventId: "event-api-slice-1",
+        title: "Origin kickoff",
+        startAt: new Date("2026-02-24T10:00:00.000Z"),
+        endAt: new Date("2026-02-24T11:00:00.000Z"),
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:05:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      api.createEvent!({
+        eventId: "event-api-slice-2",
+        title: "Origin conflict event",
+        startAt: new Date("2026-02-24T10:30:00.000Z"),
+        endAt: new Date("2026-02-24T11:30:00.000Z"),
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:06:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      api.updateEvent!({
+        eventId: "event-api-slice-1",
+        title: "Origin kickoff (updated)",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:07:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      api.createNote!({
+        noteId: "note-api-slice-1",
+        body: "Origin rollout notes",
+        linkedEntityRefs: ["task:task-api-slice-1"],
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:08:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      api.updateNote!({
+        noteId: "note-api-slice-1",
+        body: "Origin rollout notes updated",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:09:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      api.linkNoteEntity!({
+        noteId: "note-api-slice-1",
+        entityRef: "project:project-api-slice-1",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:10:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      api.unlinkNoteEntity!({
+        noteId: "note-api-slice-1",
+        entityRef: "project:project-api-slice-1",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:11:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      api.requestEventSync({
+        eventId: "event-api-slice-1",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:12:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      api.requestEventSync({
+        eventId: "event-api-slice-2",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:13:00.000Z"),
+      }),
+    );
+
+    const taskList = await Effect.runPromise(
+      api.listTasks!({
+        status: "planned",
+      }),
+    );
+    const eventList = await Effect.runPromise(
+      api.listEvents!({
+        limit: 10,
+      }),
+    );
+    const conflicts = await Effect.runPromise(
+      api.listEventConflicts!({
+        eventId: "event-api-slice-1",
+      }),
+    );
+    const pausedProjects = await Effect.runPromise(
+      api.listProjects!({
+        lifecycle: "paused",
+      }),
+    );
+    const noteList = await Effect.runPromise(
+      api.listNotes!({
+        entityRef: "task:task-api-slice-1",
+      }),
+    );
+    const pendingNotifications = await Effect.runPromise(
+      api.listNotifications!({
+        status: "pending",
+        limit: 10,
+      }),
+    );
+    const searchResults = await Effect.runPromise(
+      api.searchQuery!({
+        query: "origin rollout",
+        entityTypes: ["task", "note", "project"],
+        limit: 20,
+      }),
+    );
+
+    expect(taskList.some((task) => task.id === "task-api-slice-1")).toBe(true);
+    expect(eventList.some((event) => event.id === "event-api-slice-1")).toBe(true);
+    expect(
+      conflicts.some(
+        (conflict) =>
+          conflict.eventId === "event-api-slice-1" &&
+          conflict.conflictingEventId === "event-api-slice-2",
+      ),
+    ).toBe(true);
+    expect(
+      pausedProjects.some((project) => project.id === "project-api-slice-1"),
+    ).toBe(true);
+    expect(noteList.some((note) => note.id === "note-api-slice-1")).toBe(true);
+    expect(pendingNotifications.length).toBeGreaterThanOrEqual(2);
+    expect(searchResults.length).toBeGreaterThan(0);
+
+    const firstPending = pendingNotifications[0];
+    const secondPending = pendingNotifications[1];
+
+    expect(firstPending).toBeDefined();
+    expect(secondPending).toBeDefined();
+
+    await Effect.runPromise(
+      api.acknowledgeNotification!({
+        notificationId: firstPending!.id,
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:14:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      api.dismissNotification!({
+        notificationId: secondPending!.id,
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-24T09:15:00.000Z"),
+      }),
+    );
+
+    const sentNotifications = await Effect.runPromise(
+      api.listNotifications!({
+        status: "sent",
+      }),
+    );
+    const dismissedNotifications = await Effect.runPromise(
+      api.listNotifications!({
+        status: "dismissed",
+      }),
+    );
+
+    expect(sentNotifications.some((item) => item.id === firstPending!.id)).toBe(
+      true,
+    );
+    expect(
+      dismissedNotifications.some((item) => item.id === secondPending!.id),
+    ).toBe(true);
+  });
 });

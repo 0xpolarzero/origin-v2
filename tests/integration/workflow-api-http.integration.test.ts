@@ -29,6 +29,13 @@ const TRUSTED_SIGNED_USER_ACTOR = {
 type InvalidActorKindRoute = Exclude<
   WorkflowRouteKey,
   | "approval.approveOutboundAction"
+  | "task.list"
+  | "event.list"
+  | "event.listConflicts"
+  | "project.list"
+  | "note.list"
+  | "notification.list"
+  | "search.query"
   | "job.inspectRun"
   | "job.list"
   | "job.listHistory"
@@ -138,6 +145,122 @@ const INVALID_ACTOR_KIND_CASES: ReadonlyArray<{
       nextAt: "2026-02-25T18:10:00.000Z",
       actor: { id: "user-1", kind: "robot" },
       at: "2026-02-24T18:10:00.000Z",
+    },
+  },
+  {
+    route: "task.create",
+    body: {
+      taskId: "task-http-invalid-actor-kind-6",
+      title: "Create task invalid actor kind",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:10:30.000Z",
+    },
+  },
+  {
+    route: "task.update",
+    body: {
+      taskId: "task-http-invalid-actor-kind-7",
+      title: "Update task invalid actor kind",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:10:40.000Z",
+    },
+  },
+  {
+    route: "event.create",
+    body: {
+      eventId: "event-http-invalid-actor-kind-2",
+      title: "Create event invalid actor kind",
+      startAt: "2026-02-25T18:10:50.000Z",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:10:50.000Z",
+    },
+  },
+  {
+    route: "event.update",
+    body: {
+      eventId: "event-http-invalid-actor-kind-3",
+      title: "Update event invalid actor kind",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:10:55.000Z",
+    },
+  },
+  {
+    route: "project.create",
+    body: {
+      projectId: "project-http-invalid-actor-kind-1",
+      name: "Create project invalid actor kind",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:11:00.000Z",
+    },
+  },
+  {
+    route: "project.update",
+    body: {
+      projectId: "project-http-invalid-actor-kind-2",
+      name: "Update project invalid actor kind",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:11:05.000Z",
+    },
+  },
+  {
+    route: "project.setLifecycle",
+    body: {
+      projectId: "project-http-invalid-actor-kind-3",
+      lifecycle: "paused",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:11:10.000Z",
+    },
+  },
+  {
+    route: "note.create",
+    body: {
+      noteId: "note-http-invalid-actor-kind-1",
+      body: "Create note invalid actor kind",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:11:15.000Z",
+    },
+  },
+  {
+    route: "note.update",
+    body: {
+      noteId: "note-http-invalid-actor-kind-2",
+      body: "Update note invalid actor kind",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:11:20.000Z",
+    },
+  },
+  {
+    route: "note.linkEntity",
+    body: {
+      noteId: "note-http-invalid-actor-kind-3",
+      entityRef: "task:task-http-invalid-actor-kind-1",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:11:25.000Z",
+    },
+  },
+  {
+    route: "note.unlinkEntity",
+    body: {
+      noteId: "note-http-invalid-actor-kind-4",
+      entityRef: "task:task-http-invalid-actor-kind-1",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:11:30.000Z",
+    },
+  },
+  {
+    route: "notification.acknowledge",
+    body: {
+      notificationId: "notification-http-invalid-actor-kind-1",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:11:35.000Z",
+    },
+  },
+  {
+    route: "notification.dismiss",
+    body: {
+      notificationId: "notification-http-invalid-actor-kind-2",
+      actor: { id: "user-1", kind: "robot" },
+      at: "2026-02-24T18:11:40.000Z",
     },
   },
   {
@@ -535,6 +658,205 @@ const INTEGRATION_NEGATIVE_CASES: ReadonlyArray<IntegrationWorkflowNegativeCase>
     messageIncludes: "was not found",
   },
   {
+    route: "task.create",
+    expectedStatus: 400,
+    body: {
+      taskId: "task-http-negative-1",
+      title: "   ",
+      actor: ACTOR,
+      at: "2026-02-26T11:11:20.000Z",
+    },
+    messageIncludes: "title",
+  },
+  {
+    route: "task.update",
+    expectedStatus: 404,
+    body: {
+      taskId: "task-http-negative-missing-4",
+      title: "Update missing task",
+      actor: ACTOR,
+      at: "2026-02-26T11:11:30.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "task.list",
+    expectedStatus: 400,
+    body: {
+      status: "unknown",
+    },
+    messageIncludes: "status",
+  },
+  {
+    route: "event.create",
+    expectedStatus: 400,
+    body: {
+      eventId: "event-http-negative-1",
+      title: "Missing startAt event",
+      actor: ACTOR,
+      at: "2026-02-26T11:11:40.000Z",
+    },
+    messageIncludes: "startAt",
+  },
+  {
+    route: "event.update",
+    expectedStatus: 404,
+    body: {
+      eventId: "event-http-negative-missing-1",
+      title: "Update missing event",
+      actor: ACTOR,
+      at: "2026-02-26T11:11:50.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "event.list",
+    expectedStatus: 400,
+    body: {
+      syncState: "unknown",
+    },
+    messageIncludes: "syncState",
+  },
+  {
+    route: "event.listConflicts",
+    expectedStatus: 400,
+    body: {
+      eventId: "   ",
+    },
+    messageIncludes: "eventId",
+  },
+  {
+    route: "project.create",
+    expectedStatus: 400,
+    body: {
+      projectId: "project-http-negative-1",
+      name: "   ",
+      actor: ACTOR,
+      at: "2026-02-26T11:12:00.000Z",
+    },
+    messageIncludes: "name",
+  },
+  {
+    route: "project.update",
+    expectedStatus: 404,
+    body: {
+      projectId: "project-http-negative-missing-1",
+      name: "Update missing project",
+      actor: ACTOR,
+      at: "2026-02-26T11:12:10.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "project.setLifecycle",
+    expectedStatus: 400,
+    body: {
+      projectId: "project-http-negative-2",
+      lifecycle: "archived",
+      actor: ACTOR,
+      at: "2026-02-26T11:12:20.000Z",
+    },
+    messageIncludes: "lifecycle",
+  },
+  {
+    route: "project.list",
+    expectedStatus: 400,
+    body: {
+      lifecycle: "archived",
+    },
+    messageIncludes: "lifecycle",
+  },
+  {
+    route: "note.create",
+    expectedStatus: 400,
+    body: {
+      noteId: "note-http-negative-1",
+      body: "   ",
+      actor: ACTOR,
+      at: "2026-02-26T11:12:30.000Z",
+    },
+    messageIncludes: "body",
+  },
+  {
+    route: "note.update",
+    expectedStatus: 404,
+    body: {
+      noteId: "note-http-negative-missing-1",
+      body: "Update missing note",
+      actor: ACTOR,
+      at: "2026-02-26T11:12:40.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "note.linkEntity",
+    expectedStatus: 404,
+    body: {
+      noteId: "note-http-negative-missing-2",
+      entityRef: "task:task-http-negative-1",
+      actor: ACTOR,
+      at: "2026-02-26T11:12:50.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "note.unlinkEntity",
+    expectedStatus: 404,
+    body: {
+      noteId: "note-http-negative-missing-3",
+      entityRef: "task:task-http-negative-1",
+      actor: ACTOR,
+      at: "2026-02-26T11:13:00.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "note.list",
+    expectedStatus: 400,
+    body: {
+      entityRef: "   ",
+    },
+    messageIncludes: "entityRef",
+  },
+  {
+    route: "notification.list",
+    expectedStatus: 400,
+    body: {
+      status: "unknown",
+    },
+    messageIncludes: "status",
+  },
+  {
+    route: "notification.acknowledge",
+    expectedStatus: 404,
+    body: {
+      notificationId: "notification-http-negative-missing-1",
+      actor: ACTOR,
+      at: "2026-02-26T11:13:10.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "notification.dismiss",
+    expectedStatus: 404,
+    body: {
+      notificationId: "notification-http-negative-missing-2",
+      actor: ACTOR,
+      at: "2026-02-26T11:13:20.000Z",
+    },
+    messageIncludes: "was not found",
+  },
+  {
+    route: "search.query",
+    expectedStatus: 400,
+    body: {
+      query: "   ",
+      entityTypes: ["task"],
+      limit: 5,
+    },
+    messageIncludes: "query",
+  },
+  {
     route: "approval.requestEventSync",
     expectedStatus: 409,
     setup: async ({ dispatch }) => {
@@ -925,33 +1247,36 @@ describe("workflow-api http integration", () => {
     });
   }
 
-  test("job.list and activity.list accept omitted JSON bodies", async () => {
+  test("list routes accept omitted JSON bodies", async () => {
     const platform = await Effect.runPromise(buildCorePlatform());
     const dispatcher = makeWorkflowHttpDispatcher(
       makeWorkflowRoutes(makeWorkflowApi({ platform })),
     );
 
-    const jobListResponse = await Effect.runPromise(
-      dispatcher({
-        method: "POST",
-        path: WORKFLOW_ROUTE_PATHS["job.list"],
-      }),
-    );
-    const activityListResponse = await Effect.runPromise(
-      dispatcher({
-        method: "POST",
-        path: WORKFLOW_ROUTE_PATHS["activity.list"],
-      }),
-    );
+    const routes: ReadonlyArray<WorkflowRouteKey> = [
+      "task.list",
+      "event.list",
+      "event.listConflicts",
+      "project.list",
+      "note.list",
+      "notification.list",
+      "job.list",
+      "activity.list",
+    ];
 
-    expect(jobListResponse).toEqual({
-      status: 200,
-      body: [],
-    });
-    expect(activityListResponse).toEqual({
-      status: 200,
-      body: [],
-    });
+    for (const route of routes) {
+      const response = await Effect.runPromise(
+        dispatcher({
+          method: "POST",
+          path: WORKFLOW_ROUTE_PATHS[route],
+        }),
+      );
+
+      expect(response).toEqual({
+        status: 200,
+        body: [],
+      });
+    }
   });
 
   test("activity.list returns sanitized 400 for non-boolean aiOnly", async () => {

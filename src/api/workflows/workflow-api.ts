@@ -2,12 +2,26 @@ import { Effect } from "effect";
 
 import { CorePlatform } from "../../core/app/core-platform";
 import {
+  AcknowledgeNotificationRequest,
   ListActivityRequest,
   ListJobsRequest,
+  ListNotificationsRequest,
+  ListNotesRequest,
+  ListProjectsRequest,
+  ListTasksRequest,
+  SearchQueryRequest,
   CompleteTaskRequest,
+  CreateEventRequest,
+  CreateNoteRequest,
+  CreateProjectRequest,
+  CreateTaskRequest,
   DeferTaskRequest,
+  DismissNotificationRequest,
   InspectWorkflowCheckpointRequest,
   InspectJobRunRequest,
+  LinkNoteEntityRequest,
+  ListEventConflictsRequest,
+  ListEventsRequest,
   ListJobRunHistoryRequest,
   KeepCheckpointRequest,
   RecoverCheckpointRequest,
@@ -15,7 +29,13 @@ import {
   RequestOutboundDraftExecutionRequest,
   RescheduleTaskRequest,
   RetryJobRequest,
+  SetProjectLifecycleRequest,
   TriageSignalRequest,
+  UnlinkNoteEntityRequest,
+  UpdateEventRequest,
+  UpdateNoteRequest,
+  UpdateProjectRequest,
+  UpdateTaskRequest,
   WorkflowApi,
   WorkflowRouteKey,
 } from "./contracts";
@@ -94,6 +114,125 @@ export const makeWorkflowApi = (
           input.actor,
           input.at,
         ),
+    ),
+    createTask: wrapHandler("task.create", (input: CreateTaskRequest) =>
+      platform.createTask(input),
+    ),
+    updateTask: wrapHandler("task.update", (input: UpdateTaskRequest) =>
+      platform.updateTask(input),
+    ),
+    listTasks: wrapHandler("task.list", (input: ListTasksRequest) =>
+      platform.listTasks({
+        status: input.status,
+        projectId: input.projectId,
+        scheduledFrom: input.scheduledFrom,
+        scheduledTo: input.scheduledTo,
+      }),
+    ),
+    createEvent: wrapHandler("event.create", (input: CreateEventRequest) =>
+      platform.createEvent(input),
+    ),
+    updateEvent: wrapHandler("event.update", (input: UpdateEventRequest) =>
+      platform.updateEvent(input),
+    ),
+    listEvents: wrapHandler("event.list", (input: ListEventsRequest) =>
+      platform.listEvents({
+        from: input.from,
+        to: input.to,
+        syncState: input.syncState,
+        sort: input.sort,
+        limit: input.limit,
+      }),
+    ),
+    listEventConflicts: wrapHandler(
+      "event.listConflicts",
+      (input: ListEventConflictsRequest) =>
+        platform.listEventConflicts(input.eventId),
+    ),
+    createProject: wrapHandler(
+      "project.create",
+      (input: CreateProjectRequest) => platform.createProject(input),
+    ),
+    updateProject: wrapHandler(
+      "project.update",
+      (input: UpdateProjectRequest) => platform.updateProject(input),
+    ),
+    setProjectLifecycle: wrapHandler(
+      "project.setLifecycle",
+      (input: SetProjectLifecycleRequest) =>
+        platform.setProjectLifecycle(
+          input.projectId,
+          input.lifecycle,
+          input.actor,
+          input.at,
+        ),
+    ),
+    listProjects: wrapHandler("project.list", (input: ListProjectsRequest) =>
+      platform.listProjects({
+        lifecycle: input.lifecycle,
+      }),
+    ),
+    createNote: wrapHandler("note.create", (input: CreateNoteRequest) =>
+      platform.createNote(input),
+    ),
+    updateNote: wrapHandler("note.update", (input: UpdateNoteRequest) =>
+      platform.updateNoteBody(input.noteId, input.body, input.actor, input.at),
+    ),
+    linkNoteEntity: wrapHandler(
+      "note.linkEntity",
+      (input: LinkNoteEntityRequest) =>
+        platform.linkNoteEntity(
+          input.noteId,
+          input.entityRef,
+          input.actor,
+          input.at,
+        ),
+    ),
+    unlinkNoteEntity: wrapHandler(
+      "note.unlinkEntity",
+      (input: UnlinkNoteEntityRequest) =>
+        platform.unlinkNoteEntity(
+          input.noteId,
+          input.entityRef,
+          input.actor,
+          input.at,
+        ),
+    ),
+    listNotes: wrapHandler("note.list", (input: ListNotesRequest) =>
+      platform.listNotes({
+        entityRef: input.entityRef,
+      }),
+    ),
+    listNotifications: wrapHandler(
+      "notification.list",
+      (input: ListNotificationsRequest) =>
+        platform.listNotifications({
+          status: input.status,
+          type: input.type,
+          relatedEntity: input.relatedEntity,
+          limit: input.limit,
+        }),
+    ),
+    acknowledgeNotification: wrapHandler(
+      "notification.acknowledge",
+      (input: AcknowledgeNotificationRequest) =>
+        platform.acknowledgeNotification(
+          input.notificationId,
+          input.actor,
+          input.at,
+        ),
+    ),
+    dismissNotification: wrapHandler(
+      "notification.dismiss",
+      (input: DismissNotificationRequest) =>
+        platform.dismissNotification(input.notificationId, input.actor, input.at),
+    ),
+    searchQuery: wrapHandler("search.query", (input: SearchQueryRequest) =>
+      platform.searchEntities({
+        query: input.query,
+        entityTypes: input.entityTypes,
+        limit: input.limit,
+      }),
     ),
     requestEventSync: wrapHandler(
       "approval.requestEventSync",

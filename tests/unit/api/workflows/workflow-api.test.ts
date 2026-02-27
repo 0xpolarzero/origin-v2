@@ -86,6 +86,134 @@ const rescheduleTaskInput = {
   actor: ACTOR,
   at: new Date("2026-02-23T10:10:00.000Z"),
 };
+const createTaskInput = {
+  taskId: "task-api-create-1",
+  title: "Create task from API",
+  description: "Task description",
+  scheduledFor: new Date("2026-02-24T08:00:00.000Z"),
+  dueAt: new Date("2026-02-24T17:00:00.000Z"),
+  projectId: "project-api-1",
+  sourceEntryId: "entry-api-1",
+  actor: ACTOR,
+  at: new Date("2026-02-23T10:10:30.000Z"),
+};
+const updateTaskInput = {
+  taskId: "task-api-1",
+  title: "Update task title",
+  description: "Updated task description",
+  scheduledFor: new Date("2026-02-24T12:00:00.000Z"),
+  dueAt: null,
+  projectId: "project-api-1",
+  actor: ACTOR,
+  at: new Date("2026-02-23T10:10:40.000Z"),
+};
+const listTasksInput = {
+  status: "planned" as const,
+  projectId: "project-api-1",
+  scheduledFrom: new Date("2026-02-23T00:00:00.000Z"),
+  scheduledTo: new Date("2026-02-25T00:00:00.000Z"),
+};
+const createEventInput = {
+  eventId: "event-api-create-1",
+  title: "Create event from API",
+  startAt: new Date("2026-02-24T13:00:00.000Z"),
+  endAt: new Date("2026-02-24T14:00:00.000Z"),
+  actor: ACTOR,
+  at: new Date("2026-02-23T10:10:50.000Z"),
+};
+const updateEventInput = {
+  eventId: "event-api-1",
+  title: "Updated event title",
+  startAt: new Date("2026-02-24T15:00:00.000Z"),
+  endAt: null,
+  actor: ACTOR,
+  at: new Date("2026-02-23T10:10:55.000Z"),
+};
+const listEventsInput = {
+  from: new Date("2026-02-23T00:00:00.000Z"),
+  to: new Date("2026-02-25T00:00:00.000Z"),
+  syncState: "local_only" as const,
+  sort: "startAt_asc" as const,
+  limit: 10,
+};
+const listEventConflictsInput = {
+  eventId: "event-api-1",
+};
+const createProjectInput = {
+  projectId: "project-api-create-1",
+  name: "Create project from API",
+  description: "Project description",
+  actor: ACTOR,
+  at: new Date("2026-02-23T10:11:00.000Z"),
+};
+const updateProjectInput = {
+  projectId: "project-api-1",
+  name: "Updated project name",
+  description: "Updated project description",
+  actor: ACTOR,
+  at: new Date("2026-02-23T10:11:05.000Z"),
+};
+const setProjectLifecycleInput = {
+  projectId: "project-api-1",
+  lifecycle: "paused" as const,
+  actor: ACTOR,
+  at: new Date("2026-02-23T10:11:10.000Z"),
+};
+const listProjectsInput = {
+  lifecycle: "active" as const,
+};
+const createNoteInput = {
+  noteId: "note-api-create-1",
+  body: "Create note from API",
+  linkedEntityRefs: ["task:task-api-1", "project:project-api-1"],
+  actor: ACTOR,
+  at: new Date("2026-02-23T10:11:15.000Z"),
+};
+const updateNoteInput = {
+  noteId: "note-api-1",
+  body: "Updated note body",
+  actor: ACTOR,
+  at: new Date("2026-02-23T10:11:20.000Z"),
+};
+const linkNoteEntityInput = {
+  noteId: "note-api-1",
+  entityRef: "task:task-api-1",
+  actor: ACTOR,
+  at: new Date("2026-02-23T10:11:25.000Z"),
+};
+const unlinkNoteEntityInput = {
+  noteId: "note-api-1",
+  entityRef: "task:task-api-1",
+  actor: ACTOR,
+  at: new Date("2026-02-23T10:11:30.000Z"),
+};
+const listNotesInput = {
+  entityRef: "task:task-api-1",
+};
+const listNotificationsInput = {
+  status: "pending" as const,
+  type: "event_sync_required",
+  relatedEntity: {
+    entityType: "event",
+    entityId: "event-api-1",
+  },
+  limit: 20,
+};
+const acknowledgeNotificationInput = {
+  notificationId: "notification-api-1",
+  actor: ACTOR,
+  at: new Date("2026-02-23T10:11:35.000Z"),
+};
+const dismissNotificationInput = {
+  notificationId: "notification-api-2",
+  actor: ACTOR,
+  at: new Date("2026-02-23T10:11:40.000Z"),
+};
+const searchQueryInput = {
+  query: "follow up",
+  entityTypes: ["task", "note"],
+  limit: 20,
+};
 const requestEventSyncInput = {
   eventId: "event-api-1",
   actor: ACTOR,
@@ -309,6 +437,235 @@ const HANDLER_CASES: ReadonlyArray<HandlerCase> = [
     }),
   },
   {
+    name: "createTask",
+    route: "task.create",
+    invoke: (api) => api.createTask!(createTaskInput),
+    expectedArgs: [createTaskInput],
+    setMethod: (impl) => ({
+      createTask: (input: unknown) => impl(input),
+    }),
+  },
+  {
+    name: "updateTask",
+    route: "task.update",
+    invoke: (api) => api.updateTask!(updateTaskInput),
+    expectedArgs: [updateTaskInput],
+    setMethod: (impl) => ({
+      updateTask: (input: unknown) => impl(input),
+    }),
+  },
+  {
+    name: "listTasks",
+    route: "task.list",
+    invoke: (api) => api.listTasks!(listTasksInput),
+    expectedArgs: [listTasksInput],
+    setMethod: (impl) => ({
+      listTasks: (input: unknown) => impl(input),
+    }),
+  },
+  {
+    name: "createEvent",
+    route: "event.create",
+    invoke: (api) => api.createEvent!(createEventInput),
+    expectedArgs: [createEventInput],
+    setMethod: (impl) => ({
+      createEvent: (input: unknown) => impl(input),
+    }),
+  },
+  {
+    name: "updateEvent",
+    route: "event.update",
+    invoke: (api) => api.updateEvent!(updateEventInput),
+    expectedArgs: [updateEventInput],
+    setMethod: (impl) => ({
+      updateEvent: (input: unknown) => impl(input),
+    }),
+  },
+  {
+    name: "listEvents",
+    route: "event.list",
+    invoke: (api) => api.listEvents!(listEventsInput),
+    expectedArgs: [listEventsInput],
+    setMethod: (impl) => ({
+      listEvents: (input: unknown) => impl(input),
+    }),
+  },
+  {
+    name: "listEventConflicts",
+    route: "event.listConflicts",
+    invoke: (api) => api.listEventConflicts!(listEventConflictsInput),
+    expectedArgs: [listEventConflictsInput.eventId],
+    setMethod: (impl) => ({
+      listEventConflicts: (eventId: string | undefined) => impl(eventId),
+    }),
+  },
+  {
+    name: "createProject",
+    route: "project.create",
+    invoke: (api) => api.createProject!(createProjectInput),
+    expectedArgs: [createProjectInput],
+    setMethod: (impl) => ({
+      createProject: (input: unknown) => impl(input),
+    }),
+  },
+  {
+    name: "updateProject",
+    route: "project.update",
+    invoke: (api) => api.updateProject!(updateProjectInput),
+    expectedArgs: [updateProjectInput],
+    setMethod: (impl) => ({
+      updateProject: (input: unknown) => impl(input),
+    }),
+  },
+  {
+    name: "setProjectLifecycle",
+    route: "project.setLifecycle",
+    invoke: (api) => api.setProjectLifecycle!(setProjectLifecycleInput),
+    expectedArgs: [
+      setProjectLifecycleInput.projectId,
+      setProjectLifecycleInput.lifecycle,
+      setProjectLifecycleInput.actor,
+      setProjectLifecycleInput.at,
+    ],
+    setMethod: (impl) => ({
+      setProjectLifecycle: (
+        projectId: string,
+        lifecycle: string,
+        actor: unknown,
+        at: Date,
+      ) => impl(projectId, lifecycle, actor, at),
+    }),
+  },
+  {
+    name: "listProjects",
+    route: "project.list",
+    invoke: (api) => api.listProjects!(listProjectsInput),
+    expectedArgs: [listProjectsInput],
+    setMethod: (impl) => ({
+      listProjects: (input: unknown) => impl(input),
+    }),
+  },
+  {
+    name: "createNote",
+    route: "note.create",
+    invoke: (api) => api.createNote!(createNoteInput),
+    expectedArgs: [createNoteInput],
+    setMethod: (impl) => ({
+      createNote: (input: unknown) => impl(input),
+    }),
+  },
+  {
+    name: "updateNote",
+    route: "note.update",
+    invoke: (api) => api.updateNote!(updateNoteInput),
+    expectedArgs: [
+      updateNoteInput.noteId,
+      updateNoteInput.body,
+      updateNoteInput.actor,
+      updateNoteInput.at,
+    ],
+    setMethod: (impl) => ({
+      updateNoteBody: (noteId: string, body: string, actor: unknown, at: Date) =>
+        impl(noteId, body, actor, at),
+    }),
+  },
+  {
+    name: "linkNoteEntity",
+    route: "note.linkEntity",
+    invoke: (api) => api.linkNoteEntity!(linkNoteEntityInput),
+    expectedArgs: [
+      linkNoteEntityInput.noteId,
+      linkNoteEntityInput.entityRef,
+      linkNoteEntityInput.actor,
+      linkNoteEntityInput.at,
+    ],
+    setMethod: (impl) => ({
+      linkNoteEntity: (
+        noteId: string,
+        entityRef: string,
+        actor: unknown,
+        at: Date,
+      ) => impl(noteId, entityRef, actor, at),
+    }),
+  },
+  {
+    name: "unlinkNoteEntity",
+    route: "note.unlinkEntity",
+    invoke: (api) => api.unlinkNoteEntity!(unlinkNoteEntityInput),
+    expectedArgs: [
+      unlinkNoteEntityInput.noteId,
+      unlinkNoteEntityInput.entityRef,
+      unlinkNoteEntityInput.actor,
+      unlinkNoteEntityInput.at,
+    ],
+    setMethod: (impl) => ({
+      unlinkNoteEntity: (
+        noteId: string,
+        entityRef: string,
+        actor: unknown,
+        at: Date,
+      ) => impl(noteId, entityRef, actor, at),
+    }),
+  },
+  {
+    name: "listNotes",
+    route: "note.list",
+    invoke: (api) => api.listNotes!(listNotesInput),
+    expectedArgs: [listNotesInput],
+    setMethod: (impl) => ({
+      listNotes: (input: unknown) => impl(input),
+    }),
+  },
+  {
+    name: "listNotifications",
+    route: "notification.list",
+    invoke: (api) => api.listNotifications!(listNotificationsInput),
+    expectedArgs: [listNotificationsInput],
+    setMethod: (impl) => ({
+      listNotifications: (input: unknown) => impl(input),
+    }),
+  },
+  {
+    name: "acknowledgeNotification",
+    route: "notification.acknowledge",
+    invoke: (api) => api.acknowledgeNotification!(acknowledgeNotificationInput),
+    expectedArgs: [
+      acknowledgeNotificationInput.notificationId,
+      acknowledgeNotificationInput.actor,
+      acknowledgeNotificationInput.at,
+    ],
+    setMethod: (impl) => ({
+      acknowledgeNotification: (
+        notificationId: string,
+        actor: unknown,
+        at: Date,
+      ) => impl(notificationId, actor, at),
+    }),
+  },
+  {
+    name: "dismissNotification",
+    route: "notification.dismiss",
+    invoke: (api) => api.dismissNotification!(dismissNotificationInput),
+    expectedArgs: [
+      dismissNotificationInput.notificationId,
+      dismissNotificationInput.actor,
+      dismissNotificationInput.at,
+    ],
+    setMethod: (impl) => ({
+      dismissNotification: (notificationId: string, actor: unknown, at: Date) =>
+        impl(notificationId, actor, at),
+    }),
+  },
+  {
+    name: "searchQuery",
+    route: "search.query",
+    invoke: (api) => api.searchQuery!(searchQueryInput),
+    expectedArgs: [searchQueryInput],
+    setMethod: (impl) => ({
+      searchEntities: (input: unknown) => impl(input),
+    }),
+  },
+  {
     name: "requestEventSync",
     route: "approval.requestEventSync",
     invoke: (api) => api.requestEventSync(requestEventSyncInput),
@@ -490,21 +847,34 @@ describe("api/workflows/workflow-api", () => {
 
     expect(Object.keys(api).sort()).toEqual([
       "acceptEntryAsTask",
+      "acknowledgeNotification",
       "approveOutboundAction",
       "captureEntry",
       "completeTask",
       "convertSignal",
+      "createEvent",
       "createJob",
+      "createNote",
+      "createProject",
+      "createTask",
       "createWorkflowCheckpoint",
       "deferTask",
+      "dismissNotification",
       "editEntrySuggestion",
       "ingestSignal",
       "inspectJobRun",
       "inspectWorkflowCheckpoint",
       "keepCheckpoint",
+      "linkNoteEntity",
       "listActivity",
+      "listEventConflicts",
+      "listEvents",
       "listJobRunHistory",
       "listJobs",
+      "listNotes",
+      "listNotifications",
+      "listProjects",
+      "listTasks",
       "recordJobRun",
       "recoverCheckpoint",
       "rejectEntrySuggestion",
@@ -512,8 +882,15 @@ describe("api/workflows/workflow-api", () => {
       "requestOutboundDraftExecution",
       "rescheduleTask",
       "retryJob",
+      "searchQuery",
+      "setProjectLifecycle",
       "suggestEntryAsTask",
       "triageSignal",
+      "unlinkNoteEntity",
+      "updateEvent",
+      "updateNote",
+      "updateProject",
+      "updateTask",
     ]);
   });
 

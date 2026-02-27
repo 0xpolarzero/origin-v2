@@ -25,6 +25,26 @@ const REQUIRED_ROUTE_KEYS: ReadonlyArray<WorkflowRouteKey> = [
   "planning.completeTask",
   "planning.deferTask",
   "planning.rescheduleTask",
+  "task.create",
+  "task.update",
+  "task.list",
+  "event.create",
+  "event.update",
+  "event.list",
+  "event.listConflicts",
+  "project.create",
+  "project.update",
+  "project.setLifecycle",
+  "project.list",
+  "note.create",
+  "note.update",
+  "note.linkEntity",
+  "note.unlinkEntity",
+  "note.list",
+  "notification.list",
+  "notification.acknowledge",
+  "notification.dismiss",
+  "search.query",
   "approval.requestEventSync",
   "approval.requestOutboundDraftExecution",
   "approval.approveOutboundAction",
@@ -108,6 +128,134 @@ const VALID_ROUTE_INPUTS: Record<WorkflowRouteKey, unknown> = {
     nextAt: new Date("2026-02-24T12:00:00.000Z"),
     actor: ACTOR,
     at: AT,
+  },
+  "task.create": {
+    taskId: "task-route-created-1",
+    title: "Create task from route",
+    description: "Task description",
+    scheduledFor: new Date("2026-02-24T08:00:00.000Z"),
+    dueAt: new Date("2026-02-24T17:00:00.000Z"),
+    projectId: "project-route-1",
+    sourceEntryId: "entry-route-1",
+    actor: ACTOR,
+    at: AT,
+  },
+  "task.update": {
+    taskId: "task-route-1",
+    title: "Updated task title",
+    description: "Updated description",
+    scheduledFor: new Date("2026-02-25T09:00:00.000Z"),
+    dueAt: null,
+    projectId: "project-route-1",
+    actor: ACTOR,
+    at: AT,
+  },
+  "task.list": {
+    status: "planned",
+    projectId: "project-route-1",
+    scheduledFrom: new Date("2026-02-23T00:00:00.000Z"),
+    scheduledTo: new Date("2026-02-26T00:00:00.000Z"),
+  },
+  "event.create": {
+    eventId: "event-route-created-1",
+    title: "Route-created event",
+    startAt: new Date("2026-02-24T09:00:00.000Z"),
+    endAt: new Date("2026-02-24T10:00:00.000Z"),
+    actor: ACTOR,
+    at: AT,
+  },
+  "event.update": {
+    eventId: "event-route-1",
+    title: "Updated route event",
+    startAt: new Date("2026-02-24T11:00:00.000Z"),
+    endAt: null,
+    actor: ACTOR,
+    at: AT,
+  },
+  "event.list": {
+    from: new Date("2026-02-23T00:00:00.000Z"),
+    to: new Date("2026-02-26T00:00:00.000Z"),
+    syncState: "local_only",
+    sort: "startAt_asc",
+    limit: 10,
+  },
+  "event.listConflicts": {
+    eventId: "event-route-1",
+  },
+  "project.create": {
+    projectId: "project-route-created-1",
+    name: "Route-created project",
+    description: "Project description",
+    actor: ACTOR,
+    at: AT,
+  },
+  "project.update": {
+    projectId: "project-route-1",
+    name: "Updated project name",
+    description: "Updated project description",
+    actor: ACTOR,
+    at: AT,
+  },
+  "project.setLifecycle": {
+    projectId: "project-route-1",
+    lifecycle: "paused",
+    actor: ACTOR,
+    at: AT,
+  },
+  "project.list": {
+    lifecycle: "active",
+  },
+  "note.create": {
+    noteId: "note-route-created-1",
+    body: "Note body from route",
+    linkedEntityRefs: ["task:task-route-1", "project:project-route-1"],
+    actor: ACTOR,
+    at: AT,
+  },
+  "note.update": {
+    noteId: "note-route-1",
+    body: "Updated note body",
+    actor: ACTOR,
+    at: AT,
+  },
+  "note.linkEntity": {
+    noteId: "note-route-1",
+    entityRef: "task:task-route-1",
+    actor: ACTOR,
+    at: AT,
+  },
+  "note.unlinkEntity": {
+    noteId: "note-route-1",
+    entityRef: "task:task-route-1",
+    actor: ACTOR,
+    at: AT,
+  },
+  "note.list": {
+    entityRef: "task:task-route-1",
+  },
+  "notification.list": {
+    status: "pending",
+    type: "event_sync_required",
+    relatedEntity: {
+      entityType: "event",
+      entityId: "event-route-1",
+    },
+    limit: 10,
+  },
+  "notification.acknowledge": {
+    notificationId: "notification-route-1",
+    actor: ACTOR,
+    at: AT,
+  },
+  "notification.dismiss": {
+    notificationId: "notification-route-1",
+    actor: ACTOR,
+    at: AT,
+  },
+  "search.query": {
+    query: "follow up",
+    entityTypes: ["task", "note"],
+    limit: 10,
   },
   "approval.requestEventSync": {
     eventId: "event-route-1",
@@ -202,6 +350,26 @@ const makeApiStub = (): WorkflowApi => ({
   completeTask: (_input) => Effect.die("unused"),
   deferTask: (_input) => Effect.die("unused"),
   rescheduleTask: (_input) => Effect.die("unused"),
+  createTask: (_input) => Effect.die("unused"),
+  updateTask: (_input) => Effect.die("unused"),
+  listTasks: (_input) => Effect.die("unused"),
+  createEvent: (_input) => Effect.die("unused"),
+  updateEvent: (_input) => Effect.die("unused"),
+  listEvents: (_input) => Effect.die("unused"),
+  listEventConflicts: (_input) => Effect.die("unused"),
+  createProject: (_input) => Effect.die("unused"),
+  updateProject: (_input) => Effect.die("unused"),
+  setProjectLifecycle: (_input) => Effect.die("unused"),
+  listProjects: (_input) => Effect.die("unused"),
+  createNote: (_input) => Effect.die("unused"),
+  updateNote: (_input) => Effect.die("unused"),
+  linkNoteEntity: (_input) => Effect.die("unused"),
+  unlinkNoteEntity: (_input) => Effect.die("unused"),
+  listNotes: (_input) => Effect.die("unused"),
+  listNotifications: (_input) => Effect.die("unused"),
+  acknowledgeNotification: (_input) => Effect.die("unused"),
+  dismissNotification: (_input) => Effect.die("unused"),
+  searchQuery: (_input) => Effect.die("unused"),
   requestEventSync: (_input) => Effect.die("unused"),
   requestOutboundDraftExecution: (_input) => Effect.die("unused"),
   approveOutboundAction: (_input) => Effect.die("unused"),
@@ -276,6 +444,106 @@ const makeApiSpy = (
       Effect.sync(() => {
         onCall("planning.rescheduleTask", input);
         return "planning.rescheduleTask";
+      }),
+    createTask: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("task.create", input);
+        return "task.create";
+      }),
+    updateTask: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("task.update", input);
+        return "task.update";
+      }),
+    listTasks: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("task.list", input);
+        return "task.list";
+      }),
+    createEvent: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("event.create", input);
+        return "event.create";
+      }),
+    updateEvent: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("event.update", input);
+        return "event.update";
+      }),
+    listEvents: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("event.list", input);
+        return "event.list";
+      }),
+    listEventConflicts: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("event.listConflicts", input);
+        return "event.listConflicts";
+      }),
+    createProject: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("project.create", input);
+        return "project.create";
+      }),
+    updateProject: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("project.update", input);
+        return "project.update";
+      }),
+    setProjectLifecycle: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("project.setLifecycle", input);
+        return "project.setLifecycle";
+      }),
+    listProjects: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("project.list", input);
+        return "project.list";
+      }),
+    createNote: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("note.create", input);
+        return "note.create";
+      }),
+    updateNote: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("note.update", input);
+        return "note.update";
+      }),
+    linkNoteEntity: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("note.linkEntity", input);
+        return "note.linkEntity";
+      }),
+    unlinkNoteEntity: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("note.unlinkEntity", input);
+        return "note.unlinkEntity";
+      }),
+    listNotes: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("note.list", input);
+        return "note.list";
+      }),
+    listNotifications: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("notification.list", input);
+        return "notification.list";
+      }),
+    acknowledgeNotification: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("notification.acknowledge", input);
+        return "notification.acknowledge";
+      }),
+    dismissNotification: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("notification.dismiss", input);
+        return "notification.dismiss";
+      }),
+    searchQuery: (input: unknown) =>
+      Effect.sync(() => {
+        onCall("search.query", input);
+        return "search.query";
       }),
     requestEventSync: (input: unknown) =>
       Effect.sync(() => {
@@ -449,6 +717,12 @@ describe("api/workflows/routes", () => {
   test("route handlers enforce undefined payload rules by route requirements", async () => {
     const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
     const routesAcceptingOmittedBody = new Set<WorkflowRouteKey>([
+      "task.list",
+      "event.list",
+      "event.listConflicts",
+      "project.list",
+      "note.list",
+      "notification.list",
       "job.list",
       "activity.list",
     ]);
@@ -517,6 +791,20 @@ describe("api/workflows/routes", () => {
       { route: "signal.convert", messageIncludes: "signalId" },
       { route: "planning.completeTask", messageIncludes: "taskId" },
       { route: "planning.rescheduleTask", messageIncludes: "taskId" },
+      { route: "task.create", messageIncludes: "title" },
+      { route: "task.update", messageIncludes: "taskId" },
+      { route: "event.create", messageIncludes: "title" },
+      { route: "event.update", messageIncludes: "eventId" },
+      { route: "project.create", messageIncludes: "name" },
+      { route: "project.update", messageIncludes: "projectId" },
+      { route: "project.setLifecycle", messageIncludes: "projectId" },
+      { route: "note.create", messageIncludes: "body" },
+      { route: "note.update", messageIncludes: "noteId" },
+      { route: "note.linkEntity", messageIncludes: "noteId" },
+      { route: "note.unlinkEntity", messageIncludes: "noteId" },
+      { route: "notification.acknowledge", messageIncludes: "notificationId" },
+      { route: "notification.dismiss", messageIncludes: "notificationId" },
+      { route: "search.query", messageIncludes: "query" },
       { route: "job.recordRun", messageIncludes: "jobId" },
       { route: "job.inspectRun", messageIncludes: "jobId" },
     ];
@@ -609,6 +897,56 @@ describe("api/workflows/routes", () => {
           at: AT,
         },
         messageIncludes: "nextAt",
+      },
+      {
+        route: "task.list",
+        payload: {
+          status: "unknown",
+        },
+        messageIncludes: "status",
+      },
+      {
+        route: "event.list",
+        payload: {
+          syncState: "unknown",
+        },
+        messageIncludes: "syncState",
+      },
+      {
+        route: "event.listConflicts",
+        payload: {
+          eventId: "   ",
+        },
+        messageIncludes: "eventId",
+      },
+      {
+        route: "project.list",
+        payload: {
+          lifecycle: "archived",
+        },
+        messageIncludes: "lifecycle",
+      },
+      {
+        route: "note.list",
+        payload: {
+          entityRef: "   ",
+        },
+        messageIncludes: "entityRef",
+      },
+      {
+        route: "notification.list",
+        payload: {
+          status: "unknown",
+        },
+        messageIncludes: "status",
+      },
+      {
+        route: "search.query",
+        payload: {
+          query: "follow up",
+          entityTypes: ["task", 1],
+        },
+        messageIncludes: "entityTypes",
       },
       {
         route: "job.recordRun",
