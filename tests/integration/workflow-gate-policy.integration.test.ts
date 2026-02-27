@@ -259,7 +259,7 @@ describe("workflow gate policy integration", () => {
     expect(db.verifyCommands).toContain("bun run test:integration:db");
   });
 
-  test("API testing tickets resolve to typecheck + API integration tests", () => {
+  test("API testing tickets resolve to pre-land checks + API integration tests", () => {
     const scripts = readPackageScripts();
     const config = buildGateCommandConfig("bun", scripts);
 
@@ -273,10 +273,14 @@ describe("workflow gate policy integration", () => {
 
     expect(apiTesting.verifyCommands).toEqual([
       "bun run typecheck",
+      "bun run build",
+      "bun run lint",
       "bun run test:integration:api",
     ]);
     expect(apiTesting.validationCommands).toEqual([
       "bun run typecheck",
+      "bun run build",
+      "bun run lint",
       "bun run test:integration:api",
     ]);
     expect(apiTesting.testSuites).toEqual([
