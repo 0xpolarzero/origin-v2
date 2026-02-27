@@ -57,6 +57,35 @@ import {
   loadSignalsSurface,
   type SignalsSurfaceState,
 } from "../ui/workflows/signals-surface";
+import {
+  loadTasksSurface,
+  type TasksSurfaceState,
+} from "../ui/workflows/tasks-surface";
+import {
+  loadEventsSurface,
+  type EventsSurfaceState,
+} from "../ui/workflows/events-surface";
+import {
+  loadProjectsSurface,
+  type ProjectsSurfaceState,
+} from "../ui/workflows/projects-surface";
+import {
+  loadNotesSurface,
+  type NotesSurfaceState,
+} from "../ui/workflows/notes-surface";
+import {
+  loadNotificationsSurface,
+  type NotificationsSurfaceState,
+} from "../ui/workflows/notifications-surface";
+import {
+  loadSearchSurface,
+  type SearchSurfaceState,
+} from "../ui/workflows/search-surface";
+import {
+  loadSettingsSurface,
+  type SettingsSurfaceState,
+} from "../ui/workflows/settings-surface";
+import { type WorkflowSurfaceCorePort } from "../ui/workflows/workflow-surface-core-port";
 import { makeWorkflowSurfaceClient } from "../ui/workflows/workflow-surface-client";
 import { makeWorkflowSurfaceFiltersStore } from "../ui/workflows/workflow-surface-filters";
 
@@ -71,6 +100,13 @@ export interface InteractiveWorkflowAppState {
   inbox: InboxSurfaceState;
   signals: SignalsSurfaceState;
   plan: PlanSurfaceState;
+  tasks: TasksSurfaceState;
+  events: EventsSurfaceState;
+  projects: ProjectsSurfaceState;
+  notes: NotesSurfaceState;
+  notifications: NotificationsSurfaceState;
+  search: SearchSurfaceState;
+  settings: SettingsSurfaceState;
   jobs: JobsSurfaceState;
   activity: ActivitySurfaceState;
   pendingEventApprovals: ReadonlyArray<Event>;
@@ -223,6 +259,42 @@ const emptyPlanState: PlanSurfaceState = {
   filters: {},
 };
 
+const emptyTasksState: TasksSurfaceState = {
+  tasks: [],
+  filters: {},
+};
+
+const emptyEventsState: EventsSurfaceState = {
+  events: [],
+  pendingApprovalCount: 0,
+  filters: {},
+};
+
+const emptyProjectsState: ProjectsSurfaceState = {
+  projects: [],
+  filters: {},
+};
+
+const emptyNotesState: NotesSurfaceState = {
+  notes: [],
+  filters: {},
+};
+
+const emptyNotificationsState: NotificationsSurfaceState = {
+  notifications: [],
+  filters: {},
+};
+
+const emptySearchState: SearchSurfaceState = {
+  query: "",
+  results: [],
+  scannedEntityTypes: [],
+};
+
+const emptySettingsState: SettingsSurfaceState = {
+  values: {},
+};
+
 const emptyJobsState: JobsSurfaceState = {
   jobs: [],
   history: [],
@@ -238,6 +310,13 @@ const emptyInteractiveWorkflowAppState = (): InteractiveWorkflowAppState => ({
   inbox: emptyInboxState,
   signals: emptySignalsState,
   plan: emptyPlanState,
+  tasks: emptyTasksState,
+  events: emptyEventsState,
+  projects: emptyProjectsState,
+  notes: emptyNotesState,
+  notifications: emptyNotificationsState,
+  search: emptySearchState,
+  settings: emptySettingsState,
   jobs: emptyJobsState,
   activity: emptyActivityState,
   pendingEventApprovals: [],
@@ -293,6 +372,28 @@ const summarizePlanStatuses = (
   };
 };
 
+const createCachedSurfaceCorePort = (
+  port: WorkflowSurfaceCorePort,
+): WorkflowSurfaceCorePort => {
+  const cache = new Map<string, ReadonlyArray<unknown>>();
+
+  return {
+    getEntity: port.getEntity,
+    upsertMemory: port.upsertMemory,
+    listEntities: <T>(entityType: string) =>
+      Effect.gen(function* () {
+        const cached = cache.get(entityType);
+        if (cached) {
+          return cached as ReadonlyArray<T>;
+        }
+
+        const loaded = yield* port.listEntities<T>(entityType);
+        cache.set(entityType, loaded as ReadonlyArray<unknown>);
+        return loaded;
+      }),
+  };
+};
+
 export const makeInteractiveWorkflowApp = (
   options: MakeInteractiveWorkflowAppOptions,
 ): InteractiveWorkflowApp => {
@@ -341,20 +442,52 @@ export const makeInteractiveWorkflowApp = (
     nextActivityFilters?: ListActivityRequest,
   ): Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError> =>
     Effect.gen(function* () {
-      const [inbox, signals, plan, jobs, activity, events, drafts] = yield* Effect.all([
-        loadInboxSurface(options.platform),
-        loadSignalsSurface(options.platform),
-        loadPlanSurface(options.platform),
+      const surfacePort = createCachedSurfaceCorePort(options.platform);
+      const [
+        inbox,
+        signals,
+        plan,
+        tasks,
+        eventsSurface,
+        projects,
+        notes,
+        notifications,
+        search,
+        settings,
+        jobs,
+        activity,
+        events,
+        drafts,
+      ] = yield* Effect.all([
+        loadInboxSurface(surfacePort),
+        loadSignalsSurface(surfacePort),
+        loadPlanSurface(surfacePort),
+        loadTasksSurface(surfacePort),
+        loadEventsSurface(surfacePort),
+        loadProjectsSurface(surfacePort),
+        loadNotesSurface(surfacePort),
+        loadNotificationsSurface(surfacePort),
+        loadSearchSurface(surfacePort, {
+          query: "",
+        }),
+        loadSettingsSurface(surfacePort),
         loadJobsSurface(client, filtersStore, nextJobsFilters),
         loadActivitySurface(client, filtersStore, nextActivityFilters),
-        options.platform.listEntities<Event>("event"),
-        options.platform.listEntities<OutboundDraft>("outbound_draft"),
+        surfacePort.listEntities<Event>("event"),
+        surfacePort.listEntities<OutboundDraft>("outbound_draft"),
       ]);
 
       state = withNow({
         inbox,
         signals,
         plan,
+        tasks,
+        events: eventsSurface,
+        projects,
+        notes,
+        notifications,
+        search,
+        settings,
         jobs,
         activity,
         pendingEventApprovals: events.filter(
@@ -607,6 +740,13 @@ const surfaceSummary = (state: InteractiveWorkflowAppState): string => {
     `Suggestions: ${state.inbox.suggestions.length}`,
     `Signals: ${state.signals.signals.length}`,
     `Plan(planned/deferred/completed): ${plan.planned}/${plan.deferred}/${plan.completed}`,
+    `Tasks: ${state.tasks.tasks.length}`,
+    `Events: ${state.events.events.length}`,
+    `Projects: ${state.projects.projects.length}`,
+    `Notes: ${state.notes.notes.length}`,
+    `Notifications: ${state.notifications.notifications.length}`,
+    `Search results: ${state.search.results.length}`,
+    `Settings: ${Object.keys(state.settings.values).length}`,
     `Pending approvals(event/draft): ${state.pendingEventApprovals.length}/${state.pendingOutboundDraftApprovals.length}`,
     `Jobs: ${state.jobs.jobs.length}`,
     `Activity: ${state.activity.feed.length}`,
