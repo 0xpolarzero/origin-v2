@@ -4,6 +4,7 @@ node_modules/
 # generated runtime artifacts
 .smithers/
 .super-ralph/
+dist/
 
 # logs
 *.log
