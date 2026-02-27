@@ -6,9 +6,7 @@ import { ActorRef, ENTITY_TYPES } from "../domain/common";
 import { createJob, CreateJobInput, Job } from "../domain/job";
 import { View } from "../domain/view";
 import { CoreRepository } from "../repositories/core-repository";
-import { makeFileCoreRepository } from "../repositories/file-core-repository";
 import { makeInMemoryCoreRepository } from "../repositories/in-memory-core-repository";
-import { makeSqliteCoreRepository } from "../repositories/sqlite/sqlite-core-repository";
 import {
   approveOutboundAction,
   ApproveOutboundActionInput,
@@ -208,6 +206,12 @@ export interface CorePlatform {
 const toNativeError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
+const FILE_REPOSITORY_MODULE_PATH = "../repositories/file-core-repository";
+const SQLITE_REPOSITORY_MODULE_PATH =
+  "../repositories/sqlite/sqlite-core-repository";
+type FileRepositoryModule = typeof import("../repositories/file-core-repository");
+type SqliteRepositoryModule = typeof import("../repositories/sqlite/sqlite-core-repository");
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -235,9 +239,17 @@ const importLegacySnapshotIntoEmptyRepository = (
   snapshotPath: string,
 ): Effect.Effect<void, Error> =>
   Effect.gen(function* () {
-    const snapshotRepository = yield* makeFileCoreRepository(snapshotPath).pipe(
-      Effect.mapError((error) => new Error(error.message)),
-    );
+    const snapshotRepositoryFactory = yield* Effect.tryPromise({
+      try: () =>
+        import(
+          /* @vite-ignore */
+          FILE_REPOSITORY_MODULE_PATH
+        ) as Promise<FileRepositoryModule>,
+      catch: toNativeError,
+    });
+    const snapshotRepository = yield* snapshotRepositoryFactory
+      .makeFileCoreRepository(snapshotPath)
+      .pipe(Effect.mapError((error) => new Error(toNativeError(error).message)));
 
     if (snapshotRepository.loadSnapshot) {
       yield* snapshotRepository.loadSnapshot(snapshotPath);
@@ -291,15 +303,39 @@ export const buildCorePlatform = (
       }
 
       if (options.databasePath) {
-        return makeSqliteCoreRepository({
-          databasePath: options.databasePath,
-          runMigrationsOnInit: options.runMigrationsOnInit,
-        }).pipe(Effect.mapError((error) => new Error(error.message)));
+        const databasePath = options.databasePath;
+        return Effect.tryPromise({
+          try: () =>
+            import(
+              /* @vite-ignore */
+              SQLITE_REPOSITORY_MODULE_PATH
+            ) as Promise<SqliteRepositoryModule>,
+          catch: toNativeError,
+        }).pipe(
+          Effect.flatMap((sqliteRepositoryFactory) =>
+            sqliteRepositoryFactory.makeSqliteCoreRepository({
+              databasePath,
+              runMigrationsOnInit: options.runMigrationsOnInit,
+            }),
+          ),
+          Effect.mapError((error) => new Error(toNativeError(error).message)),
+        );
       }
 
       if (options.snapshotPath) {
-        return makeFileCoreRepository(options.snapshotPath).pipe(
-          Effect.mapError((error) => new Error(error.message)),
+        const snapshotPath = options.snapshotPath;
+        return Effect.tryPromise({
+          try: () =>
+            import(
+              /* @vite-ignore */
+              FILE_REPOSITORY_MODULE_PATH
+            ) as Promise<FileRepositoryModule>,
+          catch: toNativeError,
+        }).pipe(
+          Effect.flatMap((fileRepositoryFactory) =>
+            fileRepositoryFactory.makeFileCoreRepository(snapshotPath),
+          ),
+          Effect.mapError((error) => new Error(toNativeError(error).message)),
         );
       }
 
