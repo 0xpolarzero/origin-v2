@@ -1698,6 +1698,72 @@ describe("api/workflows/routes", () => {
     expect((retryCall?.input as { at: unknown }).at).toBeInstanceOf(Date);
   });
 
+  test("capture.suggest validator accepts aiAssist when suggestedTitle is omitted", async () => {
+    const calls: Array<{ route: WorkflowRouteKey; input: unknown }> = [];
+    const routes = makeWorkflowRoutes(
+      makeApiSpy((route, input) => {
+        calls.push({ route, input });
+      }),
+    );
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const suggestRoute = byKey.get("capture.suggest");
+
+    expect(suggestRoute).toBeDefined();
+
+    await Effect.runPromise(
+      suggestRoute!.handle({
+        entryId: "entry-route-ai-1",
+        actor: ACTOR,
+        aiAssist: true,
+        at: "2026-02-23T11:00:00.000Z",
+      }),
+    );
+
+    const suggestCall = calls.find((call) => call.route === "capture.suggest");
+    expect(suggestCall).toBeDefined();
+    expect(suggestCall?.input).toMatchObject({
+      entryId: "entry-route-ai-1",
+      aiAssist: true,
+    });
+    expect((suggestCall?.input as { at: unknown }).at).toBeInstanceOf(Date);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        (suggestCall?.input as Record<string, unknown>) ?? {},
+        "suggestedTitle",
+      ),
+    ).toBe(true);
+    expect(
+      (suggestCall?.input as { suggestedTitle?: unknown }).suggestedTitle,
+    ).toBeUndefined();
+  });
+
+  test("capture.suggest validator rejects non-boolean aiAssist", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const byKey = new Map(routes.map((route) => [route.key, route]));
+    const suggestRoute = byKey.get("capture.suggest");
+
+    expect(suggestRoute).toBeDefined();
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        suggestRoute!.handle({
+          entryId: "entry-route-ai-2",
+          actor: ACTOR,
+          aiAssist: "true",
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        _tag: "WorkflowApiError",
+        route: "capture.suggest",
+      });
+      expect(result.left.message).toContain("aiAssist");
+    }
+  });
+
   test("route handlers coerce ISO timestamp strings for workflow payloads", async () => {
     const calls: Array<{ route: WorkflowRouteKey; input: unknown }> = [];
     const routes = makeWorkflowRoutes(

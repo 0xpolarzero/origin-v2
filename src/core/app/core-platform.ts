@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { createAuditTransition } from "../domain/audit-transition";
 import { Checkpoint } from "../domain/checkpoint";
 import { ActorRef, ENTITY_TYPES } from "../domain/common";
+import { Entry } from "../domain/entry";
 import { createJob, CreateJobInput, Job } from "../domain/job";
 import { View } from "../domain/view";
 import { CoreRepository } from "../repositories/core-repository";
@@ -17,6 +18,8 @@ import {
   listActivityFeed,
   ListActivityFeedInput,
 } from "../services/activity-service";
+import type { WorkflowAiRuntime } from "../services/ai/ai-runtime";
+import { makeWorkflowAiOrchestrator } from "../services/ai/workflow-ai-orchestrator";
 import {
   createWorkflowCheckpoint,
   CreateWorkflowCheckpointInput,
@@ -31,10 +34,10 @@ import {
   CaptureEntryInput,
   editEntrySuggestion,
   EditEntrySuggestionInput,
+  EntryServiceError,
   rejectEntrySuggestion,
   RejectEntrySuggestionInput,
   suggestEntryAsTask,
-  SuggestEntryAsTaskInput,
 } from "../services/entry-service";
 import {
   createEventInService,
@@ -50,6 +53,7 @@ import {
   JobListItem,
   JobRunHistoryRecord,
   JobRunInspection,
+  JobServiceError,
   listJobs,
   listJobRunHistory,
   recordJobRun,
@@ -122,11 +126,20 @@ export interface BuildCorePlatformOptions {
   loadSnapshotOnInit?: boolean;
   importSnapshotIntoDatabase?: boolean;
   outboundActionPort?: OutboundActionPort;
+  aiRuntime?: WorkflowAiRuntime;
 }
 
 export interface CreateJobInPlatformInput extends CreateJobInput {
   jobId?: string;
   actor?: ActorRef;
+  at?: Date;
+}
+
+export interface SuggestEntryAsTaskRequest {
+  entryId: string;
+  suggestedTitle?: string;
+  aiAssist?: boolean;
+  actor: ActorRef;
   at?: Date;
 }
 
@@ -136,7 +149,7 @@ export interface CorePlatform {
     input: AcceptEntryAsTaskInput,
   ) => ReturnType<typeof acceptEntryAsTask>;
   suggestEntryAsTask: (
-    input: SuggestEntryAsTaskInput,
+    input: SuggestEntryAsTaskRequest,
   ) => ReturnType<typeof suggestEntryAsTask>;
   editEntrySuggestion: (
     input: EditEntrySuggestionInput,
@@ -512,6 +525,10 @@ export const buildCorePlatform = (
     const withMutationBoundary = <A, E>(
       effect: Effect.Effect<A, E>,
     ): Effect.Effect<A, E> => repository.withTransaction(effect);
+    const workflowAiOrchestrator = makeWorkflowAiOrchestrator({
+      repository,
+      runtime: options.aiRuntime,
+    });
 
     return {
       captureEntry: (input) =>
@@ -519,7 +536,53 @@ export const buildCorePlatform = (
       acceptEntryAsTask: (input) =>
         withMutationBoundary(acceptEntryAsTask(repository, input)),
       suggestEntryAsTask: (input) =>
-        withMutationBoundary(suggestEntryAsTask(repository, input)),
+        Effect.gen(function* () {
+          const explicitTitle =
+            typeof input.suggestedTitle === "string"
+              ? input.suggestedTitle.trim()
+              : undefined;
+          const shouldResolveWithAi =
+            input.aiAssist === true || explicitTitle === undefined;
+
+          const suggestion = shouldResolveWithAi
+            ? yield* Effect.gen(function* () {
+                const entry = yield* repository.getEntity<Entry>(
+                  "entry",
+                  input.entryId,
+                );
+                if (!entry) {
+                  return yield* Effect.fail(
+                    new EntryServiceError({
+                      message: `entry ${input.entryId} was not found`,
+                      code: "not_found",
+                    }),
+                  );
+                }
+
+                return yield* workflowAiOrchestrator.resolveEntrySuggestion({
+                  entryId: input.entryId,
+                  content: entry.content,
+                  suggestedTitle: input.suggestedTitle,
+                  aiAssist: input.aiAssist,
+                });
+              })
+            : {
+                text: explicitTitle,
+                metadata: {
+                  aiResolution: "manual",
+                },
+              };
+
+          return yield* withMutationBoundary(
+            suggestEntryAsTask(repository, {
+              entryId: input.entryId,
+              suggestedTitle: suggestion.text,
+              suggestionMetadata: suggestion.metadata,
+              actor: input.actor,
+              at: input.at,
+            }),
+          );
+        }),
       editEntrySuggestion: (input) =>
         withMutationBoundary(editEntrySuggestion(repository, input)),
       rejectEntrySuggestion: (input) =>
@@ -608,9 +671,35 @@ export const buildCorePlatform = (
           Effect.mapError((error) => new Error(error.message)),
         ),
       retryJob: (jobId, actor, at, fixSummary) =>
-        withMutationBoundary(
-          retryJobRun(repository, jobId, actor, at, fixSummary),
-        ),
+        Effect.gen(function* () {
+          const inspection = yield* inspectJobRun(repository, jobId);
+          if (inspection.runState !== "failed") {
+            return yield* Effect.fail(
+              new JobServiceError({
+                message: `job ${jobId} is ${inspection.runState}; must be in failed state before retry`,
+                code: "conflict",
+              }),
+            );
+          }
+
+          const summaryResolution = yield* workflowAiOrchestrator.resolveRetryFixSummary({
+            jobId,
+            diagnostics: inspection.diagnostics,
+            lastFailureReason: inspection.lastFailureReason,
+            fixSummary,
+          });
+
+          return yield* withMutationBoundary(
+            retryJobRun(
+              repository,
+              jobId,
+              actor,
+              at,
+              summaryResolution.text,
+              summaryResolution.metadata,
+            ),
+          );
+        }),
       inspectWorkflowCheckpoint: (checkpointId) =>
         inspectWorkflowCheckpointInService(repository, checkpointId),
       listActivityFeed: (options) =>

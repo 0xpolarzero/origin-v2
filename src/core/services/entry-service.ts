@@ -8,7 +8,7 @@ import { CoreRepository } from "../repositories/core-repository";
 
 export class EntryServiceError extends Data.TaggedError("EntryServiceError")<{
   message: string;
-  code?: "not_found";
+  code?: "not_found" | "invalid_request";
 }> {}
 
 export interface CaptureEntryInput {
@@ -29,6 +29,8 @@ export interface AcceptEntryAsTaskInput {
 export interface SuggestEntryAsTaskInput {
   entryId: string;
   suggestedTitle: string;
+  suggestionMetadata?: Record<string, string>;
+  reason?: string;
   actor: ActorRef;
   at?: Date;
 }
@@ -193,6 +195,15 @@ export const suggestEntryAsTask = (
   input: SuggestEntryAsTaskInput,
 ): Effect.Effect<Entry, EntryServiceError> =>
   Effect.gen(function* () {
+    if (input.suggestedTitle.trim().length === 0) {
+      return yield* Effect.fail(
+        new EntryServiceError({
+          message: "suggestedTitle must be a non-empty string",
+          code: "invalid_request",
+        }),
+      );
+    }
+
     const entry = yield* loadEntry(repository, input.entryId);
     const at = input.at ?? new Date();
     const atIso = at.toISOString();
@@ -214,9 +225,10 @@ export const suggestEntryAsTask = (
       fromState: entry.status,
       toState: updatedEntry.status,
       actor: input.actor,
-      reason: "AI suggested entry conversion to task",
+      reason: input.reason ?? "Entry suggestion recorded",
       at,
       metadata: {
+        ...(input.suggestionMetadata ?? {}),
         suggestedTitle: input.suggestedTitle,
       },
     }).pipe(

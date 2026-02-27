@@ -233,4 +233,130 @@ describe("entry-service", () => {
 
     expect(task.title).toBe("Plan interview with enterprise customer");
   });
+
+  test("suggestEntryAsTask records provided title with explicit suggestion metadata", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    await Effect.runPromise(
+      captureEntry(repository, {
+        entryId: "entry-5",
+        content: "Follow up with legal on contract review soon.",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T10:10:00.000Z"),
+      }),
+    );
+
+    const suggested = await Effect.runPromise(
+      suggestEntryAsTask(repository, {
+        entryId: "entry-5",
+        suggestedTitle: "Follow up with legal on contract review soon",
+        suggestionMetadata: {
+          source: "platform-orchestrator",
+          confidence: "high",
+        },
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T10:11:00.000Z"),
+      }),
+    );
+
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({ entityType: "entry", entityId: "entry-5" }),
+    );
+
+    expect(suggested.suggestedTaskTitle).toBe(
+      "Follow up with legal on contract review soon",
+    );
+    expect(auditTrail[auditTrail.length - 1]?.metadata).toEqual({
+      suggestedTitle: "Follow up with legal on contract review soon",
+      source: "platform-orchestrator",
+      confidence: "high",
+    });
+  });
+
+  test("suggestEntryAsTask preserves canonical suggestedTitle when metadata contains a colliding key", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    await Effect.runPromise(
+      captureEntry(repository, {
+        entryId: "entry-5-collision",
+        content: "Follow up with legal on contract review soon.",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T10:10:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      suggestEntryAsTask(repository, {
+        entryId: "entry-5-collision",
+        suggestedTitle: "Canonical suggested title",
+        suggestionMetadata: {
+          suggestedTitle: "Overridden title should be ignored",
+          source: "platform-orchestrator",
+        },
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T10:11:00.000Z"),
+      }),
+    );
+
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "entry",
+        entityId: "entry-5-collision",
+      }),
+    );
+
+    expect(auditTrail[auditTrail.length - 1]?.metadata).toEqual({
+      suggestedTitle: "Canonical suggested title",
+      source: "platform-orchestrator",
+    });
+  });
+
+  test("suggestEntryAsTask rejects blank suggestedTitle without mutating suggestion state", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    await Effect.runPromise(
+      captureEntry(repository, {
+        entryId: "entry-6",
+        content: "Need contract review follow-up",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T10:12:00.000Z"),
+      }),
+    );
+
+    const suggested = await Effect.runPromise(
+      Effect.either(
+        suggestEntryAsTask(repository, {
+          entryId: "entry-6",
+          suggestedTitle: "   ",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-23T10:13:00.000Z"),
+        }),
+      ),
+    );
+    const persistedEntry = await Effect.runPromise(
+      repository.getEntity<{
+        status: string;
+        suggestedTaskTitle?: string;
+      }>("entry", "entry-6"),
+    );
+
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({ entityType: "entry", entityId: "entry-6" }),
+    );
+
+    expect(Either.isLeft(suggested)).toBe(true);
+    if (Either.isLeft(suggested)) {
+      expect(suggested.left).toMatchObject({
+        _tag: "EntryServiceError",
+        code: "invalid_request",
+      });
+      expect(suggested.left.message).toContain(
+        "suggestedTitle must be a non-empty string",
+      );
+    }
+    expect(persistedEntry?.status).toBe("captured");
+    expect(persistedEntry?.suggestedTaskTitle).toBeUndefined();
+    expect(auditTrail).toHaveLength(1);
+    expect(auditTrail[0]?.toState).toBe("captured");
+  });
 });

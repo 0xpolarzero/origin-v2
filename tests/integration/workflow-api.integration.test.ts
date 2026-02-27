@@ -4,6 +4,7 @@ import { Either, Effect } from "effect";
 import { buildCorePlatform } from "../../src/core/app/core-platform";
 import { createEvent } from "../../src/core/domain/event";
 import { makeInMemoryCoreRepository } from "../../src/core/repositories/in-memory-core-repository";
+import type { WorkflowAiRuntime } from "../../src/core/services/ai/ai-runtime";
 import { makeWorkflowApi } from "../../src/api/workflows/workflow-api";
 
 describe("workflow-api integration", () => {
@@ -98,6 +99,148 @@ describe("workflow-api integration", () => {
       "suggested",
       "accepted_as_task",
     ]);
+  });
+
+  test("capture.suggest and job.retry run AI-assisted paths with deterministic injected runtime", async () => {
+    const runtimeCalls: Array<{ kind: "entry" | "retry"; id: string }> = [];
+    const runtime: WorkflowAiRuntime = {
+      suggestTaskTitleFromEntry: (input) =>
+        Effect.sync(() => {
+          runtimeCalls.push({ kind: "entry", id: input.entryId });
+          return {
+            text: "API runtime suggestion",
+            trace: {
+              provider: "openai",
+              model: "gpt-4.1-mini",
+              promptTokens: 8,
+              completionTokens: 5,
+              totalTokens: 13,
+            },
+          };
+        }),
+      suggestRetryFixSummary: (input) =>
+        Effect.sync(() => {
+          runtimeCalls.push({ kind: "retry", id: input.jobId });
+          return {
+            text: "API runtime retry summary",
+            trace: {
+              provider: "openai",
+              model: "gpt-4.1-mini",
+              stopReason: "stop",
+              promptTokens: 14,
+              completionTokens: 6,
+              totalTokens: 20,
+            },
+          };
+        }),
+    };
+    const platform = await Effect.runPromise(
+      buildCorePlatform({
+        aiRuntime: runtime,
+      }),
+    );
+    const api = makeWorkflowApi({ platform });
+
+    await Effect.runPromise(
+      platform.upsertMemory({
+        key: "settings.ai.enabled",
+        value: "true",
+        source: "integration-test",
+        confidence: 1,
+      }),
+    );
+    await Effect.runPromise(
+      platform.upsertMemory({
+        key: "settings.ai.provider",
+        value: "\"openai\"",
+        source: "integration-test",
+        confidence: 1,
+      }),
+    );
+    await Effect.runPromise(
+      platform.upsertMemory({
+        key: "settings.ai.model",
+        value: "\"gpt-4.1-mini\"",
+        source: "integration-test",
+        confidence: 1,
+      }),
+    );
+
+    await Effect.runPromise(
+      api.captureEntry({
+        entryId: "entry-api-ai-1",
+        content: "Prepare Q1 review",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T09:30:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      api.suggestEntryAsTask({
+        entryId: "entry-api-ai-1",
+        aiAssist: true,
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T09:31:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      api.createJob({
+        jobId: "job-api-ai-1",
+        name: "API AI retry",
+      }),
+    );
+    await Effect.runPromise(
+      api.recordJobRun({
+        jobId: "job-api-ai-1",
+        outcome: "failed",
+        diagnostics: "Provider timeout",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T09:32:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      api.retryJob({
+        jobId: "job-api-ai-1",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T09:33:00.000Z"),
+      }),
+    );
+
+    const entryTrail = await Effect.runPromise(
+      platform.listAuditTrail({
+        entityType: "entry",
+        entityId: "entry-api-ai-1",
+      }),
+    );
+    const retryTrail = await Effect.runPromise(
+      platform.listAuditTrail({
+        entityType: "job",
+        entityId: "job-api-ai-1",
+      }),
+    );
+    const suggestTransition = entryTrail.find(
+      (transition) => transition.toState === "suggested",
+    );
+    const retryTransition = retryTrail.find(
+      (transition) => transition.toState === "retrying",
+    );
+
+    expect(runtimeCalls).toEqual([
+      { kind: "entry", id: "entry-api-ai-1" },
+      { kind: "retry", id: "job-api-ai-1" },
+    ]);
+    expect(suggestTransition?.metadata).toMatchObject({
+      suggestedTitle: "API runtime suggestion",
+      aiResolution: "runtime",
+      aiProvider: "openai",
+      aiModel: "gpt-4.1-mini",
+    });
+    expect(retryTransition?.metadata).toMatchObject({
+      fixSummary: "API runtime retry summary",
+      aiResolution: "runtime",
+      aiProvider: "openai",
+      aiModel: "gpt-4.1-mini",
+    });
   });
 
   test("signal ingest -> triage -> convert to each supported entity executes through API handlers", async () => {

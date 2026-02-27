@@ -157,7 +157,7 @@ describe("job-service", () => {
     expect(auditTrail[auditTrail.length - 1]?.toState).toBe("retrying");
   });
 
-  test("retryJobRun stores optional fixSummary in retry transition metadata", async () => {
+  test("retryJobRun stores previousFailure and explicit fixSummary when no extra metadata is passed", async () => {
     const repository = makeInMemoryCoreRepository();
     const job = await Effect.runPromise(
       createJob({
@@ -197,6 +197,146 @@ describe("job-service", () => {
     expect(auditTrail[auditTrail.length - 1]?.metadata).toEqual({
       previousFailure: "Provider timeout",
       fixSummary: "Increase timeout to 15s and rerun",
+    });
+  });
+
+  test("retryJobRun derives deterministic fallback fixSummary when fixSummary is omitted", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const job = await Effect.runPromise(
+      createJob({
+        id: "job-retry-derived-summary-1",
+        name: "Retry with derived summary",
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("job", job.id, job));
+
+    await Effect.runPromise(
+      recordJobRun(repository, {
+        jobId: "job-retry-derived-summary-1",
+        outcome: "failed",
+        diagnostics: "Provider timeout",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T14:30:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      retryJobRun(
+        repository,
+        "job-retry-derived-summary-1",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T14:31:00.000Z"),
+      ),
+    );
+
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "job",
+        entityId: "job-retry-derived-summary-1",
+      }),
+    );
+
+    expect(auditTrail[auditTrail.length - 1]?.metadata).toEqual({
+      previousFailure: "Provider timeout",
+      fixSummary: "Investigate and address: Provider timeout",
+    });
+  });
+
+  test("retryJobRun merges explicit metadata into retry transition metadata", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const job = await Effect.runPromise(
+      createJob({
+        id: "job-retry-runtime-summary-1",
+        name: "Retry with metadata merge",
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("job", job.id, job));
+
+    await Effect.runPromise(
+      recordJobRun(repository, {
+        jobId: "job-retry-runtime-summary-1",
+        outcome: "failed",
+        diagnostics: "Upstream timeout",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T14:32:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      retryJobRun(
+        repository,
+        "job-retry-runtime-summary-1",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T14:33:00.000Z"),
+        "Increase timeout and retry with bounded backoff",
+        {
+          requestedBy: "oncall-user-1",
+          incidentId: "INC-4242",
+        },
+      ),
+    );
+
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "job",
+        entityId: "job-retry-runtime-summary-1",
+      }),
+    );
+
+    expect(auditTrail[auditTrail.length - 1]?.metadata).toEqual({
+      previousFailure: "Upstream timeout",
+      fixSummary: "Increase timeout and retry with bounded backoff",
+      requestedBy: "oncall-user-1",
+      incidentId: "INC-4242",
+    });
+  });
+
+  test("retryJobRun preserves reserved metadata keys when explicit metadata collides", async () => {
+    const repository = makeInMemoryCoreRepository();
+    const job = await Effect.runPromise(
+      createJob({
+        id: "job-retry-metadata-collision-1",
+        name: "Retry metadata collisions",
+      }),
+    );
+    await Effect.runPromise(repository.saveEntity("job", job.id, job));
+
+    await Effect.runPromise(
+      recordJobRun(repository, {
+        jobId: "job-retry-metadata-collision-1",
+        outcome: "failed",
+        diagnostics: "Canonical previous failure",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T14:34:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      retryJobRun(
+        repository,
+        "job-retry-metadata-collision-1",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T14:35:00.000Z"),
+        "Canonical fix summary",
+        {
+          previousFailure: "Should not override previousFailure",
+          fixSummary: "Should not override fixSummary",
+          incidentId: "INC-5000",
+        },
+      ),
+    );
+
+    const auditTrail = await Effect.runPromise(
+      repository.listAuditTrail({
+        entityType: "job",
+        entityId: "job-retry-metadata-collision-1",
+      }),
+    );
+
+    expect(auditTrail[auditTrail.length - 1]?.metadata).toEqual({
+      incidentId: "INC-5000",
+      previousFailure: "Canonical previous failure",
+      fixSummary: "Canonical fix summary",
     });
   });
 

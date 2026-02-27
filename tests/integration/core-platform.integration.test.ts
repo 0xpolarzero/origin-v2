@@ -2,11 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Effect } from "effect";
+import { Either, Effect } from "effect";
 
 import { buildCorePlatform } from "../../src/core/app/core-platform";
 import { CoreRepository } from "../../src/core/repositories/core-repository";
 import { makeInMemoryCoreRepository } from "../../src/core/repositories/in-memory-core-repository";
+import type { WorkflowAiRuntime } from "../../src/core/services/ai/ai-runtime";
 
 describe("Core Platform integration", () => {
   test("captures an Entry and promotes it into a triaged Task", async () => {
@@ -479,5 +480,213 @@ describe("Core Platform integration", () => {
     expect(retryEntry?.metadata).toMatchObject({
       fixSummary: "Increase timeout to 15 seconds",
     });
+  });
+
+  test("runs AI-assisted entry suggestion and retry fix summary through deterministic injected runtime", async () => {
+    const runtimeCalls: Array<{ kind: "entry" | "retry"; id: string }> = [];
+    const runtime: WorkflowAiRuntime = {
+      suggestTaskTitleFromEntry: (input) =>
+        Effect.sync(() => {
+          runtimeCalls.push({ kind: "entry", id: input.entryId });
+          return {
+            text: "Runtime generated entry suggestion",
+            trace: {
+              provider: "openai",
+              model: "gpt-4.1-mini",
+              promptTokens: 12,
+              completionTokens: 6,
+              totalTokens: 18,
+            },
+          };
+        }),
+      suggestRetryFixSummary: (input) =>
+        Effect.sync(() => {
+          runtimeCalls.push({ kind: "retry", id: input.jobId });
+          return {
+            text: "Runtime generated retry fix summary",
+            trace: {
+              provider: "openai",
+              model: "gpt-4.1-mini",
+              stopReason: "stop",
+              promptTokens: 22,
+              completionTokens: 8,
+              totalTokens: 30,
+            },
+          };
+        }),
+    };
+    const platform = await Effect.runPromise(
+      buildCorePlatform({
+        aiRuntime: runtime,
+      }),
+    );
+
+    await Effect.runPromise(
+      platform.upsertMemory({
+        key: "settings.ai.enabled",
+        value: "true",
+        source: "integration-test",
+        confidence: 1,
+      }),
+    );
+    await Effect.runPromise(
+      platform.upsertMemory({
+        key: "settings.ai.provider",
+        value: "\"openai\"",
+        source: "integration-test",
+        confidence: 1,
+      }),
+    );
+    await Effect.runPromise(
+      platform.upsertMemory({
+        key: "settings.ai.model",
+        value: "\"gpt-4.1-mini\"",
+        source: "integration-test",
+        confidence: 1,
+      }),
+    );
+
+    await Effect.runPromise(
+      platform.captureEntry({
+        entryId: "entry-platform-ai-1",
+        content: "Prepare launch checklist",
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T20:00:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      platform.suggestEntryAsTask({
+        entryId: "entry-platform-ai-1",
+        aiAssist: true,
+        actor: { id: "user-1", kind: "user" },
+        at: new Date("2026-02-23T20:01:00.000Z"),
+      }),
+    );
+
+    await Effect.runPromise(
+      platform.createJob({
+        jobId: "job-platform-ai-1",
+        name: "AI-assisted retry flow",
+      }),
+    );
+    await Effect.runPromise(
+      platform.recordJobRun({
+        jobId: "job-platform-ai-1",
+        outcome: "failed",
+        diagnostics: "Provider timeout",
+        actor: { id: "system-1", kind: "system" },
+        at: new Date("2026-02-23T20:02:00.000Z"),
+      }),
+    );
+    await Effect.runPromise(
+      platform.retryJob(
+        "job-platform-ai-1",
+        { id: "user-1", kind: "user" },
+        new Date("2026-02-23T20:03:00.000Z"),
+      ),
+    );
+
+    const entryTrail = await Effect.runPromise(
+      platform.listAuditTrail({
+        entityType: "entry",
+        entityId: "entry-platform-ai-1",
+      }),
+    );
+    const jobTrail = await Effect.runPromise(
+      platform.listAuditTrail({
+        entityType: "job",
+        entityId: "job-platform-ai-1",
+      }),
+    );
+    const entrySuggestTransition = entryTrail.find(
+      (transition) => transition.toState === "suggested",
+    );
+    const retryTransition = jobTrail.find(
+      (transition) => transition.toState === "retrying",
+    );
+
+    expect(runtimeCalls).toEqual([
+      { kind: "entry", id: "entry-platform-ai-1" },
+      { kind: "retry", id: "job-platform-ai-1" },
+    ]);
+    expect(entrySuggestTransition?.metadata).toMatchObject({
+      suggestedTitle: "Runtime generated entry suggestion",
+      aiResolution: "runtime",
+      aiProvider: "openai",
+      aiModel: "gpt-4.1-mini",
+    });
+    expect(retryTransition?.metadata).toMatchObject({
+      fixSummary: "Runtime generated retry fix summary",
+      aiResolution: "runtime",
+      aiProvider: "openai",
+      aiModel: "gpt-4.1-mini",
+    });
+  });
+
+  test("fails retry precondition before invoking AI runtime on non-retryable job state", async () => {
+    const runtimeCalls: Array<{ kind: "entry" | "retry"; id: string }> = [];
+    const runtime: WorkflowAiRuntime = {
+      suggestTaskTitleFromEntry: (input) =>
+        Effect.sync(() => {
+          runtimeCalls.push({ kind: "entry", id: input.entryId });
+          return {
+            text: "unused",
+            trace: { provider: "openai", model: "gpt-4.1-mini" },
+          };
+        }),
+      suggestRetryFixSummary: (input) =>
+        Effect.sync(() => {
+          runtimeCalls.push({ kind: "retry", id: input.jobId });
+          return {
+            text: "unused",
+            trace: { provider: "openai", model: "gpt-4.1-mini" },
+          };
+        }),
+    };
+
+    const platform = await Effect.runPromise(
+      buildCorePlatform({
+        aiRuntime: runtime,
+      }),
+    );
+
+    await Effect.runPromise(
+      platform.upsertMemory({
+        key: "settings.ai.enabled",
+        value: "true",
+        source: "integration-test",
+        confidence: 1,
+      }),
+    );
+
+    await Effect.runPromise(
+      platform.createJob({
+        jobId: "job-platform-invalid-retry-1",
+        name: "Retry precondition guard",
+      }),
+    );
+
+    const retryAttempt = await Effect.runPromise(
+      Effect.either(
+        platform.retryJob(
+          "job-platform-invalid-retry-1",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-23T20:05:00.000Z"),
+        ),
+      ),
+    );
+
+    expect(Either.isLeft(retryAttempt)).toBe(true);
+    if (Either.isLeft(retryAttempt)) {
+      expect(retryAttempt.left).toMatchObject({
+        _tag: "JobServiceError",
+        code: "conflict",
+      });
+      expect(retryAttempt.left.message).toContain("idle");
+      expect(retryAttempt.left.message).toContain(
+        "must be in failed state before retry",
+      );
+    }
+    expect(runtimeCalls).toEqual([]);
   });
 });

@@ -1,6 +1,9 @@
 import { Effect } from "effect";
 
-import { CorePlatform } from "../../core/app/core-platform";
+import {
+  CorePlatform,
+  SuggestEntryAsTaskRequest,
+} from "../../core/app/core-platform";
 import { ActorRef } from "../../core/domain/common";
 import { Job } from "../../core/domain/job";
 import { ProjectLifecycle } from "../../core/domain/project";
@@ -11,7 +14,6 @@ import {
   CaptureEntryInput,
   EditEntrySuggestionInput,
   RejectEntrySuggestionInput,
-  SuggestEntryAsTaskInput,
 } from "../../core/services/entry-service";
 import {
   CreateEventInServiceInput,
@@ -208,7 +210,7 @@ export interface WorkflowApi {
     input: CaptureEntryInput,
   ) => ApiOutput<CorePlatform["captureEntry"]>;
   suggestEntryAsTask: (
-    input: SuggestEntryAsTaskInput,
+    input: SuggestEntryAsTaskRequest,
   ) => ApiOutput<CorePlatform["suggestEntryAsTask"]>;
   editEntrySuggestion: (
     input: EditEntrySuggestionInput,

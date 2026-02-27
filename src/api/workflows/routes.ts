@@ -703,10 +703,24 @@ const validateSuggestEntryAsTaskRequest: RouteValidator<
     route,
     sourceResult.value,
     "suggestedTitle",
+    true,
   );
   if (!suggestedTitle.ok) {
     return suggestedTitle;
   }
+  if (
+    suggestedTitle.value !== undefined &&
+    suggestedTitle.value.trim().length === 0
+  ) {
+    return invalid(route, "suggestedTitle must be a non-empty string when provided");
+  }
+
+  const aiAssistValue = sourceResult.value.aiAssist;
+  if (aiAssistValue !== undefined && typeof aiAssistValue !== "boolean") {
+    return invalid(route, "aiAssist must be a boolean");
+  }
+  const aiAssist =
+    typeof aiAssistValue === "boolean" ? aiAssistValue : undefined;
 
   const actor = parseActorField(route, sourceResult.value, "actor");
   if (!actor.ok) {
@@ -721,6 +735,7 @@ const validateSuggestEntryAsTaskRequest: RouteValidator<
   return valid({
     entryId: entryId.value,
     suggestedTitle: suggestedTitle.value,
+    aiAssist,
     actor: actor.value,
     at: at.value,
   });

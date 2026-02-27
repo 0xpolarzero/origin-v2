@@ -304,12 +304,17 @@ export const retryJobRun = (
   actor: ActorRef,
   at: Date = new Date(),
   fixSummary?: string,
+  metadata?: Record<string, string>,
 ): Effect.Effect<Job, JobServiceError> =>
   repository.withTransaction(
     Effect.gen(function* () {
       const job = yield* loadJob(repository, jobId);
       yield* ensureRetryable(job);
       const atIso = at.toISOString();
+      const resolvedFixSummary =
+        typeof fixSummary === "string" && fixSummary.trim().length > 0
+          ? fixSummary.trim()
+          : `Investigate and address: ${job.lastFailureReason ?? job.diagnostics ?? "unknown failure"}`;
 
       const updated: Job = {
         ...job,
@@ -330,10 +335,9 @@ export const retryJobRun = (
         reason: "Job retry requested",
         at,
         metadata: {
+          ...(metadata ?? {}),
           previousFailure: job.lastFailureReason ?? "unknown",
-          ...(typeof fixSummary === "string" && fixSummary.trim().length > 0
-            ? { fixSummary }
-            : {}),
+          fixSummary: resolvedFixSummary,
         },
       }).pipe(
         Effect.mapError(
