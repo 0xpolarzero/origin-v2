@@ -4,6 +4,9 @@
   "type": "module",
   "packageManager": "bun@1.3.7",
   "scripts": {
+    "build": "bun run typecheck",
+    "lint": "bun run typecheck",
+    "format": "bunx prettier --check package.json",
     "test": "bun test",
     "test:unit:core": "bun test tests/unit/core",
     "test:core": "bun test tests/unit/core tests/integration/core-platform.integration.test.ts tests/integration/workflow-automation.integration.test.ts",
