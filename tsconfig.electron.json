@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist/electron",
+    "rootDir": ".",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["bun-types"]
+  },
+  "include": ["electron/**/*.ts", "src/app/shell-bootstrap.ts"],
+  "exclude": ["node_modules", "dist"]
+}
