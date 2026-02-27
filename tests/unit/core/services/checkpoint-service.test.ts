@@ -5,6 +5,7 @@ import { createTask } from "../../../../src/core/domain/task";
 import { CoreRepository } from "../../../../src/core/repositories/core-repository";
 import { makeInMemoryCoreRepository } from "../../../../src/core/repositories/in-memory-core-repository";
 import {
+  CheckpointServiceError,
   createWorkflowCheckpoint,
   inspectWorkflowCheckpoint,
   keepCheckpoint,
@@ -191,6 +192,33 @@ describe("checkpoint-service", () => {
         }),
       ),
     ).rejects.toThrow("failed to create checkpoint: name is required");
+  });
+
+  test("createWorkflowCheckpoint maps fractional auditCursor to invalid_request", async () => {
+    const repository = makeInMemoryCoreRepository();
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        createWorkflowCheckpoint(repository, {
+          checkpointId: "checkpoint-invalid-cursor",
+          name: "Invalid cursor",
+          snapshotEntityRefs: [],
+          auditCursor: 7.5,
+          rollbackTarget: "audit-7",
+          actor: { id: "user-1", kind: "user" },
+        }),
+      ),
+    );
+
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") {
+      expect(result.left).toBeInstanceOf(CheckpointServiceError);
+      expect(result.left).toMatchObject({
+        _tag: "CheckpointServiceError",
+        code: "invalid_request",
+      });
+      expect(result.left.message).toContain("auditCursor");
+    }
   });
 
   test("createWorkflowCheckpoint surfaces append-audit repository failures", async () => {

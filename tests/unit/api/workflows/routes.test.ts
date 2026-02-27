@@ -349,6 +349,35 @@ const makeApiSpy = (
       }),
   }) as unknown as WorkflowApi;
 
+const getRouteHandle = (
+  routes: ReturnType<typeof makeWorkflowRoutes>,
+  key: WorkflowRouteKey,
+): ReturnType<typeof makeWorkflowRoutes>[number]["handle"] => {
+  const route = routes.find((entry) => entry.key === key);
+  expect(route).toBeDefined();
+  return route!.handle;
+};
+
+const expectWorkflowValidationLeft = (
+  result: Either.Either<unknown, unknown>,
+  route: WorkflowRouteKey,
+  messageIncludes: string,
+): void => {
+  expect(Either.isLeft(result)).toBe(true);
+  if (Either.isLeft(result)) {
+    const left = result.left as {
+      _tag: string;
+      route: WorkflowRouteKey;
+      message: string;
+    };
+    expect(left).toMatchObject({
+      _tag: "WorkflowApiError",
+      route,
+    });
+    expect(left.message).toContain(messageIncludes);
+  }
+};
+
 describe("api/workflows/routes", () => {
   test("includes all required workflow route keys", () => {
     expect(Object.keys(WORKFLOW_ROUTE_PATHS).sort()).toEqual(
@@ -472,6 +501,143 @@ describe("api/workflows/routes", () => {
         route: "planning.deferTask",
       });
       expect(result.left.message).toContain("until");
+    }
+  });
+
+  test("uncovered routes reject empty object payloads with route-specific validation errors", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const cases: ReadonlyArray<{
+      route: WorkflowRouteKey;
+      messageIncludes: string;
+    }> = [
+      { route: "capture.suggest", messageIncludes: "entryId" },
+      { route: "capture.editSuggestion", messageIncludes: "entryId" },
+      { route: "capture.acceptAsTask", messageIncludes: "entryId" },
+      { route: "signal.triage", messageIncludes: "signalId" },
+      { route: "signal.convert", messageIncludes: "signalId" },
+      { route: "planning.completeTask", messageIncludes: "taskId" },
+      { route: "planning.rescheduleTask", messageIncludes: "taskId" },
+      { route: "job.recordRun", messageIncludes: "jobId" },
+      { route: "job.inspectRun", messageIncludes: "jobId" },
+    ];
+
+    for (const entry of cases) {
+      const result = await Effect.runPromise(
+        Effect.either(getRouteHandle(routes, entry.route)({})),
+      );
+      expectWorkflowValidationLeft(
+        result,
+        entry.route,
+        entry.messageIncludes,
+      );
+    }
+  });
+
+  test("uncovered routes reject malformed payload fields with route-specific validation errors", async () => {
+    const routes = makeWorkflowRoutes(makeApiSpy(() => undefined));
+    const cases: ReadonlyArray<{
+      route: WorkflowRouteKey;
+      payload: unknown;
+      messageIncludes: string;
+    }> = [
+      {
+        route: "capture.suggest",
+        payload: {
+          entryId: "entry-route-1",
+          suggestedTitle: 123,
+          actor: ACTOR,
+          at: AT,
+        },
+        messageIncludes: "suggestedTitle",
+      },
+      {
+        route: "capture.editSuggestion",
+        payload: {
+          entryId: "entry-route-1",
+          suggestedTitle: 123,
+          actor: ACTOR,
+          at: AT,
+        },
+        messageIncludes: "suggestedTitle",
+      },
+      {
+        route: "capture.acceptAsTask",
+        payload: {
+          entryId: "entry-route-1",
+          taskId: "task-route-1",
+          actor: { id: "user-1", kind: "robot" },
+          at: AT,
+        },
+        messageIncludes: "actor.kind",
+      },
+      {
+        route: "signal.triage",
+        payload: {
+          signalId: "signal-route-1",
+          decision: 1,
+          actor: ACTOR,
+          at: AT,
+        },
+        messageIncludes: "decision",
+      },
+      {
+        route: "signal.convert",
+        payload: {
+          signalId: "signal-route-1",
+          targetType: "invalid",
+          targetId: "task-route-1",
+          actor: ACTOR,
+          at: AT,
+        },
+        messageIncludes: "targetType",
+      },
+      {
+        route: "planning.completeTask",
+        payload: {
+          taskId: 1,
+          actor: ACTOR,
+          at: AT,
+        },
+        messageIncludes: "taskId",
+      },
+      {
+        route: "planning.rescheduleTask",
+        payload: {
+          taskId: "task-route-1",
+          nextAt: "not-a-date",
+          actor: ACTOR,
+          at: AT,
+        },
+        messageIncludes: "nextAt",
+      },
+      {
+        route: "job.recordRun",
+        payload: {
+          jobId: "job-route-1",
+          outcome: "partial",
+          actor: { id: "system-1", kind: "system" },
+          at: AT,
+        },
+        messageIncludes: "outcome",
+      },
+      {
+        route: "job.inspectRun",
+        payload: {
+          jobId: "   ",
+        },
+        messageIncludes: "jobId",
+      },
+    ];
+
+    for (const entry of cases) {
+      const result = await Effect.runPromise(
+        Effect.either(getRouteHandle(routes, entry.route)(entry.payload)),
+      );
+      expectWorkflowValidationLeft(
+        result,
+        entry.route,
+        entry.messageIncludes,
+      );
     }
   });
 

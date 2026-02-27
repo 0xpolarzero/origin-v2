@@ -1,20 +1,19 @@
-# Reference Repositories
+# References
 
-Use these as git submodules under `docs/references/` when needed:
+## Reference Strategy
 
-- `https://github.com/Effect-TS/effect`
-- `https://github.com/tim-smart/cheffect`
-- `https://github.com/mikearnaldi/accountability`
-- `https://github.com/jj-vcs/jj`
-- `https://github.com/badlogic/pi-mono`
-- `https://github.com/evmts/super-ralph`
-- `https://github.com/evmts/smithers`
+Mode: repository-links
 
-Expected local paths:
-- `docs/references/effect`
-- `docs/references/cheffect`
-- `docs/references/accountability`
-- `docs/references/jj`
-- `docs/references/pi-mono`
-- `docs/references/super-ralph`
-- `docs/references/smithers`
+Origin tracks external references as remote repository links. Local `docs/references/*` checkouts are optional and are not required contract inputs for this repository.
+
+## Reference Repositories
+
+| Name | Repository URL | Expected Local Path |
+| --- | --- | --- |
+| effect | https://github.com/Effect-TS/effect | |
+| cheffect | https://github.com/tim-smart/cheffect | |
+| accountability | https://github.com/mikearnaldi/accountability | |
+| jj | https://github.com/jj-vcs/jj | |
+| pi-mono | https://github.com/badlogic/pi-mono | |
+| super-ralph | https://github.com/evmts/super-ralph | |
+| smithers | https://github.com/evmts/smithers | |

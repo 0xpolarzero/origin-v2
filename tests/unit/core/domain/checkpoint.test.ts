@@ -38,4 +38,19 @@ describe("createCheckpoint", () => {
     expect(checkpoint.rollbackTarget).toBe("audit-12");
     expect(checkpoint.auditCursor).toBe(12);
   });
+
+  test("createCheckpoint rejects fractional auditCursor", async () => {
+    await expect(
+      Effect.runPromise(
+        createCheckpoint({
+          id: "checkpoint-1",
+          name: "Before AI refactor",
+          snapshotEntityRefs: [{ entityType: "task", entityId: "task-1" }],
+          snapshotEntities: [],
+          auditCursor: 12.25,
+          rollbackTarget: "audit-12",
+        }),
+      ),
+    ).rejects.toThrow("auditCursor");
+  });
 });

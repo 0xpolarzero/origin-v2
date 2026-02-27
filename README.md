@@ -6,7 +6,7 @@ Minimal repo for implementing Origin with Super Ralph.
 
 - `docs/design.spec.md` - product scope (features and views)
 - `docs/engineering.choices.md` - stack and delivery guardrails
-- `docs/references.md` - reference repositories to use as submodules
+- `docs/references.md` - reference repositories contract (`repository-links` strategy)
 - `docs/super-ralph.prompt.md` - single prompt for autonomous implementation
 - `AGENTS.md` - instructions for coding agents in this repo
 

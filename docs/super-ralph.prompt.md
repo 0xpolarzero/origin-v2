@@ -31,7 +31,7 @@ Deliver a complete, usable Origin app aligned with the design spec and engineeri
 
 ## References policy
 - Treat repositories listed in `docs/references.md` as required reference inputs.
-- Use them as submodules under `docs/references/*` when available.
+- Follow the `repository-links` strategy documented there; local submodule checkouts under `docs/references/*` are optional.
 - Research relevant patterns before major implementation decisions.
 
 ## Acceptance bar

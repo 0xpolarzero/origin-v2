@@ -35,6 +35,99 @@ const writeLegacySnapshot = (
   writeFileSync(snapshotPath, JSON.stringify(payload, null, 2), "utf8");
 };
 
+type ForcedFailureConfig = {
+  enabled: boolean;
+  mode:
+    | "ingestAudit"
+    | "triageAudit"
+    | "convertSignalSave"
+    | "outboundExecutedSave";
+};
+
+const signalIdForIngestRollback = "signal-db-rollback-ingest-1";
+const signalIdForTriageRollback = "signal-db-rollback-triage-1";
+const signalIdForConvertRollback = "signal-db-rollback-convert-1";
+const outboundDraftIdForApprovalRollback = "outbound-draft-db-rollback-approval-1";
+
+const stringField = (
+  value: unknown,
+  key: string,
+): string | undefined => {
+  if (typeof value !== "object" || value === null || !(key in value)) {
+    return undefined;
+  }
+
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === "string" ? field : undefined;
+};
+
+const buildFailureInjectedRepository = (
+  databasePath: string,
+  config: ForcedFailureConfig,
+) =>
+  makeSqliteCoreRepository({ databasePath }).pipe(
+    Effect.map((sqliteRepository) => ({
+      ...sqliteRepository,
+      saveEntity: (entityType: string, entityId: string, entity: unknown) => {
+        if (
+          config.enabled &&
+          config.mode === "convertSignalSave" &&
+          entityType === "signal" &&
+          entityId === signalIdForConvertRollback &&
+          stringField(entity, "triageState") === "converted"
+        ) {
+          return Effect.fail(
+            new Error("forced convertSignal signal write failure"),
+          );
+        }
+
+        if (
+          config.enabled &&
+          config.mode === "outboundExecutedSave" &&
+          entityType === "outbound_draft" &&
+          entityId === outboundDraftIdForApprovalRollback &&
+          stringField(entity, "status") === "executed"
+        ) {
+          return Effect.fail(
+            new Error("forced outbound_draft executed write failure"),
+          );
+        }
+
+        return sqliteRepository.saveEntity(entityType, entityId, entity);
+      },
+      appendAuditTransition: (transition: {
+        entityType: string;
+        entityId: string;
+        reason: string;
+      }) => {
+        if (
+          config.enabled &&
+          config.mode === "ingestAudit" &&
+          transition.entityType === "signal" &&
+          transition.entityId === signalIdForIngestRollback &&
+          transition.reason === "Signal ingested"
+        ) {
+          return Effect.fail(
+            new Error("forced ingestSignal audit write failure"),
+          );
+        }
+
+        if (
+          config.enabled &&
+          config.mode === "triageAudit" &&
+          transition.entityType === "signal" &&
+          transition.entityId === signalIdForTriageRollback &&
+          transition.reason.startsWith("Signal triaged:")
+        ) {
+          return Effect.fail(
+            new Error("forced triageSignal audit write failure"),
+          );
+        }
+
+        return sqliteRepository.appendAuditTransition(transition as never);
+      },
+    })),
+  );
 describe("database-backed core platform", () => {
   test("buildCorePlatform({ databasePath }) runs migrations and supports existing workflow routes", async () => {
     const { tempDir, databasePath } = createTempPaths();
@@ -618,6 +711,54 @@ describe("database-backed core platform", () => {
     }
   });
 
+  test("database backend cannot persist fractional checkpoint audit_cursor", async () => {
+    const { tempDir, databasePath } = createTempPaths();
+
+    try {
+      const platform = await Effect.runPromise(
+        buildCorePlatform({
+          databasePath,
+        }),
+      );
+
+      const result = await Effect.runPromise(
+        Effect.either(
+          platform.createWorkflowCheckpoint({
+            checkpointId: "checkpoint-db-fractional-cursor-1",
+            name: "Fractional cursor",
+            snapshotEntityRefs: [],
+            auditCursor: 1.5,
+            rollbackTarget: "audit-1",
+            actor: { id: "user-1", kind: "user" },
+          }),
+        ),
+      );
+
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect(result.left).toMatchObject({
+          _tag: "CheckpointServiceError",
+          code: "invalid_request",
+        });
+      }
+
+      const db = new Database(databasePath, { readonly: true });
+      const checkpointCount = db
+        .query("SELECT COUNT(*) AS count FROM checkpoint WHERE id = ?")
+        .get("checkpoint-db-fractional-cursor-1") as { count: number };
+      db.close();
+
+      expect(checkpointCount.count).toBe(0);
+
+      if (!platform.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platform.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("capture/signal/approval/checkpoint workflows preserve relations and audit-version sync", async () => {
     const { tempDir, databasePath } = createTempPaths();
 
@@ -1117,6 +1258,338 @@ describe("database-backed core platform", () => {
     }
   });
 
+  test("forced ingestSignal audit write failure rolls back signal insert", async () => {
+    const { tempDir, databasePath } = createTempPaths();
+
+    try {
+      const repository = await Effect.runPromise(
+        buildFailureInjectedRepository(databasePath, {
+          enabled: true,
+          mode: "ingestAudit",
+        }),
+      );
+      const platform = await Effect.runPromise(
+        buildCorePlatform({
+          repository: repository as never,
+        }),
+      );
+
+      const ingestAttempt = await Effect.runPromise(
+        Effect.either(
+          platform.ingestSignal({
+            signalId: "signal-db-rollback-ingest-1",
+            source: "email",
+            payload: "Forced rollback on ingest audit",
+            actor: { id: "user-1", kind: "user" },
+            at: new Date("2026-02-25T10:00:00.000Z"),
+          }),
+        ),
+      );
+
+      expect(ingestAttempt._tag).toBe("Left");
+      if (ingestAttempt._tag === "Left") {
+        expect(ingestAttempt.left.message).toContain(
+          "forced ingestSignal audit write failure",
+        );
+      }
+
+      const signal = await Effect.runPromise(
+        platform.getEntity("signal", "signal-db-rollback-ingest-1"),
+      );
+      const audit = await Effect.runPromise(
+        platform.listAuditTrail({
+          entityType: "signal",
+          entityId: "signal-db-rollback-ingest-1",
+        }),
+      );
+
+      expect(signal).toBeUndefined();
+      expect(audit).toHaveLength(0);
+
+      if (!platform.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platform.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("forced triageSignal audit write failure rolls back signal triage update", async () => {
+    const { tempDir, databasePath } = createTempPaths();
+
+    try {
+      const repository = await Effect.runPromise(
+        buildFailureInjectedRepository(databasePath, {
+          enabled: true,
+          mode: "triageAudit",
+        }),
+      );
+      const platform = await Effect.runPromise(
+        buildCorePlatform({
+          repository: repository as never,
+        }),
+      );
+
+      await Effect.runPromise(
+        platform.ingestSignal({
+          signalId: "signal-db-rollback-triage-1",
+          source: "email",
+          payload: "Force triage rollback",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-25T10:10:00.000Z"),
+        }),
+      );
+
+      const triageAttempt = await Effect.runPromise(
+        Effect.either(
+          platform.triageSignal(
+            "signal-db-rollback-triage-1",
+            "requires_outbound",
+            { id: "user-1", kind: "user" },
+            new Date("2026-02-25T10:11:00.000Z"),
+          ),
+        ),
+      );
+
+      expect(triageAttempt._tag).toBe("Left");
+      if (triageAttempt._tag === "Left") {
+        expect(triageAttempt.left.message).toContain(
+          "forced triageSignal audit write failure",
+        );
+      }
+
+      const signal = await Effect.runPromise(
+        platform.getEntity<{
+          triageState: string;
+          triageDecision?: string;
+        }>("signal", "signal-db-rollback-triage-1"),
+      );
+      const audit = await Effect.runPromise(
+        platform.listAuditTrail({
+          entityType: "signal",
+          entityId: "signal-db-rollback-triage-1",
+        }),
+      );
+
+      expect(signal?.triageState).toBe("untriaged");
+      expect(signal?.triageDecision).toBeUndefined();
+      expect(audit.some((transition) => transition.toState === "triaged")).toBe(
+        false,
+      );
+
+      if (!platform.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platform.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("forced convertSignal signal-write failure rolls back target+signal conversion mutations", async () => {
+    const { tempDir, databasePath } = createTempPaths();
+
+    try {
+      const repository = await Effect.runPromise(
+        buildFailureInjectedRepository(databasePath, {
+          enabled: true,
+          mode: "convertSignalSave",
+        }),
+      );
+      const platform = await Effect.runPromise(
+        buildCorePlatform({
+          repository: repository as never,
+        }),
+      );
+
+      await Effect.runPromise(
+        platform.ingestSignal({
+          signalId: "signal-db-rollback-convert-1",
+          source: "email",
+          payload: "Force conversion rollback",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-25T10:20:00.000Z"),
+        }),
+      );
+      await Effect.runPromise(
+        platform.triageSignal(
+          "signal-db-rollback-convert-1",
+          "ready_for_conversion",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-25T10:21:00.000Z"),
+        ),
+      );
+
+      const convertAttempt = await Effect.runPromise(
+        Effect.either(
+          platform.convertSignal({
+            signalId: "signal-db-rollback-convert-1",
+            targetType: "task",
+            targetId: "task-db-rollback-convert-1",
+            actor: { id: "user-1", kind: "user" },
+            at: new Date("2026-02-25T10:22:00.000Z"),
+          }),
+        ),
+      );
+
+      expect(convertAttempt._tag).toBe("Left");
+      if (convertAttempt._tag === "Left") {
+        expect(convertAttempt.left.message).toContain(
+          "forced convertSignal signal write failure",
+        );
+      }
+
+      const task = await Effect.runPromise(
+        platform.getEntity("task", "task-db-rollback-convert-1"),
+      );
+      const signal = await Effect.runPromise(
+        platform.getEntity<{
+          triageState: string;
+          convertedEntityType?: string;
+          convertedEntityId?: string;
+        }>("signal", "signal-db-rollback-convert-1"),
+      );
+      const signalAudit = await Effect.runPromise(
+        platform.listAuditTrail({
+          entityType: "signal",
+          entityId: "signal-db-rollback-convert-1",
+        }),
+      );
+      const taskAudit = await Effect.runPromise(
+        platform.listAuditTrail({
+          entityType: "task",
+          entityId: "task-db-rollback-convert-1",
+        }),
+      );
+
+      expect(task).toBeUndefined();
+      expect(signal?.triageState).toBe("triaged");
+      expect(signal?.convertedEntityType).toBeUndefined();
+      expect(signal?.convertedEntityId).toBeUndefined();
+      expect(
+        signalAudit.some((transition) => transition.toState === "converted"),
+      ).toBe(false);
+      expect(taskAudit).toHaveLength(0);
+
+      if (!platform.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platform.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("forced outbound_draft approval executed-write failure rolls back staged execution mutations", async () => {
+    const { tempDir, databasePath } = createTempPaths();
+
+    try {
+      const execute = mock(async (_action: unknown) => ({
+        executionId: "exec-db-rollback-approval-1",
+      }));
+      const repository = await Effect.runPromise(
+        buildFailureInjectedRepository(databasePath, {
+          enabled: true,
+          mode: "outboundExecutedSave",
+        }),
+      );
+      const platform = await Effect.runPromise(
+        buildCorePlatform({
+          repository: repository as never,
+          outboundActionPort: {
+            execute: (action) => Effect.promise(() => execute(action)),
+          },
+        }),
+      );
+
+      await Effect.runPromise(
+        platform.ingestSignal({
+          signalId: "signal-db-rollback-approval-1",
+          source: "email",
+          payload: "Rollback outbound approval",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-25T10:30:00.000Z"),
+        }),
+      );
+      await Effect.runPromise(
+        platform.triageSignal(
+          "signal-db-rollback-approval-1",
+          "requires_outbound",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-25T10:31:00.000Z"),
+        ),
+      );
+      await Effect.runPromise(
+        platform.convertSignal({
+          signalId: "signal-db-rollback-approval-1",
+          targetType: "outbound_draft",
+          targetId: "outbound-draft-db-rollback-approval-1",
+          actor: { id: "user-1", kind: "user" },
+          at: new Date("2026-02-25T10:32:00.000Z"),
+        }),
+      );
+      await Effect.runPromise(
+        platform.requestOutboundDraftExecution(
+          "outbound-draft-db-rollback-approval-1",
+          { id: "user-1", kind: "user" },
+          new Date("2026-02-25T10:33:00.000Z"),
+        ),
+      );
+
+      const approveAttempt = await Effect.runPromise(
+        Effect.either(
+          platform.approveOutboundAction({
+            actionType: "outbound_draft",
+            entityType: "outbound_draft",
+            entityId: "outbound-draft-db-rollback-approval-1",
+            approved: true,
+            actor: { id: "user-1", kind: "user" },
+            at: new Date("2026-02-25T10:34:00.000Z"),
+          }),
+        ),
+      );
+
+      expect(approveAttempt._tag).toBe("Left");
+      if (approveAttempt._tag === "Left") {
+        expect(approveAttempt.left.message).toContain(
+          "forced outbound_draft executed write failure",
+        );
+      }
+
+      const draft = await Effect.runPromise(
+        platform.getEntity<{ status: string; executionId?: string }>(
+          "outbound_draft",
+          "outbound-draft-db-rollback-approval-1",
+        ),
+      );
+      const draftAudit = await Effect.runPromise(
+        platform.listAuditTrail({
+          entityType: "outbound_draft",
+          entityId: "outbound-draft-db-rollback-approval-1",
+        }),
+      );
+
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(draft?.status).toBe("pending_approval");
+      expect(draft?.executionId).toBeUndefined();
+      expect(
+        draftAudit.some(
+          (transition) =>
+            transition.toState === "executing" ||
+            transition.toState === "executed",
+        ),
+      ).toBe(false);
+
+      if (!platform.close) {
+        throw new Error("database-backed platform should expose close()");
+      }
+      await Effect.runPromise(platform.close());
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("legacy snapshot import hydrates an empty database once when enabled", async () => {
     const { tempDir, databasePath, snapshotPath } = createTempPaths();
 
@@ -1219,7 +1692,6 @@ describe("database-backed core platform", () => {
           databasePath,
         }),
       );
-
       await Effect.runPromise(
         platformA.captureEntry({
           entryId: existingEntryId,

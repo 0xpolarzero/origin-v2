@@ -55,6 +55,15 @@ export const createCheckpoint = (
     return Effect.fail(rollbackTargetError);
   }
 
+  if (
+    !Number.isFinite(input.auditCursor) ||
+    !Number.isInteger(input.auditCursor)
+  ) {
+    return Effect.fail(
+      new DomainValidationError({ message: "auditCursor must be an integer" }),
+    );
+  }
+
   const timestamps = createTimestamps({
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,

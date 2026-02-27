@@ -58,4 +58,9 @@ export const CORE_DB_MIGRATIONS: ReadonlyArray<SqliteMigration> = [
     "Add explicit job run history table, constraints, indexes, and backfill",
     "../../database/migrations/005_job_run_history.sql",
   ),
+  defineMigration(
+    "006_checkpoint_audit_cursor_integer",
+    "Enforce integer-only checkpoint audit_cursor writes",
+    "../../database/migrations/006_checkpoint_audit_cursor_integer.sql",
+  ),
 ];

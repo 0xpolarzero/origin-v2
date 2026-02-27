@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { ApprovalServiceError } from "../../../../src/core/services/approval-service";
+import { AiRuntimeError } from "../../../../src/core/services/ai/ai-runtime";
 import { CheckpointServiceError } from "../../../../src/core/services/checkpoint-service";
 import { EntryServiceError } from "../../../../src/core/services/entry-service";
 import { EventServiceError } from "../../../../src/core/services/event-service";
@@ -66,6 +67,38 @@ describe("api/workflows/errors", () => {
       message: "event event-404 was not found",
       code: "not_found",
       statusCode: 404,
+    });
+  });
+
+  test("toWorkflowApiError maps ai runtime invalid_request and unknown codes to stable API metadata", () => {
+    const invalidRequest = toWorkflowApiError(
+      "capture.suggest",
+      new AiRuntimeError({
+        message: "prompt validation failed",
+        code: "invalid_request",
+        target: "capture.suggest",
+      }),
+    );
+    const unknown = toWorkflowApiError(
+      "job.retry",
+      new AiRuntimeError({
+        message: "provider transport failed",
+        code: "unknown",
+        target: "job.retry",
+      }),
+    );
+
+    expect(invalidRequest).toMatchObject({
+      route: "capture.suggest",
+      message: "prompt validation failed",
+      code: "validation",
+      statusCode: 400,
+    });
+    expect(unknown).toMatchObject({
+      route: "job.retry",
+      message: "provider transport failed",
+      code: "unknown",
+      statusCode: 400,
     });
   });
 

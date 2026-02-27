@@ -302,15 +302,17 @@ const parseBooleanField = (
     : invalid(route, `${field} must be a boolean`);
 };
 
-const parseNumberField = (
+const parseIntegerField = (
   route: WorkflowRouteKey,
   source: Record<string, unknown>,
   field: string,
 ): RouteValidation<number> => {
   const value = source[field];
-  return typeof value === "number" && Number.isFinite(value)
+  return typeof value === "number" &&
+    Number.isFinite(value) &&
+    Number.isInteger(value)
     ? valid(value)
-    : invalid(route, `${field} must be a finite number`);
+    : invalid(route, `${field} must be an integer`);
 };
 
 function parsePositiveIntegerField(
@@ -1260,7 +1262,7 @@ const validateCreateWorkflowCheckpointRequest: RouteValidator<
     return snapshotEntityRefs;
   }
 
-  const auditCursor = parseNumberField(
+  const auditCursor = parseIntegerField(
     route,
     sourceResult.value,
     "auditCursor",

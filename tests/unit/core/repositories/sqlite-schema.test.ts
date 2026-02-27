@@ -204,6 +204,89 @@ describe("sqlite baseline schema migrations", () => {
     }
   });
 
+  test("checkpoint.audit_cursor rejects fractional values on insert", async () => {
+    const db = new Database(":memory:");
+
+    try {
+      await applyCoreMigrations(db);
+
+      expectAbort(() => {
+        db.query(
+          `
+            INSERT INTO checkpoint (
+              id,
+              name,
+              snapshot_entity_refs,
+              snapshot_entities,
+              audit_cursor,
+              rollback_target,
+              status,
+              created_at,
+              updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+        ).run(
+          "checkpoint-fractional-insert",
+          "Checkpoint",
+          "[]",
+          "[]",
+          1.5,
+          "audit-1",
+          "created",
+          ISO_1,
+          ISO_1,
+        );
+      }, "invalid checkpoint.audit_cursor");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("checkpoint.audit_cursor rejects fractional values on update", async () => {
+    const db = new Database(":memory:");
+
+    try {
+      await applyCoreMigrations(db);
+
+      db.query(
+        `
+          INSERT INTO checkpoint (
+            id,
+            name,
+            snapshot_entity_refs,
+            snapshot_entities,
+            audit_cursor,
+            rollback_target,
+            status,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "checkpoint-fractional-update",
+        "Checkpoint",
+        "[]",
+        "[]",
+        1,
+        "audit-1",
+        "created",
+        ISO_1,
+        ISO_1,
+      );
+
+      expectAbort(() => {
+        db.query("UPDATE checkpoint SET audit_cursor = ? WHERE id = ?").run(
+          1.25,
+          "checkpoint-fractional-update",
+        );
+      }, "invalid checkpoint.audit_cursor");
+    } finally {
+      db.close();
+    }
+  });
+
   test("schema creates relation lookup indexes for linked entity fields", async () => {
     const db = new Database(":memory:");
 

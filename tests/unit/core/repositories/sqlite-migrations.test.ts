@@ -16,6 +16,7 @@ const EXPECTED_CORE_MIGRATION_IDS = [
   "003_relation_integrity",
   "004_audit_entity_versions",
   "005_job_run_history",
+  "006_checkpoint_audit_cursor_integer",
 ];
 
 const listLedgerRows = (db: Database): Array<LedgerRow> =>
@@ -135,6 +136,60 @@ describe("sqlite migration runner", () => {
 
       await Effect.runPromise(runSqliteMigrations(db, CORE_DB_MIGRATIONS));
       expect(listLedgerRows(db)).toEqual(fullLedger);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("runSqliteMigrations remediates legacy fractional checkpoint audit_cursor rows when applying 006", async () => {
+    const db = new Database(":memory:");
+    const migrationsBefore006 = CORE_DB_MIGRATIONS.filter(
+      (migration) => migration.id < "006_checkpoint_audit_cursor_integer",
+    );
+
+    try {
+      await Effect.runPromise(runSqliteMigrations(db, migrationsBefore006));
+
+      db.query(
+        `
+          INSERT INTO checkpoint (
+            id,
+            name,
+            snapshot_entity_refs,
+            snapshot_entities,
+            audit_cursor,
+            rollback_target,
+            status,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        "checkpoint-legacy-fractional",
+        "Legacy checkpoint",
+        "[]",
+        "[]",
+        12.75,
+        "audit-legacy",
+        "created",
+        "2026-02-23T00:00:00.000Z",
+        "2026-02-23T00:00:00.000Z",
+      );
+
+      await Effect.runPromise(runSqliteMigrations(db, CORE_DB_MIGRATIONS));
+
+      const row = db
+        .query(
+          "SELECT audit_cursor, typeof(audit_cursor) AS storage_type FROM checkpoint WHERE id = ?",
+        )
+        .get("checkpoint-legacy-fractional") as
+        | { audit_cursor: number; storage_type: string }
+        | null;
+
+      expect(row).not.toBeNull();
+      expect(row?.storage_type).toBe("integer");
+      expect(Number.isInteger(row?.audit_cursor)).toBe(true);
     } finally {
       db.close();
     }

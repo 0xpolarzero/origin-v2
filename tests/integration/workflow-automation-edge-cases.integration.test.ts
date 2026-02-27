@@ -13,7 +13,10 @@ import { createEvent } from "../../src/core/domain/event";
 import { makeInMemoryCoreRepository } from "../../src/core/repositories/in-memory-core-repository";
 
 const ACTOR = { id: "user-1", kind: "user" } as const;
-const TRUSTED_SYSTEM_ACTOR = { id: "trusted-system-1", kind: "system" } as const;
+const TRUSTED_SYSTEM_ACTOR = {
+  id: "trusted-system-1",
+  kind: "system",
+} as const;
 const TRUSTED_OTHER_USER_ACTOR = {
   id: "trusted-user-2",
   kind: "user",
@@ -382,6 +385,7 @@ describe("workflow automation edge cases", () => {
       jobId: "job-edge-retry-1",
       actor: ACTOR,
       at: "2026-02-24T14:02:00.000Z",
+      fixSummary: "Increase timeout and retry once",
     });
 
     const historyBeforeDuplicate = (await expectOk(
@@ -466,7 +470,9 @@ describe("workflow automation edge cases", () => {
     );
     const rollbackTransition = auditBeforeCheckpoint.at(-1);
     if (!rollbackTransition) {
-      throw new Error("expected at least one audit transition before checkpoint");
+      throw new Error(
+        "expected at least one audit transition before checkpoint",
+      );
     }
 
     await expectOk(dispatch, "checkpoint.create", {
@@ -538,6 +544,7 @@ describe("workflow automation edge cases", () => {
       jobId: "job-edge-recovery-1",
       actor: ACTOR,
       at: "2026-02-24T15:07:00.000Z",
+      fixSummary: "Retry with increased timeout",
     });
     const duplicateRetry = await Effect.runPromise(
       dispatch({
