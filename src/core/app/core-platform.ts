@@ -36,7 +36,15 @@ import {
   suggestEntryAsTask,
   SuggestEntryAsTaskInput,
 } from "../services/entry-service";
-import { requestEventSync } from "../services/event-service";
+import {
+  createEventInService,
+  CreateEventInServiceInput,
+  listEventConflicts,
+  listEvents,
+  requestEventSync,
+  UpdateEventInServiceInput,
+  updateEventInService,
+} from "../services/event-service";
 import {
   inspectJobRun,
   JobListItem,
@@ -58,7 +66,35 @@ import {
   SaveViewInput,
 } from "../services/view-service";
 import { upsertMemory, UpsertMemoryInput } from "../services/memory-service";
+import {
+  acknowledgeNotification,
+  dismissNotification,
+  ListNotificationsInput,
+  listNotifications,
+} from "../services/notification-service";
+import {
+  createNoteInService,
+  CreateNoteInServiceInput,
+  linkNoteEntity,
+  ListNotesInput,
+  listNotes,
+  unlinkNoteEntity,
+  updateNoteBody,
+} from "../services/note-service";
 import { requestOutboundDraftExecution } from "../services/outbound-draft-service";
+import {
+  createProjectInService,
+  CreateProjectInServiceInput,
+  ListProjectsInput,
+  listProjects,
+  setProjectLifecycle,
+  UpdateProjectInServiceInput,
+  updateProjectInService,
+} from "../services/project-service";
+import {
+  searchEntities,
+  SearchEntitiesInput,
+} from "../services/search-service";
 import {
   convertSignal,
   ConvertSignalInput,
@@ -67,9 +103,15 @@ import {
   triageSignal,
 } from "../services/signal-service";
 import {
+  createTaskFromInput,
+  CreateTaskFromInput,
   completeTask,
   deferTask,
+  ListTasksInput,
+  listTasks,
   rescheduleTask,
+  updateTaskDetails,
+  UpdateTaskDetailsInput,
 } from "../services/task-service";
 
 export interface BuildCorePlatformOptions {
@@ -102,6 +144,11 @@ export interface CorePlatform {
   rejectEntrySuggestion: (
     input: RejectEntrySuggestionInput,
   ) => ReturnType<typeof rejectEntrySuggestion>;
+  createTask: (input: CreateTaskFromInput) => ReturnType<typeof createTaskFromInput>;
+  updateTask: (
+    input: UpdateTaskDetailsInput,
+  ) => ReturnType<typeof updateTaskDetails>;
+  listTasks: (input?: ListTasksInput) => ReturnType<typeof listTasks>;
   completeTask: (
     taskId: string,
     actor: ActorRef,
@@ -134,6 +181,67 @@ export interface CorePlatform {
     actor: ActorRef,
     at?: Date,
   ) => ReturnType<typeof requestEventSync>;
+  createEvent: (
+    input: CreateEventInServiceInput,
+  ) => ReturnType<typeof createEventInService>;
+  updateEvent: (
+    input: UpdateEventInServiceInput,
+  ) => ReturnType<typeof updateEventInService>;
+  listEvents: (input?: Parameters<typeof listEvents>[1]) => ReturnType<typeof listEvents>;
+  listEventConflicts: (
+    eventId?: string,
+  ) => ReturnType<typeof listEventConflicts>;
+  createProject: (
+    input: CreateProjectInServiceInput,
+  ) => ReturnType<typeof createProjectInService>;
+  updateProject: (
+    input: UpdateProjectInServiceInput,
+  ) => ReturnType<typeof updateProjectInService>;
+  setProjectLifecycle: (
+    projectId: string,
+    lifecycle: Parameters<typeof setProjectLifecycle>[2],
+    actor: ActorRef,
+    at?: Date,
+  ) => ReturnType<typeof setProjectLifecycle>;
+  listProjects: (input?: ListProjectsInput) => ReturnType<typeof listProjects>;
+  createNote: (
+    input: CreateNoteInServiceInput,
+  ) => ReturnType<typeof createNoteInService>;
+  updateNoteBody: (
+    noteId: string,
+    body: string,
+    actor: ActorRef,
+    at?: Date,
+  ) => ReturnType<typeof updateNoteBody>;
+  linkNoteEntity: (
+    noteId: string,
+    entityRef: string,
+    actor: ActorRef,
+    at?: Date,
+  ) => ReturnType<typeof linkNoteEntity>;
+  unlinkNoteEntity: (
+    noteId: string,
+    entityRef: string,
+    actor: ActorRef,
+    at?: Date,
+  ) => ReturnType<typeof unlinkNoteEntity>;
+  listNotes: (input?: ListNotesInput) => ReturnType<typeof listNotes>;
+  listNotifications: (
+    input?: ListNotificationsInput,
+  ) => ReturnType<typeof listNotifications>;
+  acknowledgeNotification: (
+    notificationId: string,
+    actor: ActorRef,
+    at?: Date,
+  ) => ReturnType<typeof acknowledgeNotification>;
+  dismissNotification: (
+    notificationId: string,
+    actor: ActorRef,
+    at?: Date,
+  ) => ReturnType<typeof dismissNotification>;
+  searchEntities: (
+    input: SearchEntitiesInput,
+  ) => ReturnType<typeof searchEntities>;
   requestOutboundDraftExecution: (
     draftId: string,
     actor: ActorRef,
@@ -416,6 +524,11 @@ export const buildCorePlatform = (
         withMutationBoundary(editEntrySuggestion(repository, input)),
       rejectEntrySuggestion: (input) =>
         withMutationBoundary(rejectEntrySuggestion(repository, input)),
+      createTask: (input) =>
+        withMutationBoundary(createTaskFromInput(repository, input)),
+      updateTask: (input) =>
+        withMutationBoundary(updateTaskDetails(repository, input)),
+      listTasks: (input) => listTasks(repository, input),
       completeTask: (taskId, actor, at) =>
         withMutationBoundary(completeTask(repository, taskId, actor, at)),
       deferTask: (taskId, until, actor, at) =>
@@ -424,6 +537,12 @@ export const buildCorePlatform = (
         withMutationBoundary(
           rescheduleTask(repository, taskId, nextAt, actor, at),
         ),
+      createEvent: (input) =>
+        withMutationBoundary(createEventInService(repository, input)),
+      updateEvent: (input) =>
+        withMutationBoundary(updateEventInService(repository, input)),
+      listEvents: (input) => listEvents(repository, input),
+      listEventConflicts: (eventId) => listEventConflicts(repository, eventId),
       ingestSignal: (input) =>
         withMutationBoundary(ingestSignal(repository, input)),
       triageSignal: (signalId, decision, actor, at) =>
@@ -432,6 +551,38 @@ export const buildCorePlatform = (
         ),
       convertSignal: (input) =>
         withMutationBoundary(convertSignal(repository, input)),
+      createProject: (input) =>
+        withMutationBoundary(createProjectInService(repository, input)),
+      updateProject: (input) =>
+        withMutationBoundary(updateProjectInService(repository, input)),
+      setProjectLifecycle: (projectId, lifecycle, actor, at) =>
+        withMutationBoundary(
+          setProjectLifecycle(repository, projectId, lifecycle, actor, at),
+        ),
+      listProjects: (input) => listProjects(repository, input),
+      createNote: (input) =>
+        withMutationBoundary(createNoteInService(repository, input)),
+      updateNoteBody: (noteId, body, actor, at) =>
+        withMutationBoundary(updateNoteBody(repository, noteId, body, actor, at)),
+      linkNoteEntity: (noteId, entityRef, actor, at) =>
+        withMutationBoundary(
+          linkNoteEntity(repository, noteId, entityRef, actor, at),
+        ),
+      unlinkNoteEntity: (noteId, entityRef, actor, at) =>
+        withMutationBoundary(
+          unlinkNoteEntity(repository, noteId, entityRef, actor, at),
+        ),
+      listNotes: (input) => listNotes(repository, input),
+      listNotifications: (input) => listNotifications(repository, input),
+      acknowledgeNotification: (notificationId, actor, at) =>
+        withMutationBoundary(
+          acknowledgeNotification(repository, notificationId, actor, at),
+        ),
+      dismissNotification: (notificationId, actor, at) =>
+        withMutationBoundary(
+          dismissNotification(repository, notificationId, actor, at),
+        ),
+      searchEntities: (input) => searchEntities(repository, input),
       requestEventSync: (eventId, actor, at) =>
         withMutationBoundary(requestEventSync(repository, eventId, actor, at)),
       requestOutboundDraftExecution: (draftId, actor, at) =>

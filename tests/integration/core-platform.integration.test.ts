@@ -91,6 +91,203 @@ describe("Core Platform integration", () => {
     expect(checkpoint.status).toBe("created");
   });
 
+  test("wires task/event/project/note/notification/search service families end-to-end", async () => {
+    const platform = await Effect.runPromise(buildCorePlatform());
+    const actor = { id: "user-platform-services-1", kind: "user" } as const;
+
+    const project = await Effect.runPromise(
+      platform.createProject({
+        projectId: "project-platform-services-1",
+        name: "Platform planning project",
+        description: "Initial platform planning scope",
+        actor,
+        at: new Date("2026-02-25T08:00:00.000Z"),
+      }),
+    );
+    const updatedProject = await Effect.runPromise(
+      platform.updateProject({
+        projectId: project.id,
+        description: "Expanded platform planning scope",
+        actor,
+        at: new Date("2026-02-25T08:05:00.000Z"),
+      }),
+    );
+    const pausedProject = await Effect.runPromise(
+      platform.setProjectLifecycle(
+        project.id,
+        "paused",
+        actor,
+        new Date("2026-02-25T08:06:00.000Z"),
+      ),
+    );
+    const pausedProjects = await Effect.runPromise(
+      platform.listProjects({ lifecycle: "paused" }),
+    );
+
+    const task = await Effect.runPromise(
+      platform.createTask({
+        taskId: "task-platform-services-1",
+        title: "Platform planning task",
+        description: "Draft task details",
+        projectId: project.id,
+        actor,
+        at: new Date("2026-02-25T08:10:00.000Z"),
+      }),
+    );
+    const updatedTask = await Effect.runPromise(
+      platform.updateTask({
+        taskId: task.id,
+        title: "Platform planning task updated",
+        description: "Refined task details",
+        actor,
+        at: new Date("2026-02-25T08:11:00.000Z"),
+      }),
+    );
+    const listedTasks = await Effect.runPromise(
+      platform.listTasks({ projectId: project.id }),
+    );
+
+    const eventA = await Effect.runPromise(
+      platform.createEvent({
+        eventId: "event-platform-services-1",
+        title: "Platform planning sync",
+        startAt: new Date("2026-02-25T09:00:00.000Z"),
+        endAt: new Date("2026-02-25T10:00:00.000Z"),
+        actor,
+        at: new Date("2026-02-25T08:20:00.000Z"),
+      }),
+    );
+    const eventB = await Effect.runPromise(
+      platform.createEvent({
+        eventId: "event-platform-services-2",
+        title: "Platform planning overlap",
+        startAt: new Date("2026-02-25T09:30:00.000Z"),
+        endAt: new Date("2026-02-25T10:30:00.000Z"),
+        actor,
+        at: new Date("2026-02-25T08:21:00.000Z"),
+      }),
+    );
+    const updatedEventA = await Effect.runPromise(
+      platform.updateEvent({
+        eventId: eventA.id,
+        title: "Platform planning sync updated",
+        actor,
+        at: new Date("2026-02-25T08:22:00.000Z"),
+      }),
+    );
+    const listedEvents = await Effect.runPromise(
+      platform.listEvents({ sort: "updatedAt_desc" }),
+    );
+    const conflictsForEventA = await Effect.runPromise(
+      platform.listEventConflicts(eventA.id),
+    );
+
+    const note = await Effect.runPromise(
+      platform.createNote({
+        noteId: "note-platform-services-1",
+        body: "Platform planning notes",
+        linkedEntityRefs: [`task:${task.id}`],
+        actor,
+        at: new Date("2026-02-25T08:30:00.000Z"),
+      }),
+    );
+    const updatedNote = await Effect.runPromise(
+      platform.updateNoteBody(
+        note.id,
+        "Platform planning notes refined",
+        actor,
+        new Date("2026-02-25T08:31:00.000Z"),
+      ),
+    );
+    const linkedNote = await Effect.runPromise(
+      platform.linkNoteEntity(
+        note.id,
+        `event:${eventA.id}`,
+        actor,
+        new Date("2026-02-25T08:32:00.000Z"),
+      ),
+    );
+    const unlinkedNote = await Effect.runPromise(
+      platform.unlinkNoteEntity(
+        note.id,
+        `event:${eventA.id}`,
+        actor,
+        new Date("2026-02-25T08:33:00.000Z"),
+      ),
+    );
+    const notesForTask = await Effect.runPromise(
+      platform.listNotes({ entityRef: `task:${task.id}` }),
+    );
+
+    const syncRequested = await Effect.runPromise(
+      platform.requestEventSync(
+        eventB.id,
+        actor,
+        new Date("2026-02-25T08:40:00.000Z"),
+      ),
+    );
+    const pendingNotifications = await Effect.runPromise(
+      platform.listNotifications({
+        status: "pending",
+        relatedEntity: { entityType: "event", entityId: eventB.id },
+      }),
+    );
+    const acknowledgedNotification = await Effect.runPromise(
+      platform.acknowledgeNotification(
+        syncRequested.notification.id,
+        actor,
+        new Date("2026-02-25T08:41:00.000Z"),
+      ),
+    );
+    const dismissedNotification = await Effect.runPromise(
+      platform.dismissNotification(
+        syncRequested.notification.id,
+        actor,
+        new Date("2026-02-25T08:42:00.000Z"),
+      ),
+    );
+    const dismissedNotifications = await Effect.runPromise(
+      platform.listNotifications({ status: "dismissed", limit: 1 }),
+    );
+
+    const searchResults = await Effect.runPromise(
+      platform.searchEntities({
+        query: "platform planning",
+        entityTypes: ["project", "task", "note"],
+      }),
+    );
+
+    expect(updatedProject.description).toBe("Expanded platform planning scope");
+    expect(pausedProject.lifecycle).toBe("paused");
+    expect(pausedProjects.map((row) => row.id)).toEqual([project.id]);
+
+    expect(updatedTask.title).toBe("Platform planning task updated");
+    expect(listedTasks.map((row) => row.id)).toEqual([task.id]);
+
+    expect(updatedEventA.title).toBe("Platform planning sync updated");
+    expect(listedEvents[0]?.id).toBe(eventA.id);
+    expect(conflictsForEventA).toEqual([
+      { eventId: eventA.id, conflictingEventId: eventB.id },
+    ]);
+
+    expect(updatedNote.body).toBe("Platform planning notes refined");
+    expect(linkedNote.linkedEntityRefs).toContain(`event:${eventA.id}`);
+    expect(unlinkedNote.linkedEntityRefs).not.toContain(`event:${eventA.id}`);
+    expect(notesForTask.map((row) => row.id)).toEqual([note.id]);
+
+    expect(syncRequested.event.syncState).toBe("pending_approval");
+    expect(pendingNotifications.map((row) => row.id)).toEqual([
+      syncRequested.notification.id,
+    ]);
+    expect(acknowledgedNotification.status).toBe("sent");
+    expect(dismissedNotification.status).toBe("dismissed");
+    expect(dismissedNotifications[0]?.id).toBe(syncRequested.notification.id);
+
+    expect(searchResults.some((row) => row.entityType === "project")).toBe(true);
+    expect(searchResults.some((row) => row.entityType === "task")).toBe(true);
+    expect(searchResults.some((row) => row.entityType === "note")).toBe(true);
+  });
+
   test("persists and rehydrates core entities across app restarts", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "origin-core-"));
     const snapshotPath = join(tempDir, "core-snapshot.json");
