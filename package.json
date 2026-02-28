@@ -5,6 +5,7 @@
   "main": "dist/electron/electron/main.js",
   "packageManager": "bun@1.3.7",
   "scripts": {
+    "clean": "rm -rf dist node_modules/.vite .super-ralph/workflow.db",
     "build": "bun run typecheck && bun run build:web && bun run build:electron",
     "build:web": "bun node_modules/vite/bin/vite.js build",
     "build:electron": "bun node_modules/typescript/bin/tsc -p tsconfig.electron.json && bun node_modules/typescript/bin/tsc -p tsconfig.electron-preload.json",
