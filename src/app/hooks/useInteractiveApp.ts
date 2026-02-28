@@ -92,7 +92,6 @@ interface UseInteractiveAppReturn {
   retryJob: (jobId: string, fixSummary?: string) => Promise<void>;
   recordJobRun: (input: { jobId: string; outcome: "succeeded" | "failed"; diagnostics?: string }) => Promise<void>;
 
-
   // Activity actions
   inspectCheckpoint: (checkpointId: string) => Promise<void>;
   keepCheckpoint: (checkpointId: string) => Promise<void>;
@@ -109,6 +108,7 @@ export function useInteractiveApp(app: InteractiveWorkflowApp): UseInteractiveAp
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const isMountedRef = useRef(true);
+  const isFirstLoadRef = useRef(true);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -146,10 +146,24 @@ export function useInteractiveApp(app: InteractiveWorkflowApp): UseInteractiveAp
     [app],
   );
 
-  // Load initial state
+  // Load initial state - only once on mount
   useEffect(() => {
-    void runEffect(app.load());
-  }, [app, runEffect]);
+    if (!isFirstLoadRef.current) {
+      return;
+    }
+    isFirstLoadRef.current = false;
+
+    // Use a timeout to ensure the component is fully mounted
+    const timeoutId = setTimeout(() => {
+      runEffect(app.load()).catch(() => {
+        // Error is already handled in runEffect
+      });
+    }, 0);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, []); // Empty deps - only run once on mount
 
   // Core actions
   const refresh = useCallback(async (): Promise<void> => {
@@ -478,8 +492,6 @@ export function useInteractiveApp(app: InteractiveWorkflowApp): UseInteractiveAp
     [app, runEffect],
   );
 
-
-
   // Activity actions
   const inspectCheckpoint = useCallback(
     async (checkpointId: string): Promise<void> => {
@@ -589,7 +601,6 @@ export function useInteractiveApp(app: InteractiveWorkflowApp): UseInteractiveAp
     inspectJob,
     retryJob,
     recordJobRun,
-
 
     // Activity actions
     inspectCheckpoint,

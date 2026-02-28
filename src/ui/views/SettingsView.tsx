@@ -36,21 +36,17 @@ const DEFAULT_AI_SETTINGS: AISettings = {
 };
 
 const parseAISettings = (settings: Record<string, SettingsValue>): AISettings => {
-  const ai = settings.ai;
-  if (typeof ai !== "object" || ai === null || Array.isArray(ai)) {
-    return DEFAULT_AI_SETTINGS;
-  }
-  const aiRecord = ai as Record<string, unknown>;
+  // Settings are stored with flat keys like "ai.enabled", "ai.provider", etc.
   return {
-    enabled: typeof aiRecord.enabled === "boolean" ? aiRecord.enabled : false,
-    provider: (typeof aiRecord.provider === "string" &&
-      ["openai", "anthropic", "google", "local"].includes(aiRecord.provider))
-      ? (aiRecord.provider as AIProvider)
+    enabled: typeof settings["ai.enabled"] === "boolean" ? settings["ai.enabled"] : false,
+    provider: (typeof settings["ai.provider"] === "string" &&
+      ["openai", "anthropic", "google", "local"].includes(settings["ai.provider"]))
+      ? (settings["ai.provider"] as AIProvider)
       : "openai",
-    modelId: typeof aiRecord.modelId === "string" ? aiRecord.modelId : "",
-    maxTokens: typeof aiRecord.maxTokens === "number" ? aiRecord.maxTokens : 2000,
-    timeoutMs: typeof aiRecord.timeoutMs === "number" ? aiRecord.timeoutMs : 30000,
-    temperature: typeof aiRecord.temperature === "number" ? aiRecord.temperature : 0.7,
+    modelId: typeof settings["ai.modelId"] === "string" ? settings["ai.modelId"] : "",
+    maxTokens: typeof settings["ai.maxTokens"] === "number" ? settings["ai.maxTokens"] : 2000,
+    timeoutMs: typeof settings["ai.timeoutMs"] === "number" ? settings["ai.timeoutMs"] : 30000,
+    temperature: typeof settings["ai.temperature"] === "number" ? settings["ai.temperature"] : 0.7,
   };
 };
 
@@ -108,9 +104,15 @@ export function SettingsView({
     }
 
     setSaveStatus("saving");
+    // Save as flat keys to match the app's expected format
     const newSettings: Record<string, SettingsValue> = {
       ...settings,
-      ai: { ...aiSettings },
+      "ai.enabled": aiSettings.enabled,
+      "ai.provider": aiSettings.provider,
+      "ai.modelId": aiSettings.modelId,
+      "ai.maxTokens": aiSettings.maxTokens,
+      "ai.timeoutMs": aiSettings.timeoutMs,
+      "ai.temperature": aiSettings.temperature,
     };
     onSaveSettings(newSettings);
     setHasChanges(false);
@@ -160,12 +162,11 @@ export function SettingsView({
               className="form-toggle"
               checked={aiSettings.enabled}
               onChange={(e) => updateAISetting("enabled", e.target.checked)}
-              disabled={!aiEnabled}
             />
             Enable AI
           </label>
-          {!aiEnabled && (
-            <span className="helper-text warning">AI is disabled at the system level</span>
+          {!aiSettings.enabled && (
+            <span className="helper-text">AI is disabled. Enable to get suggestions when capturing entries.</span>
           )}
           {aiSettings.enabled && (
             <span className="helper-text success">AI is enabled and will generate suggestions</span>
