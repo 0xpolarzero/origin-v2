@@ -83,6 +83,7 @@ import {
 } from "../ui/workflows/search-surface";
 import {
   loadSettingsSurface,
+  saveSettingsSurface,
   type SettingsSurfaceState,
 } from "../ui/workflows/settings-surface";
 import { type WorkflowSurfaceCorePort } from "../ui/workflows/workflow-surface-core-port";
@@ -114,6 +115,15 @@ export interface InteractiveWorkflowAppState {
   lastUpdatedAt?: string;
 }
 
+export interface AIConfig {
+  enabled: boolean;
+  provider: string;
+  modelId: string;
+  maxTokens: number;
+  timeoutMs: number;
+  temperature: number;
+}
+
 export interface InteractiveWorkflowApp {
   getState: () => InteractiveWorkflowAppState;
   load: () => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
@@ -122,6 +132,13 @@ export interface InteractiveWorkflowApp {
     entryId?: string;
     at?: Date;
   }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  captureWithAISuggestion: (input: {
+    content: string;
+    entryId?: string;
+    at?: Date;
+  }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  isAIEnabled: () => boolean;
+  getAIConfig: () => AIConfig;
   suggestEntryAsTask: (input: {
     entryId: string;
     suggestedTitle: string;
@@ -174,6 +191,109 @@ export interface InteractiveWorkflowApp {
     nextAt: Date;
     at?: Date;
   }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  createTask: (input: {
+    title: string;
+    taskId?: string;
+    description?: string;
+    scheduledFor?: Date;
+    dueAt?: Date;
+    projectId?: string;
+    sourceEntryId?: string;
+    at?: Date;
+  }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  updateTask: (input: {
+    taskId: string;
+    title?: string;
+    description?: string | null;
+    scheduledFor?: Date | null;
+    dueAt?: Date | null;
+    projectId?: string | null;
+    at?: Date;
+  }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  loadTasks: (
+    filters?: Parameters<typeof loadTasksSurface>[1],
+  ) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  createEvent: (input: {
+    title: string;
+    startAt: Date;
+    eventId?: string;
+    endAt?: Date;
+    at?: Date;
+  }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  updateEvent: (input: {
+    eventId: string;
+    title?: string;
+    startAt?: Date;
+    endAt?: Date | null;
+    at?: Date;
+  }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  loadEvents: (
+    filters?: Parameters<typeof loadEventsSurface>[1],
+  ) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  createProject: (input: {
+    name: string;
+    projectId?: string;
+    description?: string;
+    at?: Date;
+  }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  updateProject: (input: {
+    projectId: string;
+    name?: string;
+    description?: string;
+    at?: Date;
+  }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  setProjectLifecycle: (input: {
+    projectId: string;
+    lifecycle: "active" | "paused" | "completed";
+    at?: Date;
+  }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  loadProjects: (
+    filters?: Parameters<typeof loadProjectsSurface>[1],
+  ) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  createNote: (input: {
+    body: string;
+    noteId?: string;
+    linkedEntityRefs?: ReadonlyArray<string>;
+    at?: Date;
+  }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  updateNote: (input: {
+    noteId: string;
+    body: string;
+    at?: Date;
+  }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  linkNoteEntity: (input: {
+    noteId: string;
+    entityRef: string;
+    at?: Date;
+  }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  unlinkNoteEntity: (input: {
+    noteId: string;
+    entityRef: string;
+    at?: Date;
+  }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  loadNotes: (
+    filters?: Parameters<typeof loadNotesSurface>[1],
+  ) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  loadNotifications: (
+    filters?: Parameters<typeof loadNotificationsSurface>[1],
+  ) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  acknowledgeNotification: (input: {
+    notificationId: string;
+    at?: Date;
+  }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  dismissNotification: (input: {
+    notificationId: string;
+    at?: Date;
+  }) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  search: (
+    input: Parameters<typeof loadSearchSurface>[1],
+  ) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  loadSettings: (
+    keys?: Parameters<typeof loadSettingsSurface>[1],
+  ) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
+  saveSettings: (
+    input: Parameters<typeof saveSettingsSurface>[1],
+  ) => Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError>;
   requestEventSync: (input: {
     eventId: string;
     at?: Date;
@@ -409,6 +529,9 @@ export const makeInteractiveWorkflowApp = (
   });
 
   let state = emptyInteractiveWorkflowAppState();
+  let searchFilters: Parameters<typeof loadSearchSurface>[1] = {
+    query: "",
+  };
 
   const route = <Output>(
     routeKey: WorkflowRouteKey,
@@ -459,17 +582,15 @@ export const makeInteractiveWorkflowApp = (
         events,
         drafts,
       ] = yield* Effect.all([
-        loadInboxSurface(surfacePort),
-        loadSignalsSurface(surfacePort),
-        loadPlanSurface(surfacePort),
-        loadTasksSurface(surfacePort),
-        loadEventsSurface(surfacePort),
-        loadProjectsSurface(surfacePort),
-        loadNotesSurface(surfacePort),
-        loadNotificationsSurface(surfacePort),
-        loadSearchSurface(surfacePort, {
-          query: "",
-        }),
+        loadInboxSurface(surfacePort, state.inbox.filters),
+        loadSignalsSurface(surfacePort, state.signals.filters),
+        loadPlanSurface(surfacePort, state.plan.filters),
+        loadTasksSurface(surfacePort, state.tasks.filters),
+        loadEventsSurface(surfacePort, state.events.filters),
+        loadProjectsSurface(surfacePort, state.projects.filters),
+        loadNotesSurface(surfacePort, state.notes.filters),
+        loadNotificationsSurface(surfacePort, state.notifications.filters),
+        loadSearchSurface(surfacePort, searchFilters),
         loadSettingsSurface(surfacePort),
         loadJobsSurface(client, filtersStore, nextJobsFilters),
         loadActivitySurface(client, filtersStore, nextActivityFilters),
@@ -506,33 +627,51 @@ export const makeInteractiveWorkflowApp = (
   ): Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError> =>
     effect.pipe(Effect.flatMap(() => refresh()));
 
-  const withJobState = (
-    effect: Effect.Effect<JobsSurfaceState, unknown>,
+  const withPatchedState = <A>(
+    effect: Effect.Effect<A, unknown>,
+    patch: (current: InteractiveWorkflowAppState, value: A) => InteractiveWorkflowAppState,
   ): Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError> =>
     effect.pipe(
-      Effect.map((jobs) => {
-        state = withNow({
-          ...state,
-          jobs,
-        });
+      Effect.map((value) => {
+        state = withNow(patch(state, value));
         return state;
       }),
       Effect.mapError(toAppError),
     );
 
+  const withJobState = (
+    effect: Effect.Effect<JobsSurfaceState, unknown>,
+  ): Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError> =>
+    withPatchedState(effect, (current, jobs) => ({
+      ...current,
+      jobs,
+    }));
+
   const withActivityState = (
     effect: Effect.Effect<ActivitySurfaceState, unknown>,
   ): Effect.Effect<InteractiveWorkflowAppState, InteractiveWorkflowAppError> =>
-    effect.pipe(
-      Effect.map((activity) => {
-        state = withNow({
-          ...state,
-          activity,
-        });
-        return state;
-      }),
-      Effect.mapError(toAppError),
-    );
+    withPatchedState(effect, (current, activity) => ({
+      ...current,
+      activity,
+    }));
+
+  // AI configuration helpers
+  const isAIEnabled = (): boolean => {
+    const aiEnabled = state.settings.values["ai.enabled"];
+    return typeof aiEnabled === "boolean" ? aiEnabled : false;
+  };
+
+  const getAIConfig = (): AIConfig => {
+    const values = state.settings.values;
+    return {
+      enabled: typeof values["ai.enabled"] === "boolean" ? values["ai.enabled"] : false,
+      provider: typeof values["ai.provider"] === "string" ? values["ai.provider"] : "openai",
+      modelId: typeof values["ai.modelId"] === "string" ? values["ai.modelId"] : "",
+      maxTokens: typeof values["ai.maxTokens"] === "number" ? values["ai.maxTokens"] : 1000,
+      timeoutMs: typeof values["ai.timeoutMs"] === "number" ? values["ai.timeoutMs"] : 30000,
+      temperature: typeof values["ai.temperature"] === "number" ? values["ai.temperature"] : 0.7,
+    };
+  };
 
   return {
     getState: () => state,
@@ -546,6 +685,41 @@ export const makeInteractiveWorkflowApp = (
           at: input.at,
         }),
       ),
+    captureWithAISuggestion: (input) =>
+      Effect.gen(function* () {
+        // First capture the entry
+        const capturedEntry = yield* route<Entry>("capture.entry", {
+          entryId: input.entryId,
+          content: input.content,
+          actor: options.actor,
+          at: input.at,
+        });
+
+        // If AI is enabled, trigger AI suggestion
+        if (isAIEnabled()) {
+          yield* route<Entry>("capture.suggest", {
+            entryId: capturedEntry.id,
+            suggestedTitle: input.content, // Initial fallback
+            aiAssist: true,
+            actor: options.actor,
+            at: input.at,
+          }).pipe(
+            Effect.catchAll(() =>
+              // If AI fails, just use the content as the suggestion (manual fallback)
+              route<Entry>("capture.suggest", {
+                entryId: capturedEntry.id,
+                suggestedTitle: input.content,
+                actor: options.actor,
+                at: input.at,
+              }),
+            ),
+          );
+        }
+
+        return yield* refresh();
+      }).pipe(Effect.mapError(toAppError)),
+    isAIEnabled,
+    getAIConfig,
     suggestEntryAsTask: (input) =>
       runMutation(
         route<Entry>("capture.suggest", {
@@ -638,6 +812,219 @@ export const makeInteractiveWorkflowApp = (
           at: input.at,
         }),
       ),
+    createTask: (input) =>
+      runMutation(
+        route<Task>("task.create", {
+          title: input.title,
+          actor: options.actor,
+          ...(input.taskId !== undefined ? { taskId: input.taskId } : {}),
+          ...(input.description !== undefined
+            ? { description: input.description }
+            : {}),
+          ...(input.scheduledFor !== undefined
+            ? { scheduledFor: input.scheduledFor }
+            : {}),
+          ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}),
+          ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+          ...(input.sourceEntryId !== undefined
+            ? { sourceEntryId: input.sourceEntryId }
+            : {}),
+          ...(input.at !== undefined ? { at: input.at } : {}),
+        }),
+      ),
+    updateTask: (input) =>
+      runMutation(
+        route<Task>("task.update", {
+          taskId: input.taskId,
+          actor: options.actor,
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.description !== undefined
+            ? { description: input.description }
+            : {}),
+          ...(input.scheduledFor !== undefined
+            ? { scheduledFor: input.scheduledFor }
+            : {}),
+          ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}),
+          ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+          ...(input.at !== undefined ? { at: input.at } : {}),
+        }),
+      ),
+    loadTasks: (filters) =>
+      withPatchedState(loadTasksSurface(options.platform, filters), (current, tasks) => ({
+        ...current,
+        tasks,
+      })),
+    createEvent: (input) =>
+      runMutation(
+        route<Event>("event.create", {
+          title: input.title,
+          startAt: input.startAt,
+          actor: options.actor,
+          ...(input.eventId !== undefined ? { eventId: input.eventId } : {}),
+          ...(input.endAt !== undefined ? { endAt: input.endAt } : {}),
+          ...(input.at !== undefined ? { at: input.at } : {}),
+        }),
+      ),
+    updateEvent: (input) =>
+      runMutation(
+        route<Event>("event.update", {
+          eventId: input.eventId,
+          actor: options.actor,
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.startAt !== undefined ? { startAt: input.startAt } : {}),
+          ...(input.endAt !== undefined ? { endAt: input.endAt } : {}),
+          ...(input.at !== undefined ? { at: input.at } : {}),
+        }),
+      ),
+    loadEvents: (filters) =>
+      withPatchedState(loadEventsSurface(options.platform, filters), (current, events) => ({
+        ...current,
+        events,
+      })),
+    createProject: (input) =>
+      runMutation(
+        route("project.create", {
+          name: input.name,
+          actor: options.actor,
+          ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+          ...(input.description !== undefined
+            ? { description: input.description }
+            : {}),
+          ...(input.at !== undefined ? { at: input.at } : {}),
+        }),
+      ),
+    updateProject: (input) =>
+      runMutation(
+        route("project.update", {
+          projectId: input.projectId,
+          actor: options.actor,
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.description !== undefined
+            ? { description: input.description }
+            : {}),
+          ...(input.at !== undefined ? { at: input.at } : {}),
+        }),
+      ),
+    setProjectLifecycle: (input) =>
+      runMutation(
+        route("project.setLifecycle", {
+          projectId: input.projectId,
+          lifecycle: input.lifecycle,
+          actor: options.actor,
+          at: input.at,
+        }),
+      ),
+    loadProjects: (filters) =>
+      withPatchedState(loadProjectsSurface(options.platform, filters), (current, projects) => ({
+        ...current,
+        projects,
+      })),
+    createNote: (input) =>
+      runMutation(
+        route("note.create", {
+          body: input.body,
+          actor: options.actor,
+          ...(input.noteId !== undefined ? { noteId: input.noteId } : {}),
+          ...(input.linkedEntityRefs !== undefined
+            ? { linkedEntityRefs: input.linkedEntityRefs }
+            : {}),
+          ...(input.at !== undefined ? { at: input.at } : {}),
+        }),
+      ),
+    updateNote: (input) =>
+      runMutation(
+        route("note.update", {
+          noteId: input.noteId,
+          body: input.body,
+          actor: options.actor,
+          at: input.at,
+        }),
+      ),
+    linkNoteEntity: (input) =>
+      runMutation(
+        route("note.linkEntity", {
+          noteId: input.noteId,
+          entityRef: input.entityRef,
+          actor: options.actor,
+          at: input.at,
+        }),
+      ),
+    unlinkNoteEntity: (input) =>
+      runMutation(
+        route("note.unlinkEntity", {
+          noteId: input.noteId,
+          entityRef: input.entityRef,
+          actor: options.actor,
+          at: input.at,
+        }),
+      ),
+    loadNotes: (filters) =>
+      withPatchedState(loadNotesSurface(options.platform, filters), (current, notes) => ({
+        ...current,
+        notes,
+      })),
+    loadNotifications: (filters) =>
+      withPatchedState(
+        loadNotificationsSurface(options.platform, filters),
+        (current, notifications) => ({
+          ...current,
+          notifications,
+        }),
+      ),
+    acknowledgeNotification: (input) =>
+      runMutation(
+        route("notification.acknowledge", {
+          notificationId: input.notificationId,
+          actor: options.actor,
+          at: input.at,
+        }),
+      ),
+    dismissNotification: (input) =>
+      runMutation(
+        route("notification.dismiss", {
+          notificationId: input.notificationId,
+          actor: options.actor,
+          at: input.at,
+        }),
+      ),
+    search: (input) =>
+      withPatchedState(
+        Effect.sync(() => {
+          searchFilters = {
+            query: input.query,
+            entityTypes: input.entityTypes ? [...input.entityTypes] : input.entityTypes,
+            limit: input.limit,
+          };
+
+          return searchFilters;
+        }).pipe(Effect.flatMap((filters) => loadSearchSurface(options.platform, filters))),
+        (current, search) => ({
+          ...current,
+          search,
+        }),
+      ),
+    loadSettings: (keys) =>
+      withPatchedState(loadSettingsSurface(options.platform, keys), (current, settings) => ({
+        ...current,
+        settings: keys
+          ? {
+              values: {
+                ...current.settings.values,
+                ...settings.values,
+              },
+            }
+          : settings,
+      })),
+    saveSettings: (input) =>
+      withPatchedState(saveSettingsSurface(options.platform, input), (current, settings) => ({
+        ...current,
+        settings: {
+          values: {
+            ...current.settings.values,
+            ...settings.values,
+          },
+        },
+      })),
     requestEventSync: (input) =>
       runMutation(
         route("approval.requestEventSync", {

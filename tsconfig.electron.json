@@ -8,6 +8,7 @@
     "moduleResolution": "NodeNext",
     "types": ["bun-types"]
   },
-  "include": ["electron/**/*.ts", "src/app/shell-bootstrap.ts"],
+  "include": ["electron/main.ts", "src/app/shell-bootstrap.ts"],
   "exclude": ["node_modules", "dist"]
 }
+

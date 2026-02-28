@@ -360,6 +360,285 @@ describe("interactive workflow app shell integration", () => {
       "task-ui-plan-3",
     ]);
 
+    state = await Effect.runPromise(
+      app.createProject({
+        projectId: "project-ui-direct-1",
+        name: "Direct project create",
+        description: "Created directly from app shell route binding",
+        at: new Date("2026-02-23T10:31:00.000Z"),
+      }),
+    );
+    expect(state.projects.projects.some((item) => item.project.id === "project-ui-direct-1")).toBe(
+      true,
+    );
+
+    state = await Effect.runPromise(
+      app.updateProject({
+        projectId: "project-ui-direct-1",
+        name: "Direct project create (updated)",
+        at: new Date("2026-02-23T10:32:00.000Z"),
+      }),
+    );
+    expect(
+      state.projects.projects.find((item) => item.project.id === "project-ui-direct-1")?.project
+        .name,
+    ).toBe("Direct project create (updated)");
+
+    state = await Effect.runPromise(
+      app.setProjectLifecycle({
+        projectId: "project-ui-direct-1",
+        lifecycle: "paused",
+        at: new Date("2026-02-23T10:33:00.000Z"),
+      }),
+    );
+    expect(
+      state.projects.projects.find((item) => item.project.id === "project-ui-direct-1")?.project
+        .lifecycle,
+    ).toBe("paused");
+
+    state = await Effect.runPromise(
+      app.loadProjects({
+        lifecycle: "paused",
+      }),
+    );
+    expect(state.projects.filters.lifecycle).toBe("paused");
+
+    state = await Effect.runPromise(
+      app.createProject({
+        projectId: "project-ui-direct-2",
+        name: "Direct project create (filter retention check)",
+        at: new Date("2026-02-23T10:33:30.000Z"),
+      }),
+    );
+    expect(state.projects.filters.lifecycle).toBe("paused");
+    expect(state.projects.projects.some((item) => item.project.id === "project-ui-direct-2")).toBe(
+      false,
+    );
+
+    state = await Effect.runPromise(
+      app.createTask({
+        taskId: "task-ui-direct-1",
+        title: "Direct task create",
+        projectId: "project-ui-direct-1",
+        at: new Date("2026-02-23T10:34:00.000Z"),
+      }),
+    );
+    expect(state.tasks.tasks.some((task) => task.id === "task-ui-direct-1")).toBe(true);
+
+    state = await Effect.runPromise(
+      app.updateTask({
+        taskId: "task-ui-direct-1",
+        title: "Direct task create (updated)",
+        at: new Date("2026-02-23T10:35:00.000Z"),
+      }),
+    );
+    expect(state.tasks.tasks.find((task) => task.id === "task-ui-direct-1")?.title).toBe(
+      "Direct task create (updated)",
+    );
+
+    state = await Effect.runPromise(
+      app.loadTasks({
+        status: "completed",
+      }),
+    );
+    expect(state.tasks.filters.status).toBe("completed");
+
+    state = await Effect.runPromise(
+      app.createTask({
+        taskId: "task-ui-direct-2",
+        title: "Direct task create (filtered-state check)",
+        at: new Date("2026-02-23T10:35:30.000Z"),
+      }),
+    );
+    expect(state.tasks.filters.status).toBe("completed");
+    expect(state.tasks.tasks.some((task) => task.id === "task-ui-direct-2")).toBe(false);
+
+    state = await Effect.runPromise(
+      app.createEvent({
+        eventId: "event-ui-direct-1",
+        title: "Direct event create",
+        startAt: new Date("2026-02-26T12:00:00.000Z"),
+        at: new Date("2026-02-23T10:36:00.000Z"),
+      }),
+    );
+    expect(state.events.events.some((event) => event.id === "event-ui-direct-1")).toBe(true);
+
+    state = await Effect.runPromise(
+      app.updateEvent({
+        eventId: "event-ui-direct-1",
+        title: "Direct event create (updated)",
+        at: new Date("2026-02-23T10:37:00.000Z"),
+      }),
+    );
+    expect(state.events.events.find((event) => event.id === "event-ui-direct-1")?.title).toBe(
+      "Direct event create (updated)",
+    );
+
+    state = await Effect.runPromise(
+      app.loadEvents({
+        syncState: "pending_approval",
+      }),
+    );
+    expect(state.events.filters.syncState).toBe("pending_approval");
+
+    state = await Effect.runPromise(
+      app.createEvent({
+        eventId: "event-ui-direct-2",
+        title: "Direct event create (filter retention check)",
+        startAt: new Date("2026-02-27T12:00:00.000Z"),
+        at: new Date("2026-02-23T10:37:30.000Z"),
+      }),
+    );
+    expect(state.events.filters.syncState).toBe("pending_approval");
+    expect(state.events.events.some((event) => event.id === "event-ui-direct-2")).toBe(false);
+
+    state = await Effect.runPromise(
+      app.createNote({
+        noteId: "note-ui-direct-1",
+        body: "Direct note create",
+        linkedEntityRefs: ["project:project-ui-direct-1"],
+        at: new Date("2026-02-23T10:38:00.000Z"),
+      }),
+    );
+    expect(state.notes.notes.some((note) => note.id === "note-ui-direct-1")).toBe(true);
+
+    state = await Effect.runPromise(
+      app.updateNote({
+        noteId: "note-ui-direct-1",
+        body: "Direct note create (updated)",
+        at: new Date("2026-02-23T10:39:00.000Z"),
+      }),
+    );
+    expect(state.notes.notes.find((note) => note.id === "note-ui-direct-1")?.body).toBe(
+      "Direct note create (updated)",
+    );
+
+    state = await Effect.runPromise(
+      app.linkNoteEntity({
+        noteId: "note-ui-direct-1",
+        entityRef: "task:task-ui-direct-1",
+        at: new Date("2026-02-23T10:40:00.000Z"),
+      }),
+    );
+    expect(
+      state.notes.notes.find((note) => note.id === "note-ui-direct-1")?.linkedEntityRefs,
+    ).toContain("task:task-ui-direct-1");
+
+    state = await Effect.runPromise(
+      app.unlinkNoteEntity({
+        noteId: "note-ui-direct-1",
+        entityRef: "task:task-ui-direct-1",
+        at: new Date("2026-02-23T10:41:00.000Z"),
+      }),
+    );
+    expect(
+      state.notes.notes.find((note) => note.id === "note-ui-direct-1")?.linkedEntityRefs,
+    ).not.toContain("task:task-ui-direct-1");
+
+    state = await Effect.runPromise(
+      app.loadNotes({
+        linkedEntityRef: "project:project-ui-direct-1",
+      }),
+    );
+    expect(state.notes.filters.linkedEntityRef).toBe("project:project-ui-direct-1");
+
+    state = await Effect.runPromise(
+      app.createNote({
+        noteId: "note-ui-direct-2",
+        body: "Direct note create (filter retention check)",
+        at: new Date("2026-02-23T10:41:30.000Z"),
+      }),
+    );
+    expect(state.notes.filters.linkedEntityRef).toBe("project:project-ui-direct-1");
+    expect(state.notes.notes.some((note) => note.id === "note-ui-direct-2")).toBe(false);
+
+    state = await Effect.runPromise(app.loadNotifications({ status: "pending" }));
+    expect(state.notifications.notifications.length).toBeGreaterThan(0);
+    const notificationId = state.notifications.notifications[0]?.id;
+    expect(notificationId).toBeDefined();
+
+    state = await Effect.runPromise(
+      app.acknowledgeNotification({
+        notificationId: notificationId!,
+        at: new Date("2026-02-23T10:42:00.000Z"),
+      }),
+    );
+    expect(state.notifications.filters.status).toBe("pending");
+    expect(
+      state.notifications.notifications.some(
+        (notification) => notification.id === notificationId,
+      ),
+    ).toBe(false);
+
+    state = await Effect.runPromise(app.loadNotifications());
+    expect(
+      state.notifications.notifications.find(
+        (notification) => notification.id === notificationId,
+      )?.status,
+    ).toBe("sent");
+
+    state = await Effect.runPromise(
+      app.dismissNotification({
+        notificationId: notificationId!,
+        at: new Date("2026-02-23T10:43:00.000Z"),
+      }),
+    );
+    expect(
+      state.notifications.notifications.find(
+        (notification) => notification.id === notificationId,
+      )?.status,
+    ).toBe("dismissed");
+
+    state = await Effect.runPromise(
+      app.search({
+        query: "direct",
+        entityTypes: ["task"],
+        limit: 1,
+      }),
+    );
+    expect(state.search.results.length).toBeGreaterThan(0);
+    expect(state.search.results.length).toBeLessThanOrEqual(1);
+    expect(state.search.scannedEntityTypes).toEqual(["task"]);
+
+    state = await Effect.runPromise(
+      app.createTask({
+        taskId: "task-ui-direct-3",
+        title: "Direct task create (search retention check)",
+        at: new Date("2026-02-23T10:43:30.000Z"),
+      }),
+    );
+    expect(state.search.results.length).toBeLessThanOrEqual(1);
+    expect(state.search.scannedEntityTypes).toEqual(["task"]);
+
+    state = await Effect.runPromise(
+      app.saveSettings({
+        values: {
+          "defaults.timezone": "UTC",
+          "ai.provider": "pi-mono",
+        },
+        at: new Date("2026-02-23T10:44:00.000Z"),
+      }),
+    );
+    expect(state.settings.values["defaults.timezone"]).toBe("UTC");
+    expect(state.settings.values["ai.provider"]).toBe("pi-mono");
+
+    state = await Effect.runPromise(
+      app.saveSettings({
+        values: {
+          "defaults.timezone": "America/Los_Angeles",
+        },
+        at: new Date("2026-02-23T10:45:00.000Z"),
+      }),
+    );
+    expect(state.settings.values["defaults.timezone"]).toBe("America/Los_Angeles");
+    expect(state.settings.values["ai.provider"]).toBe("pi-mono");
+
+    state = await Effect.runPromise(
+      app.loadSettings(["defaults.timezone"]),
+    );
+    expect(state.settings.values["defaults.timezone"]).toBe("America/Los_Angeles");
+    expect(state.settings.values["ai.provider"]).toBe("pi-mono");
+
     const shellMarkup = ReactDOMServer.renderToStaticMarkup(
       createInteractiveWorkflowAppShell({
         platform,

@@ -2,12 +2,13 @@ import { type ReactElement, useEffect, useState } from "react";
 import { Effect } from "effect";
 
 import { buildCorePlatform, type CorePlatform } from "../core/app/core-platform";
-import { createInteractiveWorkflowAppShell } from "./interactive-workflow-app";
+import { makeInteractiveWorkflowApp } from "./interactive-workflow-app";
+import { AppShell } from "./AppShell";
 
 const ACTOR = { id: "user-local", kind: "user" } as const;
 
 export function App(): ReactElement {
-  const [shell, setShell] = useState<ReactElement | undefined>(undefined);
+  const [app, setApp] = useState<ReturnType<typeof makeInteractiveWorkflowApp> | null>(null);
   const [error, setError] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -21,12 +22,12 @@ export function App(): ReactElement {
           return;
         }
 
-        setShell(
-          createInteractiveWorkflowAppShell({
-            platform,
-            actor: ACTOR,
-          }),
-        );
+        const interactiveApp = makeInteractiveWorkflowApp({
+          platform,
+          actor: ACTOR,
+        });
+
+        setApp(interactiveApp);
       })
       .catch((cause: unknown) => {
         if (!active) {
@@ -45,21 +46,33 @@ export function App(): ReactElement {
 
   if (error) {
     return (
-      <main className="app-shell">
+      <main className="app-shell app-shell-error">
         <h1>Origin</h1>
-        <p role="alert">Failed to initialize app: {error}</p>
+        <p role="alert" className="error-message">
+          Failed to initialize app: {error}
+        </p>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => window.location.reload()}
+        >
+          Reload Application
+        </button>
       </main>
     );
   }
 
-  if (!shell) {
+  if (!app) {
     return (
-      <main className="app-shell">
+      <main className="app-shell app-shell-loading">
         <h1>Origin</h1>
+        <div className="loading-spinner" aria-busy="true" aria-label="Loading">
+          <span className="spinner-icon">⟳</span>
+        </div>
         <p>Initializing app shell...</p>
       </main>
     );
   }
 
-  return shell;
+  return <AppShell app={app} />;
 }
